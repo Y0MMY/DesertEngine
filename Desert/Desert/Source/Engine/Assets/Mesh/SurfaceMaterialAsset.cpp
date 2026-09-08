@@ -43,6 +43,9 @@ namespace Desert::Assets
         // Never Load()ed, so nothing else would set this — and an asset that is not ready for use is
         // skipped by everything that would draw it.
         copy->m_ReadyForUse = true;
+        // And never READABLE from a file either: this is the flag eviction asks before it would release
+        // the copy and let a reload steal the subject's identity. See Unload().
+        copy->m_IsWorkingCopy = true;
         return copy;
     }
 
@@ -181,6 +184,31 @@ namespace Desert::Assets
 
     Common::BoolResultStr SurfaceMaterialAsset::Unload()
     {
+        // A WORKING COPY IS NOT EVICTABLE, AND THE REFUSAL IS THE POINT. `CreateWorkingCopy` builds an
+        // asset that was never `Load()`ed, sets `m_ReadyForUse` by hand and mints a FRESH identity so it
+        // stays out of every map the subject is in. Unloading one would flip that flag, and the next
+        // `EnsureLoaded` would run `Load()` against the SOURCE's filepath — which calls
+        // `AdoptStableHandle()` and would reassign the copy's handle from the file's MaterialId, i.e. the
+        // working copy would silently take over the subject's identity in MaterialService's maps. That is
+        // precisely the defect the fresh id exists to prevent, arrived at from the other direction.
+        if ( !IsReloadableFromFile() )
+        {
+            return Common::MakeFormattedError<bool>(
+                 "'{}' is a Material Editor working copy: it was filled in memory and never read from a "
+                 "file, so a reload would take its identity from the source material and hand every mesh "
+                 "in the level to the editor's copy. The asset stays resident.",
+                 m_Metadata.Filepath.string() );
+        }
+
+        // WAS A FLAG FLIP ONLY, while the class owns a whole `MaterialData` — the parameter list, the
+        // name -> handle texture map and the shader name, all heap. Released now.
+        //
+        // `m_MaterialUUID` and `m_Metadata.Handle` deliberately survive: they are the id every mesh
+        // submesh and every service map names this material by (AssetBase::Unload, rule 3).
+        m_Data = MaterialData{};
+        // Not cleared, and it must not be: it records that this session's values were SUBSTITUTED because
+        // the file would not parse. Clearing it here would let a later Save() write the defaults over the
+        // authored file — the exact loss Save()'s own refusal exists to prevent.
         m_ReadyForUse = false;
         return BOOLSUCCESS;
     }

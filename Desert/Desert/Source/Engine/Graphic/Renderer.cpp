@@ -62,16 +62,29 @@ namespace Desert::Graphic
         // file involved. The old on-disk BRDF_LUT.tga dependency was missing from the repo anyway, which
         // silently degraded IBL specular to the white-dummy fallback on every run.
         {
+            // The device's own, and the LUT is the clearest case there is: it is computed, not read, so
+            // there is no file to reload it from. See Engine/Graphic/ResourceLedger.hpp.
+            const ResourceAttributionScope owned( ResourceOwner::Device );
+
             Graphic::TextureSpecification spec;
             spec.GenerateMips = false;
 
             constexpr uint32_t kLutSize    = 256;
             constexpr uint32_t kLutSamples = 512;
-            m_BRDFTexture =
-                 Texture2D::Create( spec, "BRDF_LUT (generated)", kLutSize, kLutSize,
-                                    Core::Formats::ImageFormat::RGBA32F,
-                                    GenerateBRDFLutRGBA32F( kLutSize, kLutSamples ) )
-                      .ExtractValue();
+            // A failed LUT used to become a null texture here and travel on: IBL specular then sampled
+            // nothing for the whole session, which is the same silent degradation the comment above
+            // describes for the old on-disk BRDF_LUT.tga. Init can say so — it returns a result.
+            auto lut = Texture2D::Create( spec, "BRDF_LUT (generated)", kLutSize, kLutSize,
+                                          Core::Formats::ImageFormat::RGBA32F,
+                                          GenerateBRDFLutRGBA32F( kLutSize, kLutSamples ) );
+            if ( !lut )
+            {
+                return Common::MakeFormattedError<bool>(
+                     "[Renderer] the generated BRDF LUT could not be created, so IBL specular would be "
+                     "wrong for the whole session: {}",
+                     lut.GetError() );
+            }
+            m_BRDFTexture = lut.ExtractValue();
             LOG_INFO( "[Renderer] BRDF LUT generated ({}x{}, {} samples)", kLutSize, kLutSize, kLutSamples );
         }
 

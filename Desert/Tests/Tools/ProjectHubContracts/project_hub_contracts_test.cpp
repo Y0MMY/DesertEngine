@@ -30,6 +30,8 @@
 #include <thread>
 #include <vector>
 
+#include "../../TestSupport/result_assert.hpp"
+
 namespace fs = std::filesystem;
 
 namespace
@@ -488,7 +490,9 @@ TEST( ProjectHubCreate, TheProjectItWritesIsTheProjectItReadsBack )
     EXPECT_EQ( entry.Name, name ) << "the tile would show the file stem instead of the name the engine will read";
 
     const fs::path root   = fs::path( deprojPath ).parent_path();
-    const auto     parsed = Common::Project::ReadProjectFile( Hub::ReadTextFile( deprojPath ).GetValue() );
+    const auto deprojText = Hub::ReadTextFile( deprojPath );
+    ASSERT_TRUE( deprojText.IsSuccess() ) << "the .deproj did not read back: " << deprojText.GetError();
+    const auto parsed = Common::Project::ReadProjectFile( deprojText.GetValue() );
     ASSERT_TRUE( parsed.IsSuccess() ) << parsed.GetError();
     // The folders are the SHARED census, not a second list that happens to agree today.
     for ( const std::string_view folder : Common::Project::StandardContentFolders )
@@ -526,10 +530,13 @@ TEST( ProjectHubCreate, ThePayloadIsCopiedByteForByteWithNoSubstitutions )
     const auto scene = Hub::ReadTextFile( root / "Assets/Scenes/Main.desce" );
     ASSERT_TRUE( scene.IsSuccess() ) << scene.GetError();
     EXPECT_EQ( scene.GetValue(), body ) << "the payload was rewritten on the way in";
-    EXPECT_EQ( Hub::ReadTextFile( root / "Assets/Scripts/Player.lua" ).GetValue(), "-- TemplateProject\n" );
+    DESERT_EXPECT_RESULT_EQ( Hub::ReadTextFile( root / "Assets/Scripts/Player.lua" ), "-- TemplateProject\n" );
 
     // And the descriptor points at the scene the manifest named.
-    const auto parsed = Common::Project::ReadProjectFile( Hub::ReadTextFile( created.GetValue() ).GetValue() );
+    const auto createdText = Hub::ReadTextFile( created.GetValue() );
+    ASSERT_TRUE( createdText.IsSuccess() )
+         << "the created .deproj did not read back: " << createdText.GetError();
+    const auto parsed = Common::Project::ReadProjectFile( createdText.GetValue() );
     ASSERT_TRUE( parsed.IsSuccess() );
     EXPECT_EQ( parsed.GetValue().DefaultScene, "Assets/Scenes/Main.desce" );
 

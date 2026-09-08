@@ -7,8 +7,10 @@
 // them after a generator version bump.
 //
 // WHY IT IS A FILE AND NOT GENERATED AT LOAD. 1 048 576 voxels times eight lumps is eight million
-// ellipsoid evaluations plus their exponentials, and a debug build spends about a second on it. That is
-// a stall on every launch of every scene with a hero cloud in it, for an answer that never changes. The
+// ellipsoid evaluations plus their exponentials, and a debug build spends about 206 ms on it — it was
+// 1 383 ms until Г10 gave the z-slabs to the whole pool, and a fifth of a second is still a stall the
+// argument survives. That is a stall on every launch of every scene with a hero cloud in it, for an
+// answer that never changes. The
 // same decision `.dcnv` records on kCloudNoiseDefaultVolumeName, for the same reason.
 //
 //   CloudVolumeBaker --out <path.dcmv> [--in <path.dcmv>] [--catalogue <genus>]

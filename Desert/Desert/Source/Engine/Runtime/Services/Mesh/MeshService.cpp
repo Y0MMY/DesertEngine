@@ -4,6 +4,30 @@
 
 namespace Desert::Runtime
 {
+    namespace
+    {
+        // The two device buffers a mesh IS, named as the asset's. A procedural mesh is claimed differently
+        // in RegisterProcedural: it has no file, so nothing may ever release it. See ResourceLedger.hpp.
+        void ClaimMeshBuffers( const std::shared_ptr<Mesh>& mesh, const Graphic::ResourceOwner owner,
+                               const Assets::AssetHandle& asset )
+        {
+            if ( !mesh )
+                return;
+            if ( const auto& vertices = mesh->GetVertexBuffer() )
+            {
+                vertices->ClaimOwnership( owner, asset );
+                // The device bytes, from the buffer itself. This is the one place a mesh's two buffers are
+                // both in hand with the asset they came from — see Engine/Graphic/ResourceLedger.hpp.
+                vertices->RecordDeviceBytes( vertices->GetSize() );
+            }
+            if ( const auto& indices = mesh->GetIndexBuffer() )
+            {
+                indices->ClaimOwnership( owner, asset );
+                indices->RecordDeviceBytes( indices->GetSize() );
+            }
+        }
+    } // namespace
+
     Common::BoolResultStr MeshService::Register( const std::shared_ptr<Assets::MeshAsset>& meshAsset )
     {
         if ( !meshAsset->GetMetadata().IsValid() )
@@ -14,6 +38,7 @@ namespace Desert::Runtime
         const auto handle = meshAsset->GetMetadata().Handle;
         m_Meshes[handle] = Graphic::MeshFactory::Create( meshAsset );
         m_MeshAssets[handle] = meshAsset;
+        ClaimMeshBuffers( m_Meshes[handle], Graphic::ResourceOwner::AssetService, handle );
 
         return BOOLSUCCESS;
     }
@@ -73,6 +98,10 @@ namespace Desert::Runtime
                 LOG_ERROR( "[MeshService] procedural mesh {} has no GPU buffers: {}", (uint64_t)handle,
                            uploaded.GetError() );
         }
+        // `Procedural`, NOT `AssetService`, and the distinction is load-bearing rather than cosmetic: this
+        // mesh was built from no file, so there is no recipe to rebuild it from and releasing it is data
+        // loss. The ledger's owner category is what asset eviction reads to know it must not touch this.
+        ClaimMeshBuffers( mesh, Graphic::ResourceOwner::Procedural, handle );
         m_Meshes[handle] = mesh;
         return handle;
     }
@@ -95,7 +124,10 @@ namespace Desert::Runtime
             // Don't cache a FAILED build (e.g. a skinned mesh whose skeleton dependency wasn't resolved yet) —
             // otherwise the null is sticky and the mesh can never recover once the dependency is in place.
             if ( raw )
+            {
                 m_Meshes[handle] = std::move( mesh );
+                ClaimMeshBuffers( m_Meshes[handle], Graphic::ResourceOwner::AssetService, handle );
+            }
             return raw;
         }
         return nullptr;
@@ -113,6 +145,27 @@ namespace Desert::Runtime
             return nullptr;
         }
         return it->second.get();
+    }
+
+    bool MeshService::EvictBuilt( const Assets::AssetHandle& handle )
+    {
+        const auto built = m_Meshes.find( handle );
+        if ( built == m_Meshes.end() )
+            return false;
+
+        // No shell means no recipe: this is a procedural mesh registered by RegisterProcedural, and the
+        // only copy of its geometry is the buffers about to be dropped. Refuse, and say so — a silent
+        // "nothing to do" here would read to the caller as "already released".
+        if ( m_MeshAssets.find( handle ) == m_MeshAssets.end() )
+        {
+            LOG_WARN( "[MeshService] eviction asked for mesh {} and it is procedural — no asset shell, so "
+                      "nothing could rebuild it. Kept.",
+                      static_cast<uint64_t>( handle ) );
+            return false;
+        }
+
+        m_Meshes.erase( built );
+        return true;
     }
 
     void MeshService::Clear()

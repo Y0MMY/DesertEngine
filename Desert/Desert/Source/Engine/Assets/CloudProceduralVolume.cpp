@@ -1,11 +1,14 @@
 #include "CloudProceduralVolume.hpp"
 
+#include <Common/Core/JobSystem.hpp>
+#include <Common/Core/Profiler.hpp>
 #include <Common/Core/ResultStr.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <mutex>
 
 namespace Desert::Assets
 {
@@ -1458,6 +1461,27 @@ namespace Desert::Assets
         const uint32_t slices = std::max<uint32_t>( 1u, static_cast<uint32_t>( params.Species.size() ) * depth );
         uint32_t       sliceDone = 0u;
 
+        // THE XZ SLICES ARE ALSO THE UNIT OF PARALLELISM, and it is the same boundary because it is the
+        // same independence: a slice reads the species' lump bin and writes `height x width` voxels that
+        // no other slice touches. Slice z owns the bytes [z*height*width*4, (z+1)*height*width*4), which
+        // are contiguous and 64 KiB wide at the shipped grid — disjoint by construction, not by luck, and
+        // too far apart to share a cache line.
+        //
+        // WHY THE BAKE AND NOT ITS CALLER DOES THIS. The per-species setup — the lumps, their wrapped
+        // copies, the bin — is a third of nothing and all of it would be repeated if the caller split the
+        // volume up and baked the pieces. Splitting inside also means the tools, the tests and both
+        // renderers get it without each remembering to.
+        //
+        // PROGRESS AND CANCELLATION MOVE UNDER ONE LOCK. The hook is at most `4 x side` calls over a bake
+        // of seconds, so serialising them is free, and it buys two properties the header promises: the
+        // fraction is still strictly monotone (the counter advances in lock order, whichever slice got
+        // there), and exactly ONE call can be the one told to stop — every later slice tests the flag
+        // under the same lock and never reaches the callback. Without that, a cancelled bake would call
+        // the hook once per participant and "the bake carried on past a callback that said stop" would be
+        // reported against a bake that did no such thing.
+        std::mutex progressMutex;
+        bool       cancelled = false;
+
         const float voxelXKm = params.RegionSizeKm / static_cast<float>( width );
         const float voxelZKm = params.RegionSizeKm / static_cast<float>( depth );
         const float voxelYKm = params.LayerThicknessKm / static_cast<float>( height );
@@ -1564,116 +1588,148 @@ namespace Desert::Assets
                         binList[static_cast<size_t>( bz ) * bins + bx].push_back( index );
             }
 
-            std::vector<float>    distances;
-            std::vector<uint32_t> column;
+            // ONE SLICE PER CLAIM. Slices differ in cost by an order of magnitude — one crossing a cluster
+            // does the full join at every column, one over clear sky rejects at the bin — so handing out
+            // equal blocks in advance would leave most participants idle behind the unlucky one. A grain
+            // of 1 is worth its claim here: a slice is tens of milliseconds of work against a mutex.
+            Common::JobSystem::Get().ParallelRanges(
+                 depth, 1u,
+                 [&]( size_t zBegin, size_t zEnd )
+                 {
+                     DESERT_PROFILE_SCOPE( "Clouds: modelling bake XZ slice" );
 
-            for ( uint32_t z = 0; z < depth; ++z )
-            {
-                // BETWEEN SLICES AND NOT INSIDE THEM, exactly as the sculpted bake does it and for the same
-                // arithmetic: at most `4 x side` calls over a bake of seconds is a check whose cost is
-                // unmeasurable, where a call per voxel would be millions of indirect calls through a
-                // std::function and would dominate the work it is reporting on. At the shipped 256 that is
-                // one check every ~40 ms of Debug bake, which is the granularity a cancel is honoured at.
-                if ( onProgress && !onProgress( static_cast<float>( sliceDone ) / static_cast<float>( slices ) ) )
-                    return Common::MakeError<std::vector<unsigned char>>(
-                         "the procedural modelling bake was cancelled before it finished" );
-                ++sliceDone;
+                     // PER RANGE AND NOT PER BAKE: these are the scratch the inner loops refill, and one
+                     // shared pair would be the only write two slices could ever contend on.
+                     std::vector<float>    distances;
+                     std::vector<uint32_t> column;
 
-                const float worldZ = regionOriginKm.y + ( static_cast<float>( z ) + 0.5f ) * voxelZKm;
-                const int   binZ   = std::clamp( static_cast<int>( ( worldZ - regionOriginKm.y ) * invBin ), 0,
-                                                 static_cast<int>( bins ) - 1 );
+                     for ( uint32_t z = static_cast<uint32_t>( zBegin ); z < static_cast<uint32_t>( zEnd ); ++z )
+                     {
+                         // BETWEEN SLICES AND NOT INSIDE THEM, exactly as the sculpted bake does it and for the
+                         // same arithmetic: at most `4 x side` calls over a bake of seconds is a check whose cost
+                         // is unmeasurable, where a call per voxel would be millions of indirect calls through a
+                         // std::function and would dominate the work it is reporting on. At the shipped 256 that
+                         // is one check every ~40 ms of Debug bake, which is the granularity a cancel is honoured
+                         // at.
+                         if ( onProgress )
+                         {
+                             std::lock_guard<std::mutex> lk( progressMutex );
+                             if ( cancelled )
+                                 return;
+                             if ( !onProgress( static_cast<float>( sliceDone ) / static_cast<float>( slices ) ) )
+                             {
+                                 cancelled = true;
+                                 return;
+                             }
+                             ++sliceDone;
+                         }
 
-                for ( uint32_t x = 0; x < width; ++x )
-                {
-                    const float worldX = regionOriginKm.x + ( static_cast<float>( x ) + 0.5f ) * voxelXKm;
-                    const int   binX   = std::clamp( static_cast<int>( ( worldX - regionOriginKm.x ) * invBin ), 0,
-                                                     static_cast<int>( bins ) - 1 );
+                         const float worldZ = regionOriginKm.y + ( static_cast<float>( z ) + 0.5f ) * voxelZKm;
+                         const int   binZ = std::clamp( static_cast<int>( ( worldZ - regionOriginKm.y ) * invBin ),
+                                                        0, static_cast<int>( bins ) - 1 );
 
-                    const std::vector<uint32_t>& list = binList[static_cast<size_t>( binZ ) * bins + binX];
-                    if ( list.empty() )
-                        continue;
+                         for ( uint32_t x = 0; x < width; ++x )
+                         {
+                             const float worldX = regionOriginKm.x + ( static_cast<float>( x ) + 0.5f ) * voxelXKm;
+                             const int   binX =
+                                  std::clamp( static_cast<int>( ( worldX - regionOriginKm.x ) * invBin ), 0,
+                                              static_cast<int>( bins ) - 1 );
 
-                    // THE COLUMN'S OWN CANDIDATES, decided once for all 32 rows above this ground position.
-                    // The horizontal half of the box test does not depend on the altitude, and performing
-                    // it inside the y loop repeated it thirty-two times for the same answer — measured at
-                    // 642 ms per bake for one species, most of it in rejections. The list stays in the
-                    // lumps' canonical order because `list` is, which is what carries the join's
-                    // order-independence through this optimisation.
-                    column.clear();
-                    for ( uint32_t index : list )
-                    {
-                        const Placed& item = placed[index];
-                        if ( worldX < item.MinKm.x || worldX > item.MaxKm.x || worldZ < item.MinKm.z ||
-                             worldZ > item.MaxKm.z )
-                            continue;
-                        column.push_back( index );
-                    }
+                             const std::vector<uint32_t>& list =
+                                  binList[static_cast<size_t>( binZ ) * bins + binX];
+                             if ( list.empty() )
+                                 continue;
 
-                    if ( column.empty() )
-                        continue;
+                             // THE COLUMN'S OWN CANDIDATES, decided once for all 32 rows above this ground
+                             // position. The horizontal half of the box test does not depend on the altitude, and
+                             // performing it inside the y loop repeated it thirty-two times for the same answer —
+                             // measured at 642 ms per bake for one species, most of it in rejections. The list
+                             // stays in the lumps' canonical order because `list` is, which is what carries the
+                             // join's order-independence through this optimisation.
+                             column.clear();
+                             for ( uint32_t index : list )
+                             {
+                                 const Placed& item = placed[index];
+                                 if ( worldX < item.MinKm.x || worldX > item.MaxKm.x || worldZ < item.MinKm.z ||
+                                      worldZ > item.MaxKm.z )
+                                     continue;
+                                 column.push_back( index );
+                             }
 
-                    for ( uint32_t y = 0; y < height; ++y )
-                    {
-                        const float worldY = params.LayerBottomKm + ( static_cast<float>( y ) + 0.5f ) * voxelYKm;
+                             if ( column.empty() )
+                                 continue;
 
-                        const glm::vec3 point( worldX, worldY, worldZ );
+                             for ( uint32_t y = 0; y < height; ++y )
+                             {
+                                 const float worldY =
+                                      params.LayerBottomKm + ( static_cast<float>( y ) + 0.5f ) * voxelYKm;
 
-                        // THE SAME TWO LOOPS THE SCULPTED BAKE PERFORMS, in the same order, over the same
-                        // three shared functions — the nearest distance, then the shifted sum. Only the SET
-                        // is different, and it is a subset chosen so that everything left out is below the
-                        // quantisation floor.
-                        distances.clear();
+                                 const glm::vec3 point( worldX, worldY, worldZ );
 
-                        float nearest = 0.0f;
-                        bool  any     = false;
+                                 // THE SAME TWO LOOPS THE SCULPTED BAKE PERFORMS, in the same order, over the same
+                                 // three shared functions — the nearest distance, then the shifted sum. Only the
+                                 // SET is different, and it is a subset chosen so that everything left out is
+                                 // below the quantisation floor.
+                                 distances.clear();
 
-                        for ( uint32_t index : column )
-                        {
-                            const Placed& item = placed[index];
+                                 float nearest = 0.0f;
+                                 bool  any     = false;
 
-                            if ( point.y < item.MinKm.y || point.y > item.MaxKm.y )
-                            {
-                                distances.push_back( std::numeric_limits<float>::infinity() );
-                                continue;
-                            }
+                                 for ( uint32_t index : column )
+                                 {
+                                     const Placed& item = placed[index];
 
-                            const float distance = CloudModellingBlobDistanceKm( item.Blob, point );
-                            distances.push_back( distance );
+                                     if ( point.y < item.MinKm.y || point.y > item.MaxKm.y )
+                                     {
+                                         distances.push_back( std::numeric_limits<float>::infinity() );
+                                         continue;
+                                     }
 
-                            nearest = any ? std::min( nearest, distance ) : distance;
-                            any     = true;
-                        }
+                                     const float distance = CloudModellingBlobDistanceKm( item.Blob, point );
+                                     distances.push_back( distance );
 
-                        if ( !any )
-                            continue;
+                                     nearest = any ? std::min( nearest, distance ) : distance;
+                                     any     = true;
+                                 }
 
-                        float sum = 0.0f;
-                        for ( size_t k = 0; k < distances.size(); ++k )
-                        {
-                            if ( !std::isfinite( distances[k] ) )
-                                continue;
-                            sum += CloudModellingJoinTerm( placed[column[k]].Blob.Weight, distances[k], nearest,
-                                                           invBlend );
-                        }
+                                 if ( !any )
+                                     continue;
 
-                        const float joined = CloudModellingJoinKm( nearest, sum, params.BlendRadiusKm );
-                        if ( joined >= 0.0f )
-                            continue;
+                                 float sum = 0.0f;
+                                 for ( size_t k = 0; k < distances.size(); ++k )
+                                 {
+                                     if ( !std::isfinite( distances[k] ) )
+                                         continue;
+                                     sum += CloudModellingJoinTerm( placed[column[k]].Blob.Weight, distances[k],
+                                                                    nearest, invBlend );
+                                 }
 
-                        // The Dimensional Profile: 0 at the surface and 1 at ProfileDepth inside, which is
-                        // Guerrilla's own quantity (deck p.85) obtained analytically rather than by a
-                        // distance transform — and the normalised distance field variant C §3 point 2 asks
-                        // the profile to BE.
-                        const float profile = std::clamp( -joined * invProfile, 0.0f, 1.0f );
+                                 const float joined = CloudModellingJoinKm( nearest, sum, params.BlendRadiusKm );
+                                 if ( joined >= 0.0f )
+                                     continue;
 
-                        const size_t at = ( ( static_cast<size_t>( z ) * height + y ) * width + x ) *
-                                          kCloudProceduralBytesPerVoxel;
+                                 // The Dimensional Profile: 0 at the surface and 1 at ProfileDepth inside, which
+                                 // is Guerrilla's own quantity (deck p.85) obtained analytically rather than by a
+                                 // distance transform — and the normalised distance field variant C §3 point 2
+                                 // asks the profile to BE.
+                                 const float profile = std::clamp( -joined * invProfile, 0.0f, 1.0f );
 
-                        voxels[at + slot] =
-                             static_cast<unsigned char>( std::clamp( profile, 0.0f, 1.0f ) * 255.0f + 0.5f );
-                    }
-                }
-            }
+                                 const size_t at = ( ( static_cast<size_t>( z ) * height + y ) * width + x ) *
+                                                   kCloudProceduralBytesPerVoxel;
+
+                                 voxels[at + slot] = static_cast<unsigned char>(
+                                      std::clamp( profile, 0.0f, 1.0f ) * 255.0f + 0.5f );
+                             }
+                         }
+                     }
+                 } );
+
+            // ASKED AFTER THE LOOP AND NOT INSIDE IT. ParallelRanges returns only once every claimed slice
+            // has finished, so this is the first moment at which "somebody said stop" is a settled fact
+            // rather than a value another participant is still deciding.
+            if ( cancelled )
+                return Common::MakeError<std::vector<unsigned char>>(
+                     "the procedural modelling bake was cancelled before it finished" );
         }
 
         if ( onProgress )

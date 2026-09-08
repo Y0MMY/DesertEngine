@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/RendererTypes.hpp>
 #include <Engine/Graphic/DynamicResources.hpp>
+#include <Engine/Graphic/ResourceLedger.hpp>
 
 // For DESERT_VERIFY in ShaderDataTypeSize below. Not implicit: this header is reached from
 // Geometry/Mesh.hpp by translation units that never include Core.hpp on their own.
@@ -147,6 +148,12 @@ namespace Desert::Graphic
     class VertexBuffer : public DynamicResources
     {
     public:
+        // The ledger row, opened here so that every backend's vertex buffer is counted without any of them
+        // remembering to. See Engine/Graphic/ResourceLedger.hpp.
+        VertexBuffer() : m_Accounting( ResourceOwnership::Take( ResourceKind::VertexBuffer ) )
+        {
+        }
+
         virtual ~VertexBuffer() = default;
 
         /// Overwrite @p size bytes at @p offset. Refuses, having written nothing, when the buffer is not
@@ -159,6 +166,18 @@ namespace Desert::Graphic
         /// guarded. NO_DISCARD because a caller who wants to ignore it must say so in writing.
         NO_DISCARD virtual Common::BoolResultStr SetData( void* data, uint32_t size, uint32_t offset = 0 ) = 0;
 
+        void ClaimOwnership( const ResourceOwner owner, const Common::AssetHandle asset = Common::AssetHandle{} )
+        {
+            m_Accounting.Claim( owner, asset );
+        }
+
+        /// What this buffer costs on the device. Recorded by whoever knows — the base cannot ask
+        /// GetSize() from its own constructor, the backend has not allocated yet at that point.
+        void RecordDeviceBytes( const std::size_t bytes )
+        {
+            m_Accounting.RecordBytes( bytes );
+        }
+
         virtual void Use( BindUsage use = BindUsage::Bind ) const    = 0;
         virtual void RT_Use( BindUsage use = BindUsage::Bind ) const = 0;
 
@@ -169,5 +188,8 @@ namespace Desert::Graphic
         static std::shared_ptr<VertexBuffer> Create( void* data, uint32_t size,
                                                      BufferUsage usage = BufferUsage::Static );
         static std::shared_ptr<VertexBuffer> Create( uint32_t size, BufferUsage usage = BufferUsage::Dynamic );
+
+    private:
+        ResourceOwnership m_Accounting;
     };
 } // namespace Desert::Graphic

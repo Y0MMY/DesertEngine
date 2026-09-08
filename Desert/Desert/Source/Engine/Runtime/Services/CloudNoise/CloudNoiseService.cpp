@@ -42,6 +42,10 @@ namespace Desert::Runtime
                  "the {0}x{0}x{0} RGBA8 volume for '{1}' could not be created on the device",
                  data.Params.Resolution, asset->GetMetadata().Filepath.string() );
 
+        // Whose the 8 MiB volume is, in the ledger — see Engine/Graphic/ResourceLedger.hpp.
+        volume->ClaimOwnership( Graphic::ResourceOwner::AssetService, handle );
+        volume->RecordDeviceBytes( data.Voxels.size() );
+
         m_Volumes[handle] = Entry{ std::move( volume ), asset->GetRevision() };
         ++m_Generation;
 

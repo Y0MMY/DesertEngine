@@ -99,11 +99,35 @@ namespace Desert::Assets
                    []( const auto& a, const auto& b ) { return a.Time < b.Time; } );
 
         m_Clip.SkeletonSignature = m_SkeletonSignature;
+        m_HasClip                = true;
         return BOOLSUCCESS;
     }
 
     Common::BoolResultStr AnimationAsset::Unload()
     {
+        // WAS `return BOOLSUCCESS;` — a no-op over the largest allocation in the animation system: every
+        // bone track holds three keyframe vectors and the clip holds a vector of them.
+        if ( !IsReloadableFromFile() )
+        {
+            return Common::MakeFormattedError<bool>(
+                 "'{}' holds a clip that was generated in memory (SetInMemoryClip), not read from a file. "
+                 "Releasing it would destroy the only copy there is, and nothing could load it back. The "
+                 "asset stays resident.",
+                 m_Metadata.Filepath.string() );
+        }
+
+        m_Clip.Tracks.clear();
+        m_Clip.Tracks.shrink_to_fit();
+        m_Clip.Notifies.clear();
+        m_Clip.Notifies.shrink_to_fit();
+        m_Clip.AnimationName.clear();
+        m_Clip.Duration       = 0.0F;
+        m_Clip.TicksPerSecond = 0.0F;
+        // The signature is what ResolveDependencies matches a rig on, so an unloaded clip must not keep
+        // answering with one — the same reason the skeleton's readiness is now the skeleton itself.
+        m_Clip.SkeletonSignature = 0;
+        m_SkeletonSignature      = 0;
+        m_HasClip                = false;
         return BOOLSUCCESS;
     }
 

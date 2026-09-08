@@ -193,8 +193,25 @@ namespace Desert::Graphic::API::Vulkan
         m_FrameSemaphores.resize( backBufferCount );
         for ( uint32_t i = 0; i < backBufferCount; i++ )
         {
-            m_FrameSemaphores[i].PresentComplete = CreateSemaphore( device ).GetValue();
-            m_FrameSemaphores[i].RenderComplete  = CreateSemaphore( device ).GetValue();
+            // These two survived Г7's by-name pass over unchecked allocations for one reason: there
+            // was no name to look at. A failed vkCreateSemaphore stored VK_NULL_HANDLE and every
+            // frame afterwards submitted against a null semaphore — the failure was indistinguishable
+            // from success at the assignment, and the validation layer complained somewhere else
+            // entirely. Init returns a result, so it can refuse instead.
+            auto present = CreateSemaphore( device );
+            if ( !present )
+            {
+                return Common::MakeFormattedError<VkResult>( "frame {} present semaphore: {}", i,
+                                                             present.GetError() );
+            }
+            auto render = CreateSemaphore( device );
+            if ( !render )
+            {
+                return Common::MakeFormattedError<VkResult>( "frame {} render semaphore: {}", i,
+                                                             render.GetError() );
+            }
+            m_FrameSemaphores[i].PresentComplete = present.GetValue();
+            m_FrameSemaphores[i].RenderComplete  = render.GetValue();
         }
 
         m_DrawCommandBuffers.resize( backBufferCount );

@@ -389,7 +389,8 @@ TEST( CloudMaterialSchema, TheSharedDefaultMaterialStatesNoOverridesAndSoCannotD
 //
 //   * READ BY THE BAKE. Graphic::System::VolumetricCloudRenderer::BuildProceduralParams turns them into
 //     Assets::CloudProceduralFieldParams, and moving one rebuilds a volume of a few thousand bodies on a
-//     worker — measured at 5 915 ms for a 256 grid and 1 461 ms for a 128 one, Debug, on this machine.
+//     worker — measured at 961 ms for a 256 grid and 229 ms for a 128 one, Debug, on this machine, since
+//     Г10 spread the bake's z-slices over the pool instead of one worker (it was 5 915 and 1 461).
 //     The sky goes on showing the PREVIOUS volume until it lands.
 //   * READ BY THE MARCH. They travel to the GPU inside Graphic::PackCloudParams' block and the very next
 //     frame is drawn with them.

@@ -36,6 +36,15 @@ namespace Desert::Graphic
                     mipGenerator->GenerateMips( image );
                 }
 
+                // WHAT IT COSTS ON THE DEVICE, INTO ITS LEDGER ROW. Recorded from the SPECIFICATION here
+                // rather than left to whoever ends up holding the image, because this is the one place
+                // every 2D image in the engine passes through — the eight callers of ImageService::Register
+                // are a fraction of them. The mip tail is the 1/3 geometric series, taken only when the
+                // chain was actually asked for. See Engine/Graphic/ResourceLedger.hpp.
+                image->RecordDeviceBytes( static_cast<std::size_t>(
+                     Core::Formats::CalculateImageSize( spec.Width, spec.Height, spec.Format ) *
+                     ( spec.Mips > 1 ? 4U : 3U ) / 3U ) );
+
                 return image;
             }
         }
@@ -66,6 +75,13 @@ namespace Desert::Graphic
                     mipGenerator->GenerateMips( image );
                 }
 
+                // Six SQUARE faces of FaceSize, and the same mip tail as the 2D case. FaceSize and not a
+                // width/height pair on purpose — see ImageCubeSpecification, where three defects came from
+                // consumers dividing a 4x3 cross back to a face and one side of the division going missing.
+                image->RecordDeviceBytes( static_cast<std::size_t>(
+                     Core::Formats::CalculateImageSize( spec.FaceSize, spec.FaceSize, spec.Format ) * 6U *
+                     ( spec.Mips > 1 ? 4U : 3U ) / 3U ) );
+
                 return image;
             }
         }
@@ -91,11 +107,36 @@ namespace Desert::Graphic
                     return nullptr;
                 }
 
+                // A volume is a single mip by construction (Image3DSpecification says why), so no tail.
+                image->RecordDeviceBytes( static_cast<std::size_t>(
+                     Core::Formats::CalculateImageSize( spec.Width, spec.Height, spec.Format ) * spec.Depth ) );
+
                 return image;
             }
         }
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
     }
+
+    // `ImageCube::Copy` STOOD HERE AND WAS AN ALIAS, NOT A COPY. It read
+    //
+    //     std::make_shared<VulkanImageCube>( *SP_CAST( VulkanImageCube, targetImageCube ) )
+    //
+    // with a one-word unfinished-work marker above it, which is how long it had been unfinished.
+    //
+    // — a copy CONSTRUCTION of the backend object, which memberwise-copies `VkImage`, `VkImageView`,
+    // `VkSampler` and the `VmaAllocation` out of the original. The result is not a second cubemap; it is a
+    // second owner of the first one's device memory, and when either shared_ptr dies the survivor holds
+    // freed handles. Exactly М9's finding about `MaterialProperty::Clone`, whose four implementations were
+    // all aliases of the original's GPU object, one layer further down.
+    //
+    // DELETED RATHER THAN FIXED, for М9's reason and one more of its own: it had no caller anywhere in the
+    // engine or the editor, so nothing is losing a capability, and a real cubemap copy is not a
+    // constructor — it is an allocation plus a `vkCmdCopyImage` on a command buffer with two layout
+    // transitions, i.e. a function that needs a device and a queue and belongs beside the mip generator
+    // rather than beside `Create`. Anybody who needs one should write THAT and not restore this.
+    //
+    // It is also now UNWRITABLE in this shape: `Image` holds a move-only `ResourceOwnership` row
+    // (ResourceLedger.hpp), so copy-constructing any image is a compile error rather than a double free.
 
     namespace Utils
     {

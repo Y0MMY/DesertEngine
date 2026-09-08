@@ -160,10 +160,14 @@ namespace Desert::Animation
         std::string AnimationName;
         float       Duration       = 0.0f;
         float       TicksPerSecond = 25.0f;
-        uint64_t    SkeletonSignature;
+        // 0 = "no rig claimed", and it needed an initialiser: a default-constructed clip read back
+        // whatever was on the heap, and this number is what the animation system matches a skeleton on —
+        // so an unset one does not fail to match, it matches something arbitrary. Its neighbours all had
+        // one; this field was the exception.
+        uint64_t SkeletonSignature = 0;
 
-         std::vector<BoneTrack> Tracks; // it = bone index
-        //std::unordered_map<std::string, BoneTrack> Tracks;
+        std::vector<BoneTrack> Tracks; // it = bone index
+        // std::unordered_map<std::string, BoneTrack> Tracks;
 
         std::vector<AnimationNotify> Notifies; // sorted-by-time markers fired during playback
     };

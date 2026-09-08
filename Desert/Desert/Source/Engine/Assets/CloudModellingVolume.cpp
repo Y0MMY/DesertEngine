@@ -2,11 +2,14 @@
 
 #include <Engine/Assets/ContainerBytes.hpp>
 
+#include <Common/Core/JobSystem.hpp>
+
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <mutex>
 #include <tuple>
 
 namespace Desert::Assets
@@ -18,8 +21,10 @@ namespace Desert::Assets
         constexpr uint32_t kFormatRgba8 = 0u;
 
         // How many lumps one body may be made of. The bake is `voxels x blobs` ellipsoid evaluations —
-        // 1 048 576 x 64 is 67 million, about a second optimised — so the ceiling is a bake time an artist
-        // will wait through rather than an expressive limit. The shipped example uses eight.
+        // 1 048 576 x 64 is 67 million — so the ceiling is a bake time an artist will wait through rather
+        // than an expressive limit, and Г10 bought the ceiling a lot of room by handing the z-slabs to the
+        // pool: the shipped eight-lump body went from 1 383 ms to 206 ms, Debug, best of three. The shipped
+        // example uses eight.
         constexpr uint32_t kMaxBlobs = 64u;
 
         // The weight's range, and it is a statement about DISTANCE rather than a taste. A weight dilates
@@ -637,26 +642,64 @@ namespace Desert::Assets
 
         std::vector<unsigned char> voxels( static_cast<size_t>( kCloudModellingVoxelBytes ), 0u );
 
-        for ( uint32_t z = 0; z < depth; ++z )
-        {
-            // BETWEEN SLABS AND NOT INSIDE THEM. 128 calls over a bake of tens of seconds is a progress
-            // bar that moves smoothly and costs nothing measurable; per voxel it would be a million
-            // indirect calls through a std::function and would dominate the arithmetic it is reporting on.
-            if ( onProgress && !onProgress( static_cast<float>( z ) / static_cast<float>( depth ) ) )
-                return Common::MakeError<std::vector<unsigned char>>(
-                     "the bake was cancelled before it finished" );
+        // ONE SLAB PER CLAIM, ON THE ENGINE'S POOL. Slab z owns the bytes
+        // [z*height*width*4, (z+1)*height*width*4) and no other slab touches them, so the only thing the
+        // participants share is the read-only BakedField — which the note on that class already promised
+        // was safe to share and until now nothing did. `field` is the reason this is a small change rather
+        // than a rewrite: the sort, the inverted rotations and the reciprocals happened once, above, and
+        // EvaluateVoxel's only scratch is its own stack.
+        //
+        // THE PROGRESS COUNTER IS NOT `z` ANY MORE, and it cannot be. Slabs finish out of order, so
+        // reporting z/depth would hand the artist's bar a sequence that goes backwards — which
+        // CloudModellingRecipe asserts against by name. A counter advanced under the same lock that guards
+        // the callback keeps the reported sequence exactly what it was: 0, 1/depth, 2/depth, ... The lock
+        // also makes the STOP single: the first callback to answer no sets the flag, and every later slab
+        // tests it under the same lock and never reaches the callback, so "cancelled after exactly three
+        // calls" stays a true sentence about a bake running on ten threads.
+        std::mutex progressMutex;
+        uint32_t   slabsStarted = 0u;
+        bool       cancelled    = false;
 
-            for ( uint32_t y = 0; y < height; ++y )
-            {
-                for ( uint32_t x = 0; x < width; ++x )
-                {
-                    const size_t index =
-                         ( ( static_cast<size_t>( z ) * height + y ) * width + x ) * kCloudModellingBytesPerVoxel;
+        Common::JobSystem::Get().ParallelRanges(
+             depth, 1u,
+             [&]( size_t zBegin, size_t zEnd )
+             {
+                 for ( uint32_t z = static_cast<uint32_t>( zBegin ); z < static_cast<uint32_t>( zEnd ); ++z )
+                 {
+                     // BETWEEN SLABS AND NOT INSIDE THEM. 128 calls over a bake of hundreds of milliseconds
+                     // is a progress bar that moves smoothly and costs nothing measurable; per voxel it
+                     // would be a million indirect calls through a std::function and would dominate the
+                     // arithmetic it is reporting on.
+                     if ( onProgress )
+                     {
+                         std::lock_guard<std::mutex> lk( progressMutex );
+                         if ( cancelled )
+                             return;
+                         if ( !onProgress( static_cast<float>( slabsStarted ) / static_cast<float>( depth ) ) )
+                         {
+                             cancelled = true;
+                             return;
+                         }
+                         ++slabsStarted;
+                     }
 
-                    field.EvaluateVoxel( VoxelCentreKm( recipe, x, y, z ), voxels.data() + index );
-                }
-            }
-        }
+                     for ( uint32_t y = 0; y < height; ++y )
+                     {
+                         for ( uint32_t x = 0; x < width; ++x )
+                         {
+                             const size_t index = ( ( static_cast<size_t>( z ) * height + y ) * width + x ) *
+                                                  kCloudModellingBytesPerVoxel;
+
+                             field.EvaluateVoxel( VoxelCentreKm( recipe, x, y, z ), voxels.data() + index );
+                         }
+                     }
+                 }
+             } );
+
+        // After the loop, because ParallelRanges returns only once every claimed slab has finished — which
+        // is the first moment "somebody said stop" is settled rather than still being decided.
+        if ( cancelled )
+            return Common::MakeError<std::vector<unsigned char>>( "the bake was cancelled before it finished" );
 
         // THE BOUND WAS ARITHMETIC; THIS IS THE MEASUREMENT. Validate's slack is a conservative estimate
         // of the join's inflation, and a conservative estimate is exactly the kind of thing that is right

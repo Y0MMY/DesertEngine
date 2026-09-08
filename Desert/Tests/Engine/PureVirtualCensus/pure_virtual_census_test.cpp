@@ -512,14 +512,19 @@ namespace
     // comment left in its place (Properties/MaterialProperty.hpp) records why re-adding it in the shape
     // it had would be worse than not having it — every commented-out body was an ALIAS of the original's
     // GPU object, not a copy of it.
+    // A7 CLOSED THE SIXTH ROW BY ANSWERING IT. `AssetBase::Unload` stood here as a DESIGN QUESTION -
+    // thirteen implementations and no caller, and deleting them would have decided that this engine
+    // will not have eviction. The owner decided it will. The caller is `Assets::AssetEviction::Run`,
+    // reached from the frame loop after a scene change (Engine/Assets/AssetEviction.hpp), and the
+    // thirteen bodies were audited against their own classes on the way: six released nothing, five
+    // left `IsReadyForUse()` TRUE - which made them not merely ineffective but IRREVERSIBLE, because
+    // EnsureLoaded short-circuits on that flag - and one had no semicolon and compiled only because
+    // BOOLSUCCESS carries one. The contract they now obey is written on AssetBase::Unload itself and
+    // held by Desert/Tests/Engine/AssetEviction and Desert/Tests/Engine/AssetRoots.
+    //
+    // This test is what forced the row out: it asserts every row is STILL dead, so writing the caller
+    // turned it red. That is the difference between closing a question and deleting it.
     constexpr CensusRow k_Census[] = {
-         // ---- ONE ROW THAT IS A DESIGN QUESTION, NOT A CLEANUP -------------------------------------
-         // Thirteen asset types implement Unload() and NOTHING in this engine ever evicts an asset. The
-         // bodies are not wrong; the caller was never written. Deleting them decides that the engine
-         // will not have eviction, which is the owner's call and not a tidy-up.
-         { "AssetBase", "Unload", "Desert/Desert/Source/Engine/Assets/AssetBase.hpp",
-           "OWNER DECIDES: does this engine want asset eviction? 13 implementations, no caller." },
-
          // ---- THE VULKAN BACKEND'S BIND VOCABULARY AND DEAD ACCESSORS --------------------------------
          // `Use`/`RT_Use` is the OpenGL "bind this object" idiom; a Vulkan backend binds through
          // descriptor sets and never calls it. Eight declarations across five bases, all with live
@@ -758,11 +763,13 @@ TEST( PureVirtualCensus, NoAbstractBaseIsLeftWithoutASingleImplementation )
 
 TEST( PureVirtualCensus, TheNumberIsStatedSoAShrinkageIsVisible )
 {
-    // 32, and it was 35 when Г8 counted: `RenderSystem::Shutdown` and the orphan duplicate of
-    // ImGuiLayer.hpp went with that task, and `MaterialProperty::Clone` with М9. Up is a regression;
-    // down is welcome, and this line moves with it. The count is quoted because a per-row diff never
-    // says "there are four more of these now".
-    EXPECT_EQ( std::size( k_Census ), 32u )
+    // 31, and it was 35 when Г8 counted: `RenderSystem::Shutdown` and the orphan duplicate of
+    // ImGuiLayer.hpp went with that task, `MaterialProperty::Clone` with М9, and `AssetBase::Unload`
+    // with А7 — the last of those by being ANSWERED rather than deleted, which is the only way a row
+    // that was a design question is allowed to leave. Up is a regression; down is welcome, and this
+    // line moves with it. The count is quoted because a per-row diff never says "there are four more
+    // of these now".
+    EXPECT_EQ( std::size( k_Census ), 31u )
          << "the number of pure virtuals implemented by everybody and called by nobody has changed";
 }
 

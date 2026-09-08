@@ -310,9 +310,11 @@ namespace Desert::Graphic::System
          *
          * WHY A WORKER AND NOT THE FRAME. The bake is measured, not assumed — that is the exit criterion
          * this phase was given (ANALYSIS_APPROACH.md §3) — and Desert/Tests/Engine/CloudProceduralField
-         * prints it on every run: 803 / 1584 / 2529 ms for one, two and four species in a Debug build. A
-         * region shift happens once per lattice cell of camera travel, which at the shipped 3 km cell is
-         * rarely; a two-second hitch when it does would be worse than anything the volume buys.
+         * prints it on every run: 404 / 757 / 1 344 ms for one, two and four species in a Debug build,
+         * re-measured after Г10 put the bake's z-slices across the whole pool (it read 803 / 1 584 / 2 529
+         * when one worker did all of it). A region shift happens once per lattice cell of camera travel,
+         * which at the shipped 3 km cell is rarely; a hitch of even the new figure when it does would be
+         * worse than anything the volume buys.
          *
          * WHAT THE FRAME DOES MEANWHILE: it marches the volume it already has. That volume was baked for
          * a region the camera has left by at most one snap step, and it is periodic — so the answer is

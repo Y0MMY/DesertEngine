@@ -114,7 +114,21 @@ namespace Desert::Assets
 
     Common::BoolResultStr CloudTypeAsset::Unload()
     {
-        m_Ready = false;
+        // WAS THE FLAG ALONE, so `GetData()`, `GetShape()`, `GetDisplayName()` and `GetNoiseVolume()` all
+        // went on answering with post-load values on an asset that reported itself not ready. A cloud type
+        // is a dozen numbers and three optional strings, so the memory at stake is small — but a getter
+        // that contradicts the readiness flag is exactly the state §1.4 is about, and eviction is the
+        // caller that makes it reachable.
+        //
+        // The DISPLAY NAME goes back to the stem, which is what the constructor seeded and what a picker
+        // shows for a type nobody has read yet — not to empty, which would make the slot look broken.
+        m_Data        = CloudTypeData{};
+        m_NoiseVolume = AssetHandle{};
+        m_DisplayName = m_Metadata.Filepath.stem().string();
+        m_Ready       = false;
+        // The revision is monotonic ON PURPOSE and is not reset: it is what CloudTypeService compares to
+        // decide whether its cached profile table is stale, and rewinding it would make a reload look like
+        // no change at all.
         return BOOLSUCCESS;
     }
 

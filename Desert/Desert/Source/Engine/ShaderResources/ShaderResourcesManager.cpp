@@ -39,9 +39,22 @@ namespace Desert::ShaderResources
         m_SrorageBuffersData.Names[name] = index;
     }
 
+    // THE SAME RULE, AND IT APPLIES TO ALL FOUR REGISTRARS OR TO NONE. The comment above stated the
+    // rule for buffers and these two did the opposite: they registered whatever they were handed,
+    // null included, so `GetUniformImage2D(name)` answered SUCCESS holding nullptr — a successful
+    // answer carrying nothing, which is the one shape the delivery contract §1.4 names outright.
+    // `UniformImage2D::Create`/`UniformImageCube::Create` do return nullptr (the `RendererAPIType::None`
+    // arm), so the null is reachable, and MaterialExecutor unwraps these lookups without a check.
     void ShaderResourcesManager::AddImageCube( std::shared_ptr<UniformImageCube>&& buffer,
                                                const std::string&                  name )
     {
+        if ( !buffer )
+        {
+            LOG_ERROR( "[ShaderResources] image cube '{}' was not created (see the error above) and is "
+                       "not registered; every material that declares it will report it missing.",
+                       name );
+            return;
+        }
         const auto index = m_ImageCubeData.Data.size();
         m_ImageCubeData.Data.push_back( std::move( buffer ) );
         m_ImageCubeData.Names[name] = index;
@@ -49,6 +62,13 @@ namespace Desert::ShaderResources
 
     void ShaderResourcesManager::AddImage2D( std::shared_ptr<UniformImage2D>&& buffer, const std::string& name )
     {
+        if ( !buffer )
+        {
+            LOG_ERROR( "[ShaderResources] image2D '{}' was not created (see the error above) and is "
+                       "not registered; every material that declares it will report it missing.",
+                       name );
+            return;
+        }
         const auto index = m_Image2DData.Data.size();
         m_Image2DData.Data.push_back( std::move( buffer ) );
         m_Image2DData.Names[name] = index;

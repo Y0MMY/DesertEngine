@@ -55,9 +55,37 @@ namespace Desert::Core
     class Scene final
     {
     public:
-        Scene() = default;
+        Scene();
         Scene( std::string&& sceneName, Graphic::SceneRenderer* sceneRenderer );
-        ~Scene() = default;
+        ~Scene();
+
+        // Copying or moving a Scene would put a second entry in (or a stale entry into) the live-scene
+        // list below, and nothing has ever done either — the editor holds them by shared_ptr. Said out
+        // loud rather than left to the compiler, because the list makes it newly load-bearing.
+        Scene( const Scene& )            = delete;
+        Scene& operator=( const Scene& ) = delete;
+        Scene( Scene&& )                 = delete;
+        Scene& operator=( Scene&& )      = delete;
+
+        /**
+         * @brief EVERY WORLD THAT IS CURRENTLY ALIVE, in creation order.
+         *
+         * WHAT IT IS FOR. Asset eviction has to know what is still needed, and "what is still needed" is a
+         * property of every live world, not of the one that just changed. A running editor holds several:
+         * the level, each extra scene view, the Details preview, the Material Editor's preview ball, the
+         * thumbnail renderer's offscreen world. A sweep that consulted only the scene being replaced would
+         * release the assets a preview is drawing THIS FRAME — and the preview would come back grey with
+         * nothing in the log, because a rebuild-on-miss is silent by design.
+         *
+         * WHY THE LIST LIVES HERE AND NOT IN THE EDITOR. The editor is the only thing that knows how many
+         * scenes it has open, and the engine cannot ask it: EditorLayer is above this layer. A scene
+         * registering itself is the only arrangement in which "every live scene" is answerable from the
+         * engine at all, and it is answerable for the packaged Runtime by the same code.
+         *
+         * Raw pointers, non-owning: a scene is IN this list exactly between its constructor and its
+         * destructor, so an entry can never be dangling and nothing here extends a lifetime.
+         */
+        [[nodiscard]] static const std::vector<Scene*>& LiveScenes();
 
         void Clear();
 

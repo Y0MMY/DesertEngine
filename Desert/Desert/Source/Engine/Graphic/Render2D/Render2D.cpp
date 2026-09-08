@@ -21,6 +21,10 @@ namespace Desert::Graphic::Render2D
 {
     Common::BoolResultStr Render2D::Init( const std::shared_ptr<Framebuffer>& target )
     {
+        // The three pipelines, the two buffers and the 1x1 white texture below belong to the UI backend
+        // and to no asset — one scope rather than six claims. See Engine/Graphic/ResourceLedger.hpp.
+        const ResourceAttributionScope owned( ResourceOwner::UserInterface );
+
         if ( !target )
             return Common::MakeError( "Render2D::Init: null target framebuffer" );
 

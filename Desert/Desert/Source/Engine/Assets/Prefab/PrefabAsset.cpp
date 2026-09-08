@@ -37,14 +37,32 @@ namespace Desert::Assets
         }
 
         m_EntityData = std::move( loadable.GetValue().Entities );
-        m_IsLoaded = true;
+        m_IsLoaded   = true;
+        // The file IS the payload now, whatever this asset held before.
+        m_CapturedInMemory = false;
 
         return BOOLSUCCESS;
     }
 
     Common::BoolResultStr PrefabAsset::Unload()
     {
+        // A CAPTURE IS NOT AN EVICTION CANDIDATE. CreateFromEntity fills this asset from a live entity and
+        // sets m_IsLoaded WITHOUT any file existing yet — "Create Prefab" then "save" is two steps, and
+        // between them the only copy of the payload is this vector.
+        if ( !IsReloadableFromFile() )
+        {
+            return Common::MakeFormattedError<bool>(
+                 "'{}' holds a prefab captured from a live entity and not yet written to disk. Releasing it "
+                 "would destroy the capture and Load() would fail or read an older file. The asset stays "
+                 "resident.",
+                 m_Metadata.Filepath.string() );
+        }
+
         m_EntityData.clear();
+        // `clear()` alone kept the whole buffer — EntityData is a fat record and a prefab of a few hundred
+        // entities keeps every byte of its capacity. Every other clearing implementation in this directory
+        // shrinks; this one did not.
+        m_EntityData.shrink_to_fit();
         m_IsLoaded = false;
         return BOOLSUCCESS;
     }
@@ -100,6 +118,8 @@ namespace Desert::Assets
             m_EntityData[0].PrefabPath = std::nullopt;
 
         m_IsLoaded = true;
+        // Nothing on disk holds this yet — see IsReloadableFromFile and Unload's refusal.
+        m_CapturedInMemory = true;
     }
 
     // Placing an instance in the world. The BUILDING of the instance is not here and must not be: it is

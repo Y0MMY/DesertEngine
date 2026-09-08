@@ -1,9 +1,37 @@
 #include "AnimationLibrary.hpp"
 
+#include <Common/Core/Logger.hpp>
+
+#include <algorithm>
+
 namespace Desert::Animation
 {
-    AnimationLibrary::AnimationLibrary( const Assets::AssetManager* assetManager ) : m_AssetManager( assetManager )
+    AnimationLibrary::AnimationLibrary( Assets::AssetManager* assetManager ) : m_AssetManager( assetManager )
     {
+    }
+
+    // RELOAD BEFORE HANDING ONE OUT. Both lookups below resolve a handle the index recorded at Register
+    // time, and an evicted clip resolves to a perfectly valid asset holding an empty track list — so
+    // without this the caller gets a successful answer that animates nothing. AssetBase::EnsureLoaded is a
+    // no-op for a clip that is already resident, which is every clip in the common case.
+    //
+    // A clip that CANNOT be reloaded is named and skipped rather than returned empty: a procedural clip
+    // (SetInMemoryClip) is never evicted, so reaching this branch means the file is gone.
+    Assets::Asset<Assets::AnimationAsset> AnimationLibrary::Resolve( const Assets::AssetHandle& handle ) const
+    {
+        auto asset = m_AssetManager->FindByHandle<Assets::AnimationAsset>( handle );
+        if ( !asset )
+            return nullptr;
+
+        if ( const auto loaded = asset->EnsureLoaded( *m_AssetManager ); !loaded )
+        {
+            LOG_ERROR( "[AnimationLibrary] clip '{}' is indexed for a rig but could not be loaded: {}. It is "
+                       "not offered; a caller given it would have played an empty clip.",
+                       asset->GetMetadata().Filepath.string(), loaded.GetError() );
+            return nullptr;
+        }
+
+        return asset;
     }
 
     void AnimationLibrary::Register( const Assets::Asset<Assets::AnimationAsset>& animation )
@@ -58,7 +86,7 @@ namespace Desert::Animation
 
             if ( present * 2 >= anim.Bones.size() ) // >= 50%
             {
-                if ( auto asset = m_AssetManager->FindByHandle<Assets::AnimationAsset>( anim.Handle ) )
+                if ( auto asset = Resolve( anim.Handle ) )
                     result.push_back( asset );
             }
         }
@@ -75,7 +103,7 @@ namespace Desert::Animation
         {
             for ( const auto& handle : it->second )
             {
-                if ( auto asset = m_AssetManager->FindByHandle<Assets::AnimationAsset>( handle ) )
+                if ( auto asset = Resolve( handle ) )
                 {
                     result.push_back( asset );
                 }
@@ -88,5 +116,9 @@ namespace Desert::Animation
     void AnimationLibrary::Clear()
     {
         m_Index.clear();
+        // m_Anims WAS LEFT BEHIND. Clear() dropped the signature index and kept the bone-name index, so
+        // GetForSkeletonBones went on offering every clip of the previous project — resolved through an
+        // AssetManager that no longer holds them. Two indexes of one thing, one of which was cleared.
+        m_Anims.clear();
     }
 } // namespace Desert::Animation

@@ -125,8 +125,9 @@ namespace Common
     //
     // Threading contract:
     //   - Submit()/Async() are safe from any thread; jobs may run on any worker in any order.
-    //   - ParallelFor() BLOCKS until done and the CALLING thread works too — safe to call from the main
-    //     thread even when every worker is busy (it can never deadlock on a saturated pool).
+    //   - ParallelFor()/ParallelRanges() BLOCK until done and the CALLING thread works too. They are safe
+    //     to call from the main thread AND FROM A WORKER — including from inside another one of them. See
+    //     the note on ParallelRanges for why nesting used to hang and why it now cannot.
     //   - Jobs must not assume GPU/AssetManager/ECS access is safe — same rule the old ad-hoc threads had.
     class JobSystem
     {
@@ -152,8 +153,55 @@ namespace Common
             return fut;
         }
 
-        // Blocking parallel-for over [0, count): body(index). Work is split into (workers + 1) contiguous
-        // chunks; the calling thread executes one chunk itself while the pool takes the rest.
+        /**
+         * @brief Blocking parallel loop over [0, count) handed out in CONTIGUOUS RANGES of at most
+         *        @p grain indices: body(begin, end) is called once per range and must process every index
+         *        in [begin, end).
+         *
+         * WHY RANGES AND NOT INDICES. A body with per-range setup — a scratch buffer, a bin lookup, a
+         * thread-local accumulator — cannot express itself through body(index) without either
+         * reallocating per element or reaching for thread_local, and thread_local in a shared pool is
+         * state that outlives the loop that filled it. ParallelFor below is this function with the range
+         * walked for you, so there is ONE mechanism and not two.
+         *
+         * RANGES ARE CLAIMED, NOT DEALT. Every participant pulls the next unclaimed range off one cursor,
+         * so a range that costs ten times its neighbours is absorbed by whoever finishes first instead of
+         * holding the whole loop up. Pick @p grain so that one range is worth claiming (a lock and a
+         * couple of hundred nanoseconds) and small enough that there are several per participant.
+         *
+         * SAFE TO CALL FROM A WORKER, INCLUDING FROM INSIDE ANOTHER PARALLEL LOOP, and that is the whole
+         * reason this shape exists. The previous implementation dealt one chunk per participant up front
+         * and then waited for EVERY chunk it had submitted. A chunk still sitting in the queue can only
+         * ever run on a worker, so if every worker is itself blocked in such a wait, no chunk runs, no
+         * worker is freed, and the pool hangs — a cycle, not a slowdown. The engine walked straight into
+         * it: the cloud modelling bake runs ON a worker (VolumetricCloudRenderer), and parallelising its
+         * z-slices with the old ParallelFor would have been exactly that nested call.
+         *
+         * WHY THE CYCLE CANNOT FORM NOW. This function never waits on a job that has not started:
+         *   - all the work is claimed from one cursor, so a helper job that is never scheduled owes
+         *     nothing and is not waited for;
+         *   - the caller claims and runs ranges itself until the cursor is empty, so the loop always
+         *     completes even if not one helper ever runs;
+         *   - only then does it wait, and only on the ranges a helper has ALREADY CLAIMED — and a helper
+         *     that has claimed one is by definition running on a worker thread.
+         * The wait's precondition is therefore "a thread that is running will finish", never "a job needs
+         * a free worker". Worst case — every worker busy — the caller does all the work serially, which
+         * is precisely what the old implementation degraded to when it did not hang. Nesting is covered by
+         * the same argument by induction: a body that calls this function again does not block on the pool
+         * either, so "a running range finishes" stays true at any depth.
+         *
+         * WHAT IS STILL YOUR RESPONSIBILITY: the body must not wait for work only a WORKER can do — an
+         * Async() future, a hand-rolled latch another job signals. That is the one way to reintroduce the
+         * cycle, and no primitive here can detect it.
+         *
+         * @param grain 0 is read as 1.
+         */
+        void ParallelRanges( size_t count, size_t grain,
+                             const std::function<void( size_t begin, size_t end )>& body );
+
+        // Blocking parallel-for over [0, count): body(index). ParallelRanges with the range walked for
+        // you and a grain of about a quarter of a participant's share, so the loop stays balanced when
+        // the indices cost different amounts (importing files, running ECS systems — both do).
         void ParallelFor( size_t count, const std::function<void( size_t )>& body );
 
         size_t WorkerCount() const

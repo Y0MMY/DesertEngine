@@ -7,6 +7,7 @@
 #include <Engine/ShaderResources/ShaderReflectionTypes.hpp>
 
 #include <Engine/Assets/Shader/ShaderAsset.hpp>
+#include <Engine/Graphic/ResourceLedger.hpp>
 
 namespace Desert::Graphic
 {
@@ -15,7 +16,18 @@ namespace Desert::Graphic
     class Shader
     {
     public:
+        // The ledger row — see Engine/Graphic/ResourceLedger.hpp. One row per Shader object, which on the
+        // Vulkan backend is N `VkShaderModule` plus its descriptor set layouts and pools.
+        Shader() : m_Accounting( ResourceOwnership::Take( ResourceKind::Shader ) )
+        {
+        }
+
         virtual ~Shader() = default;
+
+        void ClaimOwnership( const ResourceOwner owner, const Common::AssetHandle asset = Common::AssetHandle{} )
+        {
+            m_Accounting.Claim( owner, asset );
+        }
 
         virtual void                  Use( BindUsage use = BindUsage::Bind ) const                             = 0;
         virtual void                  RT_Use( BindUsage use = BindUsage::Bind ) const                          = 0;
@@ -72,6 +84,9 @@ namespace Desert::Graphic
         static std::shared_ptr<Shader> Create( const Assets::Asset<Assets::ShaderAsset>& asset,
                                                const ShaderDefines&                      defines  = {},
                                                const std::string&                        passName = {} );
+
+    private:
+        ResourceOwnership m_Accounting;
     };
 
 } // namespace Desert::Graphic

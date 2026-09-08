@@ -354,8 +354,9 @@ TEST( CloudModellingRecipe, TheBakeIsAPureFunctionOfTheRecipe )
 
 TEST( CloudModellingRecipe, ACancelledBakeSaysSoRatherThanReturningHalfAVolume )
 {
-    // The panel's destructor depends on this. Without it, closing the tool mid-bake has to block on a
-    // worker with tens of seconds left to run.
+    // The panel's destructor depends on this. Without it, closing the tool mid-bake has to block on a bake
+    // with the rest of its slabs left to run — hundreds of milliseconds for the shipped body since Г10 put
+    // them on the pool, and seconds for one at the 64-lump ceiling.
     int  calls  = 0;
     auto banked = Assets::GenerateCloudModellingVolume( SculptedRecipe(),
                                                         [&calls]( float )

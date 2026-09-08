@@ -24,6 +24,16 @@ namespace Desert::Assets
 
     Common::BoolResultStr ShaderAsset::Unload()
     {
+        // WAS `return BOOLSUCCESS;`, which kept both the whole `.shader` source text and the ready flag.
+        // The flag half is the dangerous one — see AssetBase::Unload, rule 2.
+        //
+        // NOTE FOR ANYONE EVICTING THESE: the compiled `Graphic::Shader` — the VkShaderModules, the
+        // descriptor set layouts and the pools — is the ShaderService's, not this asset's, and dropping
+        // the source text does not touch it. That is correct and deliberate: a pipeline built from a
+        // shader outlives the text it was compiled from.
+        m_ShaderContent.clear();
+        m_ShaderContent.shrink_to_fit();
+        m_ReadyForUse = false;
         return BOOLSUCCESS;
     }
 } // namespace Desert::Assets

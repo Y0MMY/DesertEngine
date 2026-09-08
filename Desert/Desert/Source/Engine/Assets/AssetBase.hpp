@@ -26,10 +26,49 @@ namespace Desert::Assets
         {
         }
 
-        virtual Common::BoolResultStr Load()   = 0;
+        virtual Common::BoolResultStr Load() = 0;
+
+        // RELEASE THIS ASSET'S PAYLOAD, KEEPING ITS IDENTITY.
+        //
+        // The contract every implementation now obeys, and none of them did before there was a caller:
+        //
+        //   1. It releases what the type OWNS on the heap, `shrink_to_fit` included — `clear()` alone
+        //      keeps the capacity, which is most of the memory for a mesh or a prefab.
+        //   2. It leaves `IsReadyForUse()` FALSE. That flag is what `EnsureLoaded` asks before deciding to
+        //      parse, so an emptied asset that still reports "ready" is one nobody will ever reload. Five
+        //      of the thirteen bodies failed this and were therefore not merely ineffective but
+        //      irreversible.
+        //   3. It does NOT touch `m_Metadata.Handle`. Two types replace their handle during Load from an
+        //      id inside the file, and that id is what every service map and every `.demat` reference
+        //      resolves against. An evicted asset keeps its identity or the reload is a different asset.
+        //   4. It REFUSES, with a reason, when `IsReloadableFromFile()` is false. Releasing an asset that
+        //      was filled in memory is data loss wearing eviction's clothes, and a silent no-op would be
+        //      §1.4's "empty successful answer" — the caller would read it as released.
+        //
+        // It releases nothing on the GPU, because no asset in this engine owns anything on the GPU: the
+        // device objects built from an asset live in a `Runtime::*Service` keyed on its handle, and it is
+        // the service that releases them (Engine/Assets/AssetEviction.hpp). That is also why every one of
+        // these bodies is safe to run with a frame in flight — the vectors they free were copied into
+        // device buffers at build time and are read by nothing afterwards.
         virtual Common::BoolResultStr Unload() = 0;
 
         virtual bool IsReadyForUse() const = 0;
+
+        // CAN THIS ASSET BE REBUILT BY READING ITS FILE AGAIN?
+        //
+        // For almost every asset, yes: the file is the recipe and `Load()` is the whole of the rebuild.
+        // Three types have a SECOND producer that fills them from memory with no file behind it — a prefab
+        // captured from a live entity, a procedurally generated animation clip, the Material Editor's
+        // working copy — and for those, releasing the payload destroys the only copy that exists.
+        //
+        // It is a QUESTION ON THE ASSET rather than a list inside the evictor because the evictor cannot
+        // see how an asset was filled, and a list somewhere else is a second place that has to agree with
+        // this one. `Desert/Tests/Engine/AssetEviction` asserts that every type answering `false` here
+        // also refuses `Unload()`, so the two halves of the guard cannot drift apart.
+        virtual bool IsReloadableFromFile() const
+        {
+            return true;
+        }
 
         // LOADING AND RESOLVING ARE ONE STEP, and this is the only entry point that says so.
         //
