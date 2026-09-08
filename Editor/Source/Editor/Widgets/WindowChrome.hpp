@@ -50,7 +50,7 @@ namespace Desert::Editor::UI
         /// through the same Application::Close the control channel's `quit` uses, so there is one way to
         /// end a session rather than two that will drift.
         WindowChrome( Desert::Window& window, std::function<void()> onCloseRequested )
-            : m_Window( window ), m_OnCloseRequested( std::move( onCloseRequested ) )
+             : m_Window( window ), m_OnCloseRequested( std::move( onCloseRequested ) )
         {
         }
 

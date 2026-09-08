@@ -28,17 +28,18 @@ namespace Desert::Editor::UI
         /// look like the button that toggles a gizmo.
         bool WindowButton( const char* id, const char* icon, const char* tooltip, bool danger )
         {
-            const ImVec4 hovered = danger ? ImVec4( 0.77f, 0.16f, 0.16f, 1.0f ) : ImVec4( 1.0f, 1.0f, 1.0f, 0.12f );
-            const ImVec4 active  = danger ? ImVec4( 0.62f, 0.12f, 0.12f, 1.0f ) : ImVec4( 1.0f, 1.0f, 1.0f, 0.20f );
+            const ImVec4 hovered =
+                 danger ? ImVec4( 0.77f, 0.16f, 0.16f, 1.0f ) : ImVec4( 1.0f, 1.0f, 1.0f, 0.12f );
+            const ImVec4 active = danger ? ImVec4( 0.62f, 0.12f, 0.12f, 1.0f ) : ImVec4( 1.0f, 1.0f, 1.0f, 0.20f );
 
             ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.0f, 0.0f, 0.0f, 0.0f ) );
             ImGui::PushStyleColor( ImGuiCol_ButtonHovered, hovered );
             ImGui::PushStyleColor( ImGuiCol_ButtonActive, active );
             ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 0.0f );
 
-            const float height  = ImGui::GetFrameHeight();
-            const bool  clicked = ImGui::Button( ( std::string( icon ) + "##" + id ).c_str(),
-                                                 ImVec2( kButtonWidth, height ) );
+            const float height = ImGui::GetFrameHeight();
+            const bool  clicked =
+                 ImGui::Button( ( std::string( icon ) + "##" + id ).c_str(), ImVec2( kButtonWidth, height ) );
 
             ImGui::PopStyleVar();
             ImGui::PopStyleColor( 3 );
@@ -119,10 +120,10 @@ namespace Desert::Editor::UI
             // pointer, and the user would be dragging thin air.
             if ( m_Window.IsWindowMaximized() )
             {
-                const float fraction = ImGui::GetMainViewport()->Size.x > 0.0f
-                                            ? ( io.MousePos.x - ImGui::GetMainViewport()->Pos.x ) /
-                                                   ImGui::GetMainViewport()->Size.x
-                                            : 0.5f;
+                const float fraction =
+                     ImGui::GetMainViewport()->Size.x > 0.0f
+                          ? ( io.MousePos.x - ImGui::GetMainViewport()->Pos.x ) / ImGui::GetMainViewport()->Size.x
+                          : 0.5f;
                 m_Window.Restore();
 
                 const int restoredW = (int)m_Window.GetWidth();
@@ -165,10 +166,10 @@ namespace Desert::Editor::UI
         // the window's position moves with it), +1 the right/bottom edge, 0 leaves that axis alone.
         struct Grip
         {
-            int             dx;
-            int             dy;
-            ImVec2          pos;
-            ImVec2          size;
+            int              dx;
+            int              dy;
+            ImVec2           pos;
+            ImVec2           size;
             ImGuiMouseCursor cursor;
         };
         const Grip grips[] = {
@@ -244,9 +245,9 @@ namespace Desert::Editor::UI
         constexpr int kMinH = 240;
 
         const WindowRect start = { m_ResizeStartPosX, m_ResizeStartPosY, m_ResizeStartW, m_ResizeStartH };
-        const WindowRect moved =
-             ResizeFromGrip( start, m_ResizeX, m_ResizeY, (int)( ImGui::GetIO().MousePos.x - m_ResizeMouseStart.x ),
-                             (int)( ImGui::GetIO().MousePos.y - m_ResizeMouseStart.y ), kMinW, kMinH );
+        const WindowRect moved = ResizeFromGrip(
+             start, m_ResizeX, m_ResizeY, (int)( ImGui::GetIO().MousePos.x - m_ResizeMouseStart.x ),
+             (int)( ImGui::GetIO().MousePos.y - m_ResizeMouseStart.y ), kMinW, kMinH );
 
         if ( moved.X != start.X || moved.Y != start.Y )
             m_Window.SetWindowPos( moved.X, moved.Y );

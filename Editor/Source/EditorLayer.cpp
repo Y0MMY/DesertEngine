@@ -4416,8 +4416,8 @@ namespace Desert::Editor
         if ( !window || !m_MainScene )
             return;
 
-        const std::string title = "Desert Engine — " + Editor::ProjectContext::Current().Name + " — " +
-                                  m_MainScene->GetSceneName();
+        const std::string title =
+             "Desert Engine — " + Editor::ProjectContext::Current().Name + " — " + m_MainScene->GetSceneName();
         if ( window->GetTitle() != title )
             window->SetTitle( title );
     }
