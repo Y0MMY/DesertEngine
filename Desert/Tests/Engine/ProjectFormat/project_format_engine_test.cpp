@@ -11,6 +11,7 @@
 #include <DesertShared/EngineRegistry.hpp>
 #include <DesertShared/ProjectFormat.hpp>
 #include <Engine/Project/EngineRegistration.hpp>
+#include <Engine/Project/ProjectContext.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -166,6 +167,105 @@ TEST( EngineRegistration, WithNoEngineRootThereIsNothingToRegisterAndItSaysWhy )
     EXPECT_NE( registered.GetError().find( "DESERT_ROOT" ), std::string::npos ) << registered.GetError();
     EXPECT_FALSE( std::filesystem::exists( config / "engines.json" ) )
          << "an empty registry was written for an engine that was never located";
+
+    std::error_code ec;
+    std::filesystem::remove_all( config, ec );
+}
+
+// ── K11: the engine's half of projects.json, a file two programs write ───────────────────────────
+//
+// engines.json has had "a registry this build cannot parse is left untouched" since И7 (three tests
+// up). projects.json — the file with TWO writers rather than one — did not: an unreadable registry
+// was read as EMPTY and the promotion was then written over the top, so one bad byte forgot every
+// project the user had. These assert the same protection and the read-modify-write beside it.
+
+TEST( ProjectContextRecent, ARegistryThisBuildCannotParseIsLeftUntouchedRatherThanOverwritten )
+{
+    const std::filesystem::path config   = TempConfigDirectory( "recent-corrupt" );
+    const std::string           original = R"({"Projects": [ this is not json)";
+    {
+        std::ofstream out( config / "projects.json" );
+        out << original;
+    }
+
+    // The refusal is visible through the reader as well: "empty" and "unreadable" are different
+    // answers, and this used to return the same value for both.
+    const auto read = Desert::Project::ProjectContext::RecentProjects( config.string() );
+    EXPECT_FALSE( read.IsSuccess() ) << "a corrupt registry was reported as an empty one";
+
+    Desert::Project::ProjectContext::RegisterRecent( config.string(), "/p/New.deproj" );
+    EXPECT_EQ( ReadWhole( config / "projects.json" ), original )
+         << "the user's whole project list was replaced by a registry built on a failed read";
+
+    std::error_code ec;
+    std::filesystem::remove_all( config, ec );
+}
+
+TEST( ProjectContextRecent, AProjectTheLauncherFiledSurvivesTheEnginesNextWrite )
+{
+    // The other half of ProjectHubTwoWriters, from this side: whatever is in the file when the
+    // engine writes must still be in the file afterwards. The engine re-reads immediately before
+    // writing, so "whatever is in the file" is not a copy from process start.
+    const std::filesystem::path config = TempConfigDirectory( "recent-merge" );
+
+    Common::Project::ProjectsRegistry fromLauncher;
+    Common::Project::PromoteRecent( fromLauncher, "/p/FiledByTheLauncher.deproj", 500 );
+    {
+        std::ofstream out( config / "projects.json" );
+        out << Common::Project::WriteProjectsRegistry( fromLauncher );
+    }
+
+    Desert::Project::ProjectContext::RegisterRecent( config.string(), "/p/OpenedByTheEditor.deproj" );
+
+    const auto after = Desert::Project::ProjectContext::RecentProjects( config.string() );
+    ASSERT_TRUE( after.IsSuccess() ) << after.GetError();
+    ASSERT_EQ( after.GetValue().Projects.size(), 2u ) << "the engine wrote over the launcher's entry";
+    EXPECT_EQ( after.GetValue().Projects[0].Path, "/p/OpenedByTheEditor.deproj" ) << "most recent first";
+    EXPECT_EQ( after.GetValue().Projects[1].Path, "/p/FiledByTheLauncher.deproj" );
+
+    std::error_code ec;
+    std::filesystem::remove_all( config, ec );
+}
+
+TEST( ProjectContextRecent, AMachineWithNoRegistryYetIsNotAFailure )
+{
+    // The one case that answers "empty" successfully — and it has to, or a fresh machine would
+    // refuse to record the first project ever opened on it.
+    const std::filesystem::path config = TempConfigDirectory( "recent-fresh" );
+    const auto                  fresh  = Desert::Project::ProjectContext::RecentProjects( config.string() );
+    ASSERT_TRUE( fresh.IsSuccess() ) << fresh.GetError();
+    EXPECT_TRUE( fresh.GetValue().Projects.empty() );
+
+    Desert::Project::ProjectContext::RegisterRecent( config.string(), "/p/First.deproj" );
+    const auto after = Desert::Project::ProjectContext::RecentProjects( config.string() );
+    ASSERT_TRUE( after.IsSuccess() );
+    ASSERT_EQ( after.GetValue().Projects.size(), 1u );
+    EXPECT_EQ( after.GetValue().Projects[0].Path, "/p/First.deproj" );
+
+    std::error_code ec;
+    std::filesystem::remove_all( config, ec );
+}
+
+TEST( ProjectContextRecent, ARegistryReadAndWrittenBackUnchangedIsByteIdentical )
+{
+    // The relation K11 states for every one of these files, on the engine's side of this one: a
+    // read followed by a write with no change in between must leave the bytes alone. Anything else
+    // means the two writers churn each other's file on every open.
+    //
+    // True for a registry THIS BUILD wrote. A registry carrying a key this build does not declare
+    // is not byte-stable — the writer emits ProjectsRegistry's members and nothing else — and that
+    // is the half that needs an rfl::ExtraFields carrier on the shared struct.
+    const std::filesystem::path config = TempConfigDirectory( "recent-identity" );
+    Desert::Project::ProjectContext::RegisterRecent( config.string(), "/p/A.deproj" );
+    Desert::Project::ProjectContext::RegisterRecent( config.string(), "/p/B.deproj" );
+    const std::string before = ReadWhole( config / "projects.json" );
+    ASSERT_FALSE( before.empty() );
+
+    // Read it and write it straight back, through the same two shared functions both hosts use.
+    const auto parsed = Common::Project::ReadProjectsRegistry( before );
+    ASSERT_TRUE( parsed.IsSuccess() ) << parsed.GetError();
+    EXPECT_EQ( Common::Project::WriteProjectsRegistry( parsed.GetValue() ), before )
+         << "reading and writing back with no change altered the file";
 
     std::error_code ec;
     std::filesystem::remove_all( config, ec );

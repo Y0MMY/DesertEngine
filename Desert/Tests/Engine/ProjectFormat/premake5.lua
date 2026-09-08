@@ -20,6 +20,11 @@ project(test_name)
         -- be reachable by no suite that is not willing to write into the developer's real
         -- ~/.desertengine, which is how a file-writing function ends up untested.
         "%{wks.location}/Desert/Desert/Source/Engine/Project/EngineRegistration.cpp",
+        -- The engine's half of the OTHER two-writer file, projects.json. Same reason and same
+        -- shape: RecentProjects/RegisterRecent take the config directory as an argument, so the
+        -- protocol the launcher plays the other half of is reachable here without writing into the
+        -- developer's own ~/.desertengine. Everything it touches is Common.
+        "%{wks.location}/Desert/Desert/Source/Engine/Project/ProjectContext.cpp",
     }
 
     includedirs {

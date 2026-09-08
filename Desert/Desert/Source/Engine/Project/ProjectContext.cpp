@@ -17,9 +17,9 @@ namespace Desert::Project
         std::optional<ProjectFile> s_Current;
         std::string                s_FilePath;
 
-        std::string RegistryFile()
+        std::string RegistryFile( const std::string& configDirectory )
         {
-            return ProjectContext::ConfigDirectory() + "/projects.json";
+            return ( std::filesystem::path( configDirectory ) / "projects.json" ).string();
         }
     } // namespace
 
@@ -87,7 +87,7 @@ namespace Desert::Project
         // packaged game reads its descriptor out of a mounted .dpak and is not on this machine's
         // disk at all, and a headless capture run is on disk but is not a person opening a project.
         if ( onDisk && record == RecordInRecent::Yes )
-            RegisterRecent( s_FilePath );
+            RegisterRecent( ConfigDirectory(), s_FilePath );
         LOG_INFO( "[Project] Opened '{}' ({}) — assets root: {}", s_Current->Name, s_FilePath,
                   Common::Constants::Path::ASSETS_PATH.string() );
         return true;
@@ -151,43 +151,68 @@ namespace Desert::Project
         return ( std::filesystem::path( Directory() ) / s_Current->DefaultScene ).string();
     }
 
-    Common::Project::ProjectsRegistry ProjectContext::RecentProjects()
+    Common::ResultStr<Common::Project::ProjectsRegistry>
+    ProjectContext::RecentProjects( const std::string& configDirectory )
     {
-        if ( !std::filesystem::exists( RegistryFile() ) )
-            return {};
+        const std::string file = RegistryFile( configDirectory );
 
-        const auto raw = Common::Utils::FileSystem::ReadFileContent( RegistryFile() );
-        if ( !raw || raw.GetValue().empty() )
-            return {};
+        // No registry yet is a fresh machine, not a failure — and it is the ONLY case that answers
+        // "empty" successfully.
+        if ( !std::filesystem::exists( file ) )
+            return Common::MakeSuccess( Common::Project::ProjectsRegistry{} );
+
+        const auto raw = Common::Utils::FileSystem::ReadFileContent( file );
+        if ( !raw )
+            return Common::MakeFormattedError<Common::Project::ProjectsRegistry>(
+                 "{} exists but could not be read: {}", file, raw.GetError() );
+        if ( raw.GetValue().empty() )
+            return Common::MakeSuccess( Common::Project::ProjectsRegistry{} );
+
         auto parsed = Common::Project::ReadProjectsRegistry( raw.GetValue() );
         if ( !parsed.IsSuccess() )
-        {
-            // Refusing quietly here looked like "my projects vanished" — name the file and the reason.
-            LOG_ERROR( "[Project] {}: {}", RegistryFile(), parsed.GetError() );
-            return {};
-        }
+            return Common::MakeFormattedError<Common::Project::ProjectsRegistry>( "{}: {}", file,
+                                                                                  parsed.GetError() );
         // The reader migrates a registry from before LastOpened; the write below then puts the
         // current shape on disk, so the file upgrades the first time any project is opened.
-        return parsed.ExtractValue();
+        return Common::MakeSuccess( parsed.ExtractValue() );
     }
 
-    void ProjectContext::RegisterRecent( const std::string& deprojPath )
+    void ProjectContext::RegisterRecent( const std::string& configDirectory, const std::string& deprojPath )
     {
+        // READ-MODIFY-WRITE, AND THE READ IS HERE. projects.json has two writers in two programs —
+        // this one and Tools/ProjectHub — and neither arbitrates, so the only thing that keeps a
+        // write from erasing the other side's records is how OLD the copy being written is. This
+        // side re-reads immediately before writing; the launcher does the same through
+        // Hub::MutateProjects. Neither holds a session-long snapshot any more.
+        //
         // The policy — most recent first, unique, no cap, LastOpened stamped — is ONE function in
-        // desert-shared now, called by this side and by the launcher. It used to be two copies over
+        // desert-shared, called by this side and by the launcher. It used to be two copies over
         // one shared file, which is how both of them ended up carrying the same silent cap of ten:
         // lifting either alone would have had the other erase what it kept.
-        auto registry = RecentProjects();
+        auto onDisk = RecentProjects( configDirectory );
+        if ( !onDisk.IsSuccess() )
+        {
+            // NOTHING IS WRITTEN. The registry is unreadable, so this process cannot know what it
+            // would be overwriting — and it used to write anyway, over a registry it had silently
+            // read as empty, which turned one bad byte into "all my projects are gone".
+            LOG_ERROR( "[Project] The recent-projects registry was not updated with '{}': {}. The file "
+                       "on disk is unchanged.",
+                       deprojPath, onDisk.GetError() );
+            return;
+        }
+
+        Common::Project::ProjectsRegistry registry = onDisk.ExtractValue();
         Common::Project::PromoteRecent( registry, deprojPath, Common::Project::UnixNow() );
 
         // Atomic (write-then-rename): this file is shared with the Project Hub, and an interrupted
         // in-place write left a torn projects.json that neither side could parse — every recent
         // project gone over one crash at the wrong moment. On failure the registry simply keeps its
         // previous list, which is the right outcome for a convenience file: name it and move on.
+        const std::string file = RegistryFile( configDirectory );
         if ( !Common::Utils::FileSystem::WriteContentToFileAtomic(
-                  std::filesystem::path( RegistryFile() ), Common::Project::WriteProjectsRegistry( registry ) ) )
+                  std::filesystem::path( file ), Common::Project::WriteProjectsRegistry( registry ) ) )
             LOG_ERROR( "[Project] Could not update the recent-projects registry {} — it keeps its "
                        "previous contents",
-                       RegistryFile() );
+                       file );
     }
 } // namespace Desert::Project

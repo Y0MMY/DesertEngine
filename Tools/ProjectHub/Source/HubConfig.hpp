@@ -9,6 +9,7 @@
 // way to assert "what the launcher writes, the engine reads" without writing into the developer's
 // real registry.
 
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -33,10 +34,39 @@ namespace Hub
     [[nodiscard]] Common::ResultStr<Common::Project::ProjectsRegistry>
     LoadProjects( const std::string& configDirectory );
 
-    // Returns the reason on failure — the file on disk then keeps its previous list, which for a
-    // convenience file is the right failure: nothing is lost, the one change is.
-    [[nodiscard]] Common::BoolResultStr SaveProjects( const std::string&                       configDirectory,
-                                                      const Common::Project::ProjectsRegistry& registry );
+    // THE ONLY WAY THIS PROCESS CHANGES projects.json — there is deliberately no "save the registry".
+    //
+    // The file has TWO WRITERS IN TWO PROGRAMS: this launcher and the engine's
+    // Desert::Project::ProjectContext::RegisterRecent. Nothing arbitrates between them, so a writer
+    // that flushes a snapshot it loaded earlier does not merely lose a FIELD — it loses whole
+    // RECORDS. The measured shape: the launcher read the registry once when its window opened
+    // (Main.cpp, startup), the Editor filed every project opened while that window was up, and the
+    // next launcher action wrote its own session-old list back over the top. Everything the engine
+    // recorded in between was gone, with nothing said.
+    //
+    // So a caller states an INTENT — promote this path, forget that path — and this function
+    // re-reads the file AS IT IS ON DISK at the moment of the write, applies the intent to that, and
+    // writes the result. `apply` must therefore be a rewrite of the registry it is handed and must
+    // not close over a registry loaded earlier; that is the whole difference between this and the
+    // shape it replaces.
+    //
+    // It also cannot destroy a registry it could not understand. An unreadable or unparseable file
+    // is returned as an error and NOTHING is written — the previous shape left the in-memory
+    // registry empty when the load failed and then wrote that emptiness back, so one unparseable
+    // byte cost the user every project they had.
+    //
+    // The merged registry comes back so the caller can ADOPT it. A caller that keeps its pre-merge
+    // copy is stale again the instant this returns, which is the defect this exists to remove.
+    //
+    // What is left: read-modify-write is not atomic ACROSS PROCESSES. The write itself is
+    // (Files.cpp renames a temp file over the target, so the registry is never torn), and the window
+    // in which a concurrent writer can be lost is now a 4 KB read plus a rename rather than a whole
+    // launcher session. Closing the last microseconds needs an advisory file lock BOTH hosts take,
+    // which belongs beside PromoteRecent in desert-shared rather than being written twice here — see
+    // the K11 report.
+    [[nodiscard]] Common::ResultStr<Common::Project::ProjectsRegistry>
+    MutateProjects( const std::string&                                               configDirectory,
+                    const std::function<void( Common::Project::ProjectsRegistry& )>& apply );
 
     [[nodiscard]] Common::ResultStr<Common::Engine::EngineRegistry>
     LoadEngines( const std::string& configDirectory );

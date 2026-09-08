@@ -197,7 +197,9 @@ TEST( ProjectHubRecent, WhatTheLauncherWritesTheEngineReadsBackOutOfTheSameFile 
     Common::Project::ProjectsRegistry registry;
     Common::Project::PromoteRecent( registry, "/p/Old.deproj", 1000 );
     Common::Project::PromoteRecent( registry, kHostileDeproj, 1757203200 );
-    ASSERT_TRUE( Hub::SaveProjects( config.string(), registry ).IsSuccess() );
+    ASSERT_TRUE( Hub::MutateProjects( config.string(),
+                                      [&registry]( Common::Project::ProjectsRegistry& r ) { r = registry; } )
+                      .IsSuccess() );
 
     // Read it the way the ENGINE would: raw bytes off disk, through the shared reader.
     const auto raw = Hub::ReadTextFile( Hub::ProjectsRegistryFile( config.string() ) );
@@ -228,12 +230,13 @@ TEST( ProjectHubRecent, ARegistryWrittenBeforeLastOpenedIsReadAndThenUpgradedInP
 
     auto loaded = Hub::LoadProjects( config.string() );
     ASSERT_TRUE( loaded.IsSuccess() ) << loaded.GetError();
-    Common::Project::ProjectsRegistry registry = loaded.ExtractValue();
+    const Common::Project::ProjectsRegistry registry = loaded.ExtractValue();
     ASSERT_EQ( registry.Projects.size(), 2u ) << "the launcher lost projects on the way in";
     EXPECT_EQ( registry.Projects[0].Path, "/p/A.deproj" ) << "the order the old format carried was scrambled";
 
-    Common::Project::PromoteRecent( registry, "/p/B.deproj", 99 );
-    ASSERT_TRUE( Hub::SaveProjects( config.string(), registry ).IsSuccess() );
+    ASSERT_TRUE( Hub::MutateProjects( config.string(), []( Common::Project::ProjectsRegistry& r )
+                                      { Common::Project::PromoteRecent( r, "/p/B.deproj", 99 ); } )
+                      .IsSuccess() );
 
     const auto raw = Hub::ReadTextFile( Hub::ProjectsRegistryFile( config.string() ) );
     ASSERT_TRUE( raw.IsSuccess() );
@@ -258,6 +261,194 @@ TEST( ProjectHubRecent, AMissingRegistryIsAnEmptyListAndAnUnreadableOneIsARefusa
     auto broken = Hub::LoadProjects( config.string() );
     ASSERT_FALSE( broken.IsSuccess() ) << "a corrupt registry was reported as an empty one";
     EXPECT_NE( broken.GetError().find( "projects.json" ), std::string::npos ) << broken.GetError();
+
+    std::error_code ec;
+    fs::remove_all( config, ec );
+}
+
+// ── K11: projects.json has two writers, so a write is an INTENT and never a snapshot ─────────────
+//
+// The relation, stated once: WHAT THE OTHER WRITER PUT IN THE FILE IS STILL IN THE FILE AFTER THIS
+// ONE WRITES. Every test below is one way of being wrong about that, and each of them was reachable
+// before Hub::MutateProjects existed — the launcher held the registry it loaded when its window
+// opened and flushed that copy whole, while the Editor filed a project every time it started.
+//
+// "The other writer" is simulated by writing the file directly, which is exactly what the engine's
+// ProjectContext::RegisterRecent does through the same shared serializer.
+
+TEST( ProjectHubTwoWriters, AProjectFiledByTheEngineSurvivesTheLaunchersNextWrite )
+{
+    const fs::path config = MakeTempDirectory( "twowriters" );
+
+    // 10:00 — the launcher's window opens and it reads the registry.
+    ASSERT_TRUE( Hub::MutateProjects( config.string(), []( Common::Project::ProjectsRegistry& r )
+                                      { Common::Project::PromoteRecent( r, "/p/Old.deproj", 1000 ); } )
+                      .IsSuccess() );
+    auto atStartup = Hub::LoadProjects( config.string() );
+    ASSERT_TRUE( atStartup.IsSuccess() ) << atStartup.GetError();
+    const Common::Project::ProjectsRegistry sessionSnapshot = atStartup.ExtractValue();
+
+    // 10:30 — the ENGINE opens a project. It re-reads and writes; the launcher never notices.
+    {
+        auto fromEngine = Hub::LoadProjects( config.string() );
+        ASSERT_TRUE( fromEngine.IsSuccess() );
+        Common::Project::ProjectsRegistry engineCopy = fromEngine.ExtractValue();
+        Common::Project::PromoteRecent( engineCopy, "/p/OpenedByTheEditor.deproj", 2000 );
+        ASSERT_TRUE( Hub::WriteTextFile( Hub::ProjectsRegistryFile( config.string() ),
+                                         Common::Project::WriteProjectsRegistry( engineCopy ) )
+                          .IsSuccess() );
+    }
+
+    // 11:00 — the launcher forgets a dead entry. Its own copy is half an hour old.
+    ASSERT_EQ( sessionSnapshot.Projects.size(), 1u ) << "the snapshot under test is not the stale one";
+    ASSERT_TRUE( Hub::MutateProjects( config.string(),
+                                      []( Common::Project::ProjectsRegistry& r )
+                                      {
+                                          auto& p = r.Projects;
+                                          p.erase( std::remove_if( p.begin(), p.end(),
+                                                                   []( const Common::Project::ProjectRecord& x )
+                                                                   { return x.Path == "/p/Old.deproj"; } ),
+                                                   p.end() );
+                                      } )
+                      .IsSuccess() );
+
+    const auto raw = Hub::ReadTextFile( Hub::ProjectsRegistryFile( config.string() ) );
+    ASSERT_TRUE( raw.IsSuccess() );
+    auto after = Common::Project::ReadProjectsRegistry( raw.GetValue() );
+    ASSERT_TRUE( after.IsSuccess() ) << after.GetError();
+
+    ASSERT_EQ( after.GetValue().Projects.size(), 1u )
+         << "the launcher wrote its session-old list back over the engine's";
+    EXPECT_EQ( after.GetValue().Projects[0].Path, "/p/OpenedByTheEditor.deproj" )
+         << "the project the Editor filed while the launcher window was open is gone";
+
+    std::error_code ec;
+    fs::remove_all( config, ec );
+}
+
+TEST( ProjectHubTwoWriters, TheMergedRegistryComesBackSoTheCallerCannotStayStale )
+{
+    // A caller that keeps its pre-merge copy is stale again the instant the call returns, which is
+    // the defect this whole shape exists to remove — so the merged registry is the RETURN VALUE and
+    // not something the caller has to go and re-read.
+    const fs::path config = MakeTempDirectory( "adopt" );
+    ASSERT_TRUE(
+         Hub::WriteTextFile( Hub::ProjectsRegistryFile( config.string() ),
+                             R"({"FileVersion":1,"Projects":[{"Path":"/p/Engine.deproj","LastOpened":7}]})" )
+              .IsSuccess() );
+
+    auto merged = Hub::MutateProjects( config.string(), []( Common::Project::ProjectsRegistry& r )
+                                       { Common::Project::PromoteRecent( r, "/p/Mine.deproj", 9 ); } );
+    ASSERT_TRUE( merged.IsSuccess() ) << merged.GetError();
+    ASSERT_EQ( merged.GetValue().Projects.size(), 2u );
+    EXPECT_EQ( merged.GetValue().Projects[0].Path, "/p/Mine.deproj" );
+    EXPECT_EQ( merged.GetValue().Projects[1].Path, "/p/Engine.deproj" )
+         << "the caller was handed back a registry that does not contain what is on disk";
+
+    std::error_code ec;
+    fs::remove_all( config, ec );
+}
+
+TEST( ProjectHubTwoWriters, ARegistryThatCannotBeParsedIsNotOverwritten )
+{
+    // The engine had the mirror of this and it was live: an unparseable registry was silently read
+    // as EMPTY and then written back, so one bad byte cost the user every project they had.
+    const fs::path    config  = MakeTempDirectory( "refuse" );
+    const std::string corrupt = R"({"FileVersion":1,"Projects":[{"Path":)";
+    ASSERT_TRUE( Hub::WriteTextFile( Hub::ProjectsRegistryFile( config.string() ), corrupt ).IsSuccess() );
+
+    auto attempted = Hub::MutateProjects( config.string(), []( Common::Project::ProjectsRegistry& r )
+                                          { Common::Project::PromoteRecent( r, "/p/New.deproj", 1 ); } );
+    EXPECT_FALSE( attempted.IsSuccess() ) << "a registry that could not be understood was written anyway";
+
+    const auto raw = Hub::ReadTextFile( Hub::ProjectsRegistryFile( config.string() ) );
+    ASSERT_TRUE( raw.IsSuccess() );
+    EXPECT_EQ( raw.GetValue(), corrupt ) << "the file was replaced with a registry built on nothing";
+
+    std::error_code ec;
+    fs::remove_all( config, ec );
+}
+
+TEST( ProjectHubTwoWriters, ARegistryReadAndWrittenBackUnchangedIsByteIdentical )
+{
+    // The class-closing relation for this file, and the one a caller may not simply assume: a
+    // read-modify-write with an EMPTY modification must leave the bytes alone. If it does not, then
+    // every write churns the file for both writers and no diff over it means anything — and the
+    // shape that breaks it is the one K11 is about, a writer enumerating its own struct instead of
+    // the file.
+    //
+    // It is checked over a file this build WROTE. A file carrying a key this build does not declare
+    // is NOT byte-stable — rfl::json::write emits ProjectsRegistry's members and nothing else — and
+    // that half needs an rfl::ExtraFields carrier on the shared struct (desert-shared), which is
+    // deliberately not claimed here.
+    const fs::path config = MakeTempDirectory( "identity" );
+
+    ASSERT_TRUE( Hub::MutateProjects( config.string(),
+                                      []( Common::Project::ProjectsRegistry& r )
+                                      {
+                                          Common::Project::PromoteRecent( r, "/p/A.deproj", 1000 );
+                                          Common::Project::PromoteRecent( r, kHostileDeproj, 1757203200 );
+                                      } )
+                      .IsSuccess() );
+
+    const auto before = Hub::ReadTextFile( Hub::ProjectsRegistryFile( config.string() ) );
+    ASSERT_TRUE( before.IsSuccess() );
+
+    ASSERT_TRUE( Hub::MutateProjects( config.string(), []( Common::Project::ProjectsRegistry& ) {} ).IsSuccess() );
+
+    const auto after = Hub::ReadTextFile( Hub::ProjectsRegistryFile( config.string() ) );
+    ASSERT_TRUE( after.IsSuccess() );
+    EXPECT_EQ( before.GetValue(), after.GetValue() ) << "reading and writing back with no change altered the file";
+
+    std::error_code ec;
+    fs::remove_all( config, ec );
+}
+
+TEST( ProjectHubTwoWriters, ForgettingAProjectRemovesTheONEThePersonPointedAt )
+{
+    // The launcher's remove was an ERASE BY POSITION into the list it was drawing, applied to the
+    // list on disk. PromoteRecent moves an entry to the front, so any project the Editor opened
+    // while the window was up shifted every index below it — and the row the user clicked was not
+    // the row that got forgotten. The intent is the PATH.
+    const fs::path config = MakeTempDirectory( "byname" );
+    ASSERT_TRUE( Hub::MutateProjects( config.string(),
+                                      []( Common::Project::ProjectsRegistry& r )
+                                      {
+                                          Common::Project::PromoteRecent( r, "/p/C.deproj", 1 );
+                                          Common::Project::PromoteRecent( r, "/p/B.deproj", 2 );
+                                          Common::Project::PromoteRecent( r, "/p/A.deproj", 3 );
+                                      } )
+                      .IsSuccess() );
+    // The list the launcher is drawing is [A, B, C] and the user clicks "forget" on row 1 — B.
+    const std::string clicked = "/p/B.deproj";
+
+    // The Editor opens C in the meantime, so the list on disk is now [C, A, B]: row 1 is A.
+    {
+        auto onDisk = Hub::LoadProjects( config.string() );
+        ASSERT_TRUE( onDisk.IsSuccess() );
+        Common::Project::ProjectsRegistry engineCopy = onDisk.ExtractValue();
+        Common::Project::PromoteRecent( engineCopy, "/p/C.deproj", 4 );
+        ASSERT_TRUE( Hub::WriteTextFile( Hub::ProjectsRegistryFile( config.string() ),
+                                         Common::Project::WriteProjectsRegistry( engineCopy ) )
+                          .IsSuccess() );
+    }
+
+    auto merged = Hub::MutateProjects(
+         config.string(),
+         [&clicked]( Common::Project::ProjectsRegistry& r )
+         {
+             auto& p = r.Projects;
+             p.erase( std::remove_if( p.begin(), p.end(), [&clicked]( const Common::Project::ProjectRecord& x )
+                                      { return x.Path == clicked; } ),
+                      p.end() );
+         } );
+    ASSERT_TRUE( merged.IsSuccess() ) << merged.GetError();
+
+    std::vector<std::string> left;
+    for ( const auto& record : merged.GetValue().Projects )
+        left.push_back( record.Path );
+    EXPECT_EQ( left, ( std::vector<std::string>{ "/p/C.deproj", "/p/A.deproj" } ) )
+         << "the row the user pointed at is not the row that was forgotten";
 
     std::error_code ec;
     fs::remove_all( config, ec );

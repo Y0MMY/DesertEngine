@@ -68,13 +68,30 @@ namespace Desert::Project
         // Recent projects (most recent first) from <config>/projects.json (shared with the Project
         // Hub). The whole registry, not a list of paths: each entry carries the LastOpened the
         // launcher draws its relative time from, and RegisterRecent has to write the entries back.
-        static Common::Project::ProjectsRegistry RecentProjects();
+        //
+        // A REFUSAL AND AN EMPTY LIST ARE DIFFERENT ANSWERS (DC §1.4), and this used to return the
+        // same value for both. A machine with no registry yet has no projects; a registry that
+        // exists and does not parse has all of them, and the caller below WRITES what it gets back
+        // — so collapsing the two turned one unparseable byte into "every project you ever opened
+        // is gone". Absent file = an empty registry, successfully. Anything else = the reason.
+        //
+        // The config directory is an ARGUMENT, on the same terms as EngineRegistration's: it is what
+        // lets a suite point this at a temp folder instead of at the developer's own ~/.desertengine,
+        // and without it the two-writer protocol below would be reachable by no test at all.
+        [[nodiscard]] static Common::ResultStr<Common::Project::ProjectsRegistry>
+        RecentProjects( const std::string& configDirectory );
+
+        // Files `deprojPath` at the top of the registry in `configDirectory` — the ENGINE's half of a
+        // file two programs write (Tools/ProjectHub is the other). Public because it is one half of a
+        // cross-process protocol and a test has to be able to play the other half.
+        //
+        // READ-MODIFY-WRITE: the registry is re-read here, immediately before the write, never held
+        // from earlier. A registry that cannot be read is NOT overwritten — the reason is logged and
+        // the file is left exactly as it is.
+        static void RegisterRecent( const std::string& configDirectory, const std::string& deprojPath );
 
         // ~/.desertengine (created on demand) — user-level config shared by the tools (projects.json,
         // the editor's editor.json).
         static std::string ConfigDirectory();
-
-    private:
-        static void RegisterRecent( const std::string& deprojPath );
     };
 } // namespace Desert::Project
