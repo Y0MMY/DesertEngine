@@ -384,17 +384,15 @@ namespace Desert::Graphic
         }
     } // namespace LedgerDetail
 
-    using namespace LedgerDetail;
-
     inline ResourceAttributionScope::ResourceAttributionScope( const ResourceOwner owner ) noexcept
-         : m_Previous( AmbientOwner() )
+         : m_Previous( LedgerDetail::AmbientOwner() )
     {
-        AmbientOwner() = owner;
+        LedgerDetail::AmbientOwner() = owner;
     }
 
     inline ResourceAttributionScope::~ResourceAttributionScope()
     {
-        AmbientOwner() = m_Previous;
+        LedgerDetail::AmbientOwner() = m_Previous;
     }
 
     // ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -467,34 +465,34 @@ namespace Desert::Graphic
 
     inline uint64_t ResourceLedger::Open( const ResourceKind kind, const std::size_t bytes )
     {
-        std::lock_guard<std::mutex> guard( Lock() );
+        std::lock_guard<std::mutex> guard( LedgerDetail::Lock() );
 
-        const uint64_t id = NextRowId()++;
+        const uint64_t id = LedgerDetail::NextRowId()++;
 
-        LedgerRow row;
+        LedgerDetail::LedgerRow row;
         row.Kind = kind;
         // The ambient default, if a scope is open. Nothing else reads it: a later Claim() overwrites the
         // owner outright, because naming the asset behind an object is more specific than naming the
         // subsystem that happened to be building when it appeared.
-        row.Owner      = AmbientOwner();
+        row.Owner      = LedgerDetail::AmbientOwner();
         row.Bytes      = bytes;
         row.BytesKnown = bytes != 0;
-        Rows().emplace( id, row );
+        LedgerDetail::Rows().emplace( id, row );
 
         return id;
     }
 
     inline void ResourceLedger::Close( const uint64_t row )
     {
-        std::lock_guard<std::mutex> guard( Lock() );
-        Rows().erase( row );
+        std::lock_guard<std::mutex> guard( LedgerDetail::Lock() );
+        LedgerDetail::Rows().erase( row );
     }
 
     inline void ResourceLedger::Attribute( const uint64_t row, const ResourceOwner owner,
                                            const Common::AssetHandle asset )
     {
-        std::lock_guard<std::mutex> guard( Lock() );
-        if ( const auto it = Rows().find( row ); it != Rows().end() )
+        std::lock_guard<std::mutex> guard( LedgerDetail::Lock() );
+        if ( const auto it = LedgerDetail::Rows().find( row ); it != LedgerDetail::Rows().end() )
         {
             it->second.Owner = owner;
             it->second.Asset = asset;
@@ -503,8 +501,8 @@ namespace Desert::Graphic
 
     inline void ResourceLedger::SetBytes( const uint64_t row, const std::size_t bytes )
     {
-        std::lock_guard<std::mutex> guard( Lock() );
-        if ( const auto it = Rows().find( row ); it != Rows().end() )
+        std::lock_guard<std::mutex> guard( LedgerDetail::Lock() );
+        if ( const auto it = LedgerDetail::Rows().find( row ); it != LedgerDetail::Rows().end() )
         {
             it->second.Bytes      = bytes;
             it->second.BytesKnown = bytes != 0;
@@ -513,9 +511,9 @@ namespace Desert::Graphic
 
     inline bool ResourceLedger::Read( const uint64_t row, ResourceOwner& owner, Common::AssetHandle& asset )
     {
-        std::lock_guard<std::mutex> guard( Lock() );
-        const auto                  it = Rows().find( row );
-        if ( it == Rows().end() )
+        std::lock_guard<std::mutex> guard( LedgerDetail::Lock() );
+        const auto                  it = LedgerDetail::Rows().find( row );
+        if ( it == LedgerDetail::Rows().end() )
             return false;
         owner = it->second.Owner;
         asset = it->second.Asset;
@@ -524,10 +522,10 @@ namespace Desert::Graphic
 
     inline ResourceCensus ResourceLedger::Take()
     {
-        std::lock_guard<std::mutex> guard( Lock() );
+        std::lock_guard<std::mutex> guard( LedgerDetail::Lock() );
 
         ResourceCensus census;
-        for ( const auto& [id, row] : Rows() )
+        for ( const auto& [id, row] : LedgerDetail::Rows() )
         {
             ++census.Live;
             ++census.PerKind[static_cast<std::size_t>( row.Kind )];
