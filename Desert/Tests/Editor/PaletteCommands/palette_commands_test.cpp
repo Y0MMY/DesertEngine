@@ -31,9 +31,14 @@
 #include <string>
 #include <vector>
 
+using Desert::Editor::ClampPaletteSelection;
+using Desert::Editor::CommandPalette;
 using Desert::Editor::PaletteCommand;
 using Desert::Editor::PaletteCommandDone;
 using Desert::Editor::PaletteCommandOutcome;
+using Desert::Editor::PaletteHit;
+using Desert::Editor::RankPaletteCommands;
+using Desert::Editor::WrapPaletteSelection;
 using Desert::Editor::Control::CommandAddress;
 using Desert::Editor::Control::ResolveCommand;
 
@@ -163,6 +168,159 @@ TEST( PaletteCommands, ResolvingAndRunningTouchesExactlyTheOneEntry )
 
     EXPECT_EQ( undo, 1 );
     EXPECT_EQ( grid, 0 ) << "resolving one entry ran another";
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 4. THE PALETTE'S OWN DECISIONS - A6-2 point 3.
+//
+// `CommandPalette.cpp` is compiled by no suite, which alone says little: 85 % of this repository's
+// translation units are not. What made it worth acting on is that A6-1 had just put two things worth
+// checking INTO it - WHEN the dictionary is built, and WHAT the ranking does with it - so the only
+// evidence either worked was a photograph.
+//
+// The decisions are free functions now and are asserted here. What is left in the .cpp is a drawing: the
+// popup's lifecycle, the keyboard focus, the scroll. That half is NAMED as unreachable rather than
+// pretended about, and it is checked the one way it can be - by looking at a frame, which the control
+// channel can now take because the palette has a name in its own dictionary.
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    std::vector<std::string> LabelsOf( const std::vector<PaletteHit>& hits )
+    {
+        std::vector<std::string> labels;
+        labels.reserve( hits.size() );
+        for ( const PaletteHit& hit : hits )
+            labels.push_back( hit.Command->Label );
+        return labels;
+    }
+
+    std::vector<PaletteCommand> Named( const std::vector<std::string>& labels )
+    {
+        std::vector<PaletteCommand> commands;
+        for ( const std::string& label : labels )
+            commands.push_back( { "Action", label, [] { return PaletteCommandDone(); } } );
+        return commands;
+    }
+} // namespace
+
+// AN EMPTY QUERY OFFERS EVERYTHING, in the dictionary's own order. This is the first thing a person sees
+// on Ctrl+P and the first thing a picture of the overlay shows.
+TEST( PaletteCommands, AnEmptyQueryOffersTheWholeDictionaryInOrder )
+{
+    const auto commands = Named( { "Save Scene", "Undo", "Redo" } );
+    EXPECT_EQ( LabelsOf( RankPaletteCommands( commands, "" ) ),
+               ( std::vector<std::string>{ "Save Scene", "Undo", "Redo" } ) );
+}
+
+TEST( PaletteCommands, AQueryNothingMatchesOffersNothing )
+{
+    EXPECT_TRUE( RankPaletteCommands( Named( { "Save Scene", "Undo" } ), "zzzz" ).empty() );
+}
+
+// THE ORDER IS BEST-FIRST, asserted as a property of the whole result rather than by naming a winner:
+// the scores are FuzzyMatch's business and pinning one would make this suite red for an honest change
+// to it.
+TEST( PaletteCommands, TheOfferedListIsBestFirst )
+{
+    const auto commands = Named( { "Save Scene", "Open Scene Arena", "Undo", "Save this document" } );
+    const auto hits     = RankPaletteCommands( commands, "save" );
+
+    ASSERT_FALSE( hits.empty() );
+    for ( const PaletteHit& hit : hits )
+        ASSERT_NE( hit.Command, nullptr );
+    for ( std::size_t i = 1; i < hits.size(); ++i )
+        EXPECT_GE( hits[i - 1].Score, hits[i].Score ) << "the list is not best-first at " << i;
+}
+
+// STABLE, AND THAT IS LOAD-BEARING RATHER THAN TIDY. The first row is what Enter runs, so an unstable
+// sort would let two openings that found the same entries with the same scores run DIFFERENT commands
+// for the same keystrokes.
+TEST( PaletteCommands, EntriesOfEqualScoreKeepTheDictionaryOrder )
+{
+    // Identical labels: whatever FuzzyMatch scores them, they score the same, so only stability decides.
+    std::vector<PaletteCommand> commands;
+    for ( const char* group : { "First", "Second", "Third" } )
+        commands.push_back( { group, "Toggle the grid", [] { return PaletteCommandDone(); } } );
+
+    const auto hits = RankPaletteCommands( commands, "grid" );
+    ASSERT_EQ( hits.size(), 3u );
+    EXPECT_EQ( hits[0].Command->Group, "First" );
+    EXPECT_EQ( hits[1].Command->Group, "Second" );
+    EXPECT_EQ( hits[2].Command->Group, "Third" );
+}
+
+// The hit points INTO the dictionary it was given, which is what lets Draw run the entry without a copy
+// - and is why the caller must not let that vector die first. Stated as a property rather than left for
+// a reader to infer.
+TEST( PaletteCommands, AHitPointsAtTheEntryItCameFrom )
+{
+    const auto commands = Named( { "Undo", "Redo" } );
+    const auto hits     = RankPaletteCommands( commands, "Redo" );
+
+    ASSERT_FALSE( hits.empty() );
+    EXPECT_EQ( hits[0].Command, &commands[1] );
+}
+
+// -- the selection arithmetic ----------------------------------------------------------------------
+
+TEST( PaletteCommands, AnEmptyListSelectsNothingRatherThanRowZero )
+{
+    EXPECT_EQ( ClampPaletteSelection( 0, 0 ), 0 );
+    EXPECT_EQ( ClampPaletteSelection( 7, 0 ), 0 );
+    EXPECT_EQ( ClampPaletteSelection( -3, 0 ), 0 );
+    EXPECT_EQ( WrapPaletteSelection( 4, 0 ), 0 );
+}
+
+// THE CLAMP KEEPS A SELECTION INSIDE A LIST THAT SHRANK UNDER IT - the ordinary case, since the list is
+// re-ranked on every keystroke and one more letter usually makes it shorter.
+TEST( PaletteCommands, ASelectionSurvivesTheListShrinkingUnderIt )
+{
+    EXPECT_EQ( ClampPaletteSelection( 9, 3 ), 2 );
+    EXPECT_EQ( ClampPaletteSelection( 2, 3 ), 2 );
+    EXPECT_EQ( ClampPaletteSelection( 0, 3 ), 0 );
+    EXPECT_EQ( ClampPaletteSelection( -1, 3 ), 0 );
+}
+
+// UP FROM THE FIRST ROW REACHES THE LAST, AND DOWN FROM THE LAST REACHES THE FIRST. The wrap is fed a
+// clamped selection moved by one, so its whole domain is [-1, hitCount] - asserted over all of it.
+TEST( PaletteCommands, TheSelectionWrapsAtBothEndsOverItsWholeDomain )
+{
+    constexpr std::size_t kCount = 4;
+
+    EXPECT_EQ( WrapPaletteSelection( -1, kCount ), 3 ) << "Up from the first row must reach the last";
+    EXPECT_EQ( WrapPaletteSelection( static_cast<int>( kCount ), kCount ), 0 )
+         << "Down from the last row must reach the first";
+
+    for ( int selected = -1; selected <= static_cast<int>( kCount ); ++selected )
+    {
+        const int wrapped = WrapPaletteSelection( selected, kCount );
+        EXPECT_GE( wrapped, 0 ) << "selected " << selected;
+        EXPECT_LT( wrapped, static_cast<int>( kCount ) ) << "selected " << selected;
+    }
+}
+
+// -- the flag protocol A6-1 introduced, which had no test and one photograph ------------------------
+//
+// The dictionary is rebuilt on the frame the palette OPENS and not on every frame it is open - it walks
+// the scene's entities, the levels on disk and every openable file under the content root, and doing
+// that sixty times a second while somebody types was two recursive directory walks per frame.
+
+TEST( PaletteCommands, TheDictionaryIsAskedForExactlyOncePerOpening )
+{
+    CommandPalette palette;
+    EXPECT_FALSE( palette.TakeJustOpened() ) << "a palette nobody opened must not ask for a dictionary";
+
+    palette.Open();
+    EXPECT_TRUE( palette.IsOpen() );
+    EXPECT_TRUE( palette.TakeJustOpened() ) << "the frame it opens on must ask";
+
+    for ( int frame = 0; frame < 60; ++frame )
+        EXPECT_FALSE( palette.TakeJustOpened() ) << "rebuilt again on frame " << frame;
+
+    palette.Open();
+    EXPECT_TRUE( palette.TakeJustOpened() ) << "the NEXT opening must ask again, or it would show the "
+                                               "previous session's list";
 }
 
 int main( int argc, char** argv )

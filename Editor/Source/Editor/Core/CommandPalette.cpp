@@ -11,15 +11,6 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
-    void CommandPalette::Open()
-    {
-        m_Open          = true;
-        m_JustOpened    = true;
-        m_NeedsCommands = true;
-        m_Selected      = 0;
-        m_Query[0]      = '\0';
-    }
-
     Common::BoolResultStr CommandPalette::Draw()
     {
         if ( !m_Open )
@@ -45,35 +36,19 @@ namespace Desert::Editor
         // nobody chose anything is a success with nothing to say, which is what the caller wants.
         Common::BoolResultStr chosen = PaletteCommandDone();
 
-        // Rank the commands against the current query.
-        struct Scored
-        {
-            const PaletteCommand* Cmd;
-            int                   Score;
-        };
-        std::vector<Scored> hits;
-        hits.reserve( m_Commands.size() );
-        for ( const auto& c : m_Commands )
-        {
-            int score = 0;
-            if ( FuzzyMatch( m_Query, c.Label, score ) )
-                hits.push_back( { &c, score } );
-        }
-        std::stable_sort( hits.begin(), hits.end(),
-                          []( const Scored& a, const Scored& b ) { return a.Score > b.Score; } );
+        // THE RANKING AND THE SELECTION ARITHMETIC ARE NOT HERE ANY MORE (A6-2 point 3). They were
+        // decisions buried in a drawing routine no suite compiles; they are free functions in the header
+        // now, and this reads as what it is — a frame applying them.
+        const std::vector<PaletteHit> hits = RankPaletteCommands( m_Commands, m_Query );
 
-        if ( hits.empty() )
-            m_Selected = 0;
-        else
-            m_Selected = std::clamp( m_Selected, 0, static_cast<int>( hits.size() ) - 1 );
+        m_Selected = ClampPaletteSelection( m_Selected, hits.size() );
 
         // Keyboard navigation (read before the InputText eats the frame's key state).
         if ( ImGui::IsKeyPressed( ImGuiKey_DownArrow, true ) )
             ++m_Selected;
         if ( ImGui::IsKeyPressed( ImGuiKey_UpArrow, true ) )
             --m_Selected;
-        if ( !hits.empty() )
-            m_Selected = ( m_Selected + static_cast<int>( hits.size() ) ) % static_cast<int>( hits.size() );
+        m_Selected = WrapPaletteSelection( m_Selected, hits.size() );
 
         if ( m_JustOpened )
         {
@@ -92,7 +67,7 @@ namespace Desert::Editor
         ImGui::BeginChild( "##paletteResults", ImVec2( 0.0f, 320.0f ) );
         for ( int i = 0; i < static_cast<int>( hits.size() ); ++i )
         {
-            const PaletteCommand& c        = *hits[i].Cmd;
+            const PaletteCommand& c        = *hits[i].Command;
             const bool            selected = ( i == m_Selected );
             if ( ImGui::Selectable( ( c.Label + "##" + std::to_string( i ) ).c_str(), selected ) )
             {
@@ -112,7 +87,7 @@ namespace Desert::Editor
 
         if ( enter && !hits.empty() )
         {
-            chosen = hits[m_Selected].Cmd->Run();
+            chosen = hits[m_Selected].Command->Run();
             ImGui::CloseCurrentPopup();
             m_Open = false;
         }

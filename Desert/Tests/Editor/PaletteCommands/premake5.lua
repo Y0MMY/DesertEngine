@@ -23,8 +23,8 @@ project(test_name)
 
     files {
         test_files,
-        -- Ranking the near misses in a refusal. std-only, compiled straight in — the same way the
-        -- FuzzyMatch suite next door takes it.
+        -- What the palette's ranking calls, and what ResolveCommand's near misses call. std-only,
+        -- compiled straight in — the same way the FuzzyMatch suite next door takes it.
         "%{wks.location}/Editor/Source/Editor/Core/FuzzyMatch.cpp",
     }
 
