@@ -900,18 +900,88 @@ namespace Desert::Core::Preprocess
         //   PushConstant ...    -> layout(push_constant) uniform ...          (block name + instance kept)
         //
         // AUTO NUMBERS (drop the parentheses): `In T x;` / `Out T x;` / `Uniform Name {}` / `Buffer Name {}`
-        // / `ReadBuffer`/`WriteBuffer` with NO (n) auto-allocate the lowest free slot, in declaration order,
-        // per STAGE. Three independent spaces: `in` locations, `out` locations, and descriptor bindings; auto
-        // slots skip any EXPLICIT numbers already used in the stage so the two can be mixed. Caveat (per-stage,
-        // by design): a resource SHARED across stages (e.g. the camera UB from an include) or one a C++ site
-        // binds by a fixed number must keep its EXPLICIT (n) so every stage / the host agree — auto can't
-        // coordinate across stages.
+        // / `ReadBuffer`/`WriteBuffer` with NO (n) auto-allocate the lowest free slot, in declaration order.
+        // Three independent spaces: `in` locations, `out` locations, and descriptor bindings; auto slots skip
+        // any EXPLICIT number already present so the two can be mixed.
+        //
+        // THE SCOPE IS ONE CALL OF THIS FUNCTION, WHICH IS NARROWER THAN A STAGE — this paragraph said "per
+        // STAGE" until 2026-09-08 and the code has never done that. AssembleStage translates the DSL `Include`
+        // block and the stage body in TWO separate calls, and ShaderIncluder hands every `#include`d `.glslh`
+        // its own call as well. So each of those texts starts counting from zero, and two auto declarations in
+        // two of them collide. Nothing in the tree does it today (no shipped shader uses an `Include` block and
+        // no `.glslh` declares an auto form), which is why it has never been seen — but the guarantee the old
+        // wording offered was not one this function can make. Anything SHARED — a resource an include declares,
+        // one a second stage also names, or one a C++ site binds by a fixed number — must keep its EXPLICIT (n).
         //
         // Storage-image format qualifiers (`layout(binding=n, rgba32f) uniform imageCube`) and tessellation
         // layout (`layout(vertices=n) out`, `layout(quads,...) in`) are inherently GLSL-structural and stay
         // as raw `layout(...)` — the only sanctioned escape (DShaderTool allows exactly these forms).
+        //
+        // COMMENTS ARE PROSE AND ARE NEVER TRANSLATED. Five of the keywords — In, Out, Uniform, Buffer,
+        // PushConstant — are ordinary English words, and the sugar used to search the whole file text.
+        // `// Integrate alive particles. In LOCAL mode ...` in ParticleSimulate.shader really was rewritten
+        // to `... layout(location = 0) in LOCAL mode ...` and really did consume location 0; it was harmless
+        // only because a compute stage declares no automatic In/Out, so nobody ever asked for the eaten
+        // number. Whoever added the first `In`/`Out` to a stage whose prose contains one of the five would
+        // have found the attributes shifted by one and would have gone looking in the code, not in the
+        // paragraph above it.
+
+        // Splits `src` into alternating CODE and COMMENT runs, concatenating back to `src` exactly.
+        // Comments are what GLSL says they are — `//` to end of line, `/* */` non-nesting — and nothing
+        // else. This is a two-state scanner rather than a lexer on purpose: the only thing the sugar has
+        // to not-see is a comment, so identifying comments is the whole job, and a full shader lexer would
+        // buy nothing but the string literals GLSL does not have.
+        struct SourceRun
+        {
+            std::string Text;
+            bool        IsCode;
+        };
+
+        std::vector<SourceRun> SplitCodeAndComments( const std::string& src )
+        {
+            std::vector<SourceRun> runs;
+            size_t                 codeBegin = 0;
+
+            const auto flushCode = [&]( size_t end )
+            {
+                if ( end > codeBegin )
+                    runs.push_back( { src.substr( codeBegin, end - codeBegin ), true } );
+            };
+
+            for ( size_t i = 0; i < src.size(); )
+            {
+                if ( src[i] == '/' && i + 1 < src.size() && src[i + 1] == '/' )
+                {
+                    flushCode( i );
+                    const size_t end  = src.find( '\n', i );
+                    const size_t stop = ( end == std::string::npos ) ? src.size() : end; // the '\n' is code
+                    runs.push_back( { src.substr( i, stop - i ), false } );
+                    i = codeBegin = stop;
+                }
+                else if ( src[i] == '/' && i + 1 < src.size() && src[i + 1] == '*' )
+                {
+                    flushCode( i );
+                    const size_t close = src.find( "*/", i + 2 );
+                    // An unterminated block comment swallows the rest of the file — the same thing GLSL's
+                    // own preprocessor does with it, so the sugar and the compiler agree about where code
+                    // stopped instead of disagreeing silently.
+                    const size_t stop = ( close == std::string::npos ) ? src.size() : close + 2;
+                    runs.push_back( { src.substr( i, stop - i ), false } );
+                    i = codeBegin = stop;
+                }
+                else
+                {
+                    ++i;
+                }
+            }
+            flushCode( src.size() );
+            return runs;
+        }
+
         std::string TranslateLayoutSugar( const std::string& src )
         {
+            std::vector<SourceRun> runs = SplitCodeAndComments( src );
+
             // (1) EXPLICIT forms first — a numbered declaration always wins and is left untouched by the
             // auto pass below (the capitalized keyword is consumed here).
             static const std::pair<std::regex, std::string> kRules[] = {
@@ -929,15 +999,25 @@ namespace Desert::Core::Preprocess
                    "layout(local_size_x = $1, local_size_y = $2, local_size_z = $3) in" },
                  { std::regex( R"(\bPushConstant\b)" ), "layout(push_constant) uniform" },
             };
-            std::string out = src;
-            for ( const auto& [re, rep] : kRules )
-                out = std::regex_replace( out, re, rep );
+            for ( auto& run : runs )
+            {
+                if ( !run.IsCode )
+                    continue;
+                for ( const auto& [re, rep] : kRules )
+                    run.Text = std::regex_replace( run.Text, re, rep );
+            }
 
             // (2) Seed each auto-allocator with the EXPLICIT numbers already present so auto never collides.
+            // Over the CODE runs only: a number quoted in a comment is documentation, not an occupancy.
             const auto collect = [&]( const std::regex& re, std::set<int>& used )
             {
-                for ( std::sregex_iterator it( out.begin(), out.end(), re ), end; it != end; ++it )
-                    used.insert( std::stoi( ( *it )[1].str() ) );
+                for ( const auto& run : runs )
+                {
+                    if ( !run.IsCode )
+                        continue;
+                    for ( std::sregex_iterator it( run.Text.begin(), run.Text.end(), re ), end; it != end; ++it )
+                        used.insert( std::stoi( ( *it )[1].str() ) );
+                }
             };
             std::set<int> usedIn, usedOut, usedBind;
             collect( std::regex( R"(location\s*=\s*(\d+)\s*\)\s*in\b)" ), usedIn );
@@ -956,32 +1036,51 @@ namespace Desert::Core::Preprocess
             // (3) Replace paren-less forms left-to-right (declaration order). Replacing the FIRST occurrence
             // each pass consumes the capitalized keyword, so the next search advances to the next one; the
             // lowercase `in`/`out`/`uniform`/`buffer` in the replacement is never re-matched.
-            const auto replaceFirst =
-                 [&]( const std::regex& re, const std::function<std::string( const std::smatch& )>& make )
+            //
+            // Each allocator is drained run by run in text order, which is the same order it saw when the
+            // three passes swept one flat string: the runs are ordered, and a counter only cares about the
+            // order of ITS OWN keyword.
+            const auto replaceFirst = []( std::string& text, const std::regex& re,
+                                          const std::function<std::string( const std::smatch& )>& make )
             {
                 std::smatch m;
-                while ( std::regex_search( out, m, re ) )
-                    out = m.prefix().str() + make( m ) + m.suffix().str();
+                while ( std::regex_search( text, m, re ) )
+                    text = m.prefix().str() + make( m ) + m.suffix().str();
             };
 
-            replaceFirst( std::regex( R"(\bIn\b(?!\s*\())" ), [&]( const std::smatch& )
-                          { return "layout(location = " + std::to_string( alloc( usedIn ) ) + ") in"; } );
-            replaceFirst( std::regex( R"(\bOut\b(?!\s*\())" ), [&]( const std::smatch& )
-                          { return "layout(location = " + std::to_string( alloc( usedOut ) ) + ") out"; } );
-            // One combined pass over the four binding keywords so they share ONE binding space in text order.
-            replaceFirst( std::regex( R"(\b(Uniform|ReadBuffer|WriteBuffer|Buffer)\b(?!\s*\())" ),
-                          [&]( const std::smatch& m )
-                          {
-                              const int         n  = alloc( usedBind );
-                              const std::string kw = m[1].str();
-                              if ( kw == "Uniform" )
-                                  return "layout(binding = " + std::to_string( n ) + ") uniform";
-                              if ( kw == "ReadBuffer" )
-                                  return "layout(std430, binding = " + std::to_string( n ) + ") readonly buffer";
-                              if ( kw == "WriteBuffer" )
-                                  return "layout(std430, binding = " + std::to_string( n ) + ") writeonly buffer";
-                              return "layout(std430, binding = " + std::to_string( n ) + ") buffer";
-                          } );
+            static const std::regex kAutoIn( R"(\bIn\b(?!\s*\())" );
+            static const std::regex kAutoOut( R"(\bOut\b(?!\s*\())" );
+            // One combined pattern over the four binding keywords so they share ONE binding space in text order.
+            static const std::regex kAutoBinding( R"(\b(Uniform|ReadBuffer|WriteBuffer|Buffer)\b(?!\s*\())" );
+
+            std::string out;
+            for ( auto& run : runs )
+            {
+                if ( run.IsCode )
+                {
+                    replaceFirst( run.Text, kAutoIn, [&]( const std::smatch& )
+                                  { return "layout(location = " + std::to_string( alloc( usedIn ) ) + ") in"; } );
+                    replaceFirst( run.Text, kAutoOut,
+                                  [&]( const std::smatch& ) {
+                                      return "layout(location = " + std::to_string( alloc( usedOut ) ) + ") out";
+                                  } );
+                    replaceFirst(
+                         run.Text, kAutoBinding,
+                         [&]( const std::smatch& m )
+                         {
+                             const int         n  = alloc( usedBind );
+                             const std::string kw = m[1].str();
+                             if ( kw == "Uniform" )
+                                 return "layout(binding = " + std::to_string( n ) + ") uniform";
+                             if ( kw == "ReadBuffer" )
+                                 return "layout(std430, binding = " + std::to_string( n ) + ") readonly buffer";
+                             if ( kw == "WriteBuffer" )
+                                 return "layout(std430, binding = " + std::to_string( n ) + ") writeonly buffer";
+                             return "layout(std430, binding = " + std::to_string( n ) + ") buffer";
+                         } );
+                }
+                out += run.Text;
+            }
             return out;
         }
 
