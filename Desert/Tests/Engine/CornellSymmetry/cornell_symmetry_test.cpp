@@ -1,0 +1,426 @@
+// Г16 — THE RELATION A CORNELL BOX EXISTS TO STATE, AND THE ONE NOBODY WAS ASKING:
+//
+//     Two surfaces standing symmetrically about a point light receive the same light from it.
+//
+// The defect this suite is born from is not a wrong line in any shader. `CornellDemo.desce` places
+// CB_LeftRed at x = -300 and CB_RightGreen at x = +300, same scale, same primitive, with its only point
+// light CB_BackLight at x = 0 — so both inner faces stand 386.1 cm from the source, both see it at
+// N·L = 0.751, both take the same 0.460 distance attenuation, and both are viewed from a camera on the
+// symmetry plane at N·V = 0.203. Every geometric input is equal to four decimals. The frame was not:
+// the green wall came back lit and the red wall came back black.
+//
+// The cause was in neither the geometry nor the shader but in the MATERIAL ASSET. Editor/Resources/
+// Assets/Materials/CB_Red.demat carried `RoughnessFactor 0.0` and `MetallicFactor 1.0` — a chrome
+// mirror — where its five CB_* siblings and the builder that authors them (EditorLayer::
+// BuildCornellShowcase -> CreatePBRMaterialAsset(..., red, 0.9f)) all say roughness 0.9 and no
+// metalness at all. A conductor has no diffuse lobe (`kd = (1 - F) * (1 - metalness)` in
+// Mesh/DirectLighting.glslh is identically zero at metalness 1) and a mirror's specular lobe only fires
+// where the eye lies in the reflected direction of the source, which for a delta light is nowhere. The
+// measured consequence, through the shipped text this suite compiles:
+//
+//     point-light response, luminance   left wall 0.000041   right wall 0.407380   ratio 1 : 9900
+//
+// Both sides of that were individually defensible — the shader is right about conductors, the asset is
+// a legal material — which is the exact shape this project has now paid for repeatedly. So the
+// assertion is the AGREEMENT, and it is stated on the shipped shader maths rather than on a CPU model
+// that could be right while the GPU is wrong.
+//
+// WHAT IS DELIBERATELY NOT ASSERTED. The scene's OTHER light, CB_Sun, is a directional light whose
+// travel direction is normalize(0.6, -1, 0.2) — it is NOT on the symmetry plane, and it lights the
+// right wall's inner face at N·L = 0.507 while missing the left wall's entirely. That asymmetry is
+// honest physics and the fixture is entitled to it; the suite records the number (below) so that a
+// future reader does not re-derive it, and asserts only that the POINT light is the symmetric one, which
+// is what makes the claim above well-formed.
+
+#include <gtest/gtest.h>
+
+#include "CornellSymmetryReference.hpp"
+
+#include <rflcpp/rfl/json.hpp>
+
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+using namespace Desert::Tests::CornellSymmetryRef;
+
+namespace
+{
+    // The primitive Cube is 100 units on a side (PrimitiveMeshFactory.cpp: "one world unit is a
+    // centimetre, so a Cube is 100 units on a side"), so a component scale of s spans 100*s and reaches
+    // 50*s from its centre. The walls are thin slabs; their INNER face is the one the box is lit
+    // through, and it is the surface every number below is taken on.
+    constexpr float kCubeHalfExtent = 50.0f;
+
+    // The acceptance camera the defect was found from: --camera 0,300,1400 --look 0,-0.1,-1. It matters
+    // to the specular half of the BRDF, and it sits ON the symmetry plane, which the first test asserts
+    // rather than assumes.
+    const glm::vec3 kCameraPosition{ 0.0f, 300.0f, 1400.0f };
+
+    // Fdielectric, as every call site in the engine builds it: mix(vec3(0.04), albedo, metalness).
+    const glm::vec3 kDielectricF0{ 0.04f };
+
+    std::string RepoRoot()
+    {
+        std::string prefix = "./";
+        for ( int up = 0; up < 6; ++up )
+        {
+            std::ifstream probe( prefix + "Desert/Desert/Source/Engine/Core/SceneSettings.hpp" );
+            if ( probe )
+                return prefix;
+            prefix += "../";
+        }
+        return {};
+    }
+
+    std::string ReadAll( const std::string& path )
+    {
+        std::ifstream     file( path );
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        return buffer.str();
+    }
+
+    rfl::Generic::Object ParseObject( const std::string& json, const std::string& what )
+    {
+        const auto parsed = rfl::json::read<rfl::Generic>( json );
+        EXPECT_TRUE( parsed.has_value() ) << what;
+        if ( !parsed.has_value() )
+            return {};
+        const auto object = parsed.value().to_object();
+        EXPECT_TRUE( object.has_value() ) << what;
+        return object.has_value() ? object.value() : rfl::Generic::Object{};
+    }
+
+    float Scalar( const rfl::Generic& value )
+    {
+        if ( const auto d = value.to_double(); d.has_value() )
+            return static_cast<float>( d.value() );
+        if ( const auto i = value.to_int64(); i.has_value() )
+            return static_cast<float>( i.value() );
+        return std::numeric_limits<float>::quiet_NaN();
+    }
+
+    glm::vec3 Vec3( const rfl::Generic::Object& owner, const std::string& key )
+    {
+        const auto field = owner.get( key );
+        EXPECT_TRUE( field.has_value() ) << key;
+        if ( !field.has_value() )
+            return {};
+        const auto array = field.value().to_array();
+        EXPECT_TRUE( array.has_value() ) << key;
+        if ( !array.has_value() || array.value().size() < 3 )
+            return {};
+        return { Scalar( array.value()[0] ), Scalar( array.value()[1] ), Scalar( array.value()[2] ) };
+    }
+
+    // One entity of CornellDemo, reduced to what a lighting question needs.
+    struct Entity
+    {
+        rfl::Generic::Object Record;
+        glm::vec3            Translation{ 0.0f };
+        glm::vec3            Scale{ 1.0f };
+    };
+
+    Entity EntityByTag( const rfl::Generic::Object& scene, const std::string& tag )
+    {
+        const auto entities = scene.get( "Entities" ).value().to_array();
+        EXPECT_TRUE( entities.has_value() );
+        if ( !entities.has_value() )
+            return {};
+
+        for ( const auto& node : entities.value() )
+        {
+            const auto record = node.to_object();
+            if ( !record.has_value() )
+                continue;
+            const auto name = record.value().get( "Tag" );
+            if ( !name.has_value() || !name.value().to_string().has_value() )
+                continue;
+            if ( name.value().to_string().value() != tag )
+                continue;
+
+            Entity found;
+            found.Record      = record.value();
+            found.Translation = Vec3( record.value(), "Translation" );
+            found.Scale       = Vec3( record.value(), "Scale" );
+            return found;
+        }
+        EXPECT_TRUE( false ) << "CornellDemo has no entity tagged " << tag;
+        return {};
+    }
+
+    // A .demat as the shading path sees it: the three PBR schema params, defaulted exactly as
+    // Programs/PBR/StaticMeshPBR.shader declares them (Albedo (1,1,1,1), Metallic 0, Roughness 0.5) so a
+    // file that omits a param is read the way the GPU reads it and not the way a test would like to.
+    struct Material
+    {
+        glm::vec3 Albedo{ 1.0f };
+        float     Metallic  = 0.0f;
+        float     Roughness = 0.5f;
+    };
+
+    Material LoadMaterial( const std::string& root, const std::string& relativePath )
+    {
+        const std::string path = root + "Editor/Resources/Assets/" + relativePath;
+        const auto        file = ParseObject( ReadAll( path ), path );
+
+        Material   material;
+        const auto params = file.get( "Params" );
+        EXPECT_TRUE( params.has_value() ) << path;
+        if ( !params.has_value() )
+            return material;
+        const auto list = params.value().to_array();
+        EXPECT_TRUE( list.has_value() ) << path;
+        if ( !list.has_value() )
+            return material;
+
+        for ( const auto& node : list.value() )
+        {
+            const auto entry = node.to_object();
+            if ( !entry.has_value() )
+                continue;
+            const auto name = entry.value().get( "Name" );
+            if ( !name.has_value() || !name.value().to_string().has_value() )
+                continue;
+            const auto value = entry.value().get( "Value" );
+            if ( !value.has_value() || !value.value().to_array().has_value() )
+                continue;
+            const auto components = value.value().to_array().value();
+            if ( components.empty() )
+                continue;
+
+            const std::string key = name.value().to_string().value();
+            if ( key == "AlbedoColor" && components.size() >= 3 )
+                material.Albedo = { Scalar( components[0] ), Scalar( components[1] ),
+                                    Scalar( components[2] ) };
+            else if ( key == "MetallicFactor" )
+                material.Metallic = Scalar( components[0] );
+            else if ( key == "RoughnessFactor" )
+                material.Roughness = Scalar( components[0] );
+        }
+        return material;
+    }
+
+    std::string MaterialPathOf( const Entity& entity )
+    {
+        const auto mesh = entity.Record.get( "StaticMesh" );
+        EXPECT_TRUE( mesh.has_value() );
+        if ( !mesh.has_value() )
+            return {};
+        const auto paths = mesh.value().to_object().value().get( "MaterialPaths" ).value().to_array();
+        EXPECT_TRUE( paths.has_value() );
+        if ( !paths.has_value() || paths.value().empty() )
+            return {};
+        return paths.value()[0].to_string().value();
+    }
+
+    // The point light as the shader receives it, straight out of the scene file.
+    struct PointLightPayload
+    {
+        glm::vec3 Position{ 0.0f };
+        glm::vec3 Color{ 1.0f };
+        float     Intensity = 0.0f;
+        float     Radius    = 0.0f;
+        float     MinRadius = 0.0f;
+        int       Falloff   = 1;
+    };
+
+    PointLightPayload LoadPointLight( const rfl::Generic::Object& scene, const std::string& tag )
+    {
+        const Entity entity = EntityByTag( scene, tag );
+        const auto   block  = entity.Record.get( "PointLight" );
+        EXPECT_TRUE( block.has_value() ) << tag;
+        if ( !block.has_value() )
+            return {};
+        const auto data = block.value().to_object().value();
+
+        PointLightPayload light;
+        light.Position  = entity.Translation;
+        light.Color     = Vec3( data, "Color" );
+        light.Intensity = Scalar( data.get( "Intensity" ).value() );
+        light.Radius    = Scalar( data.get( "Radius" ).value() );
+        light.MinRadius = Scalar( data.get( "MinRadius" ).value() );
+        light.Falloff   = static_cast<int>( Scalar( data.get( "Falloff" ).value() ) );
+        return light;
+    }
+
+    // What the deferred composite computes for one point light on one surface, through the SHIPPED
+    // text: Mesh/PointLight.glslh's `CalculatePointLight` is `LightFalloffFactor` (PBRFunctions.glslh)
+    // followed by `EvaluateDirectLight` (DirectLighting.glslh), and both of those are compiled as C++
+    // by the reference header. The three lines below are the wrapper, which declares an SSBO and
+    // therefore cannot be.
+    glm::vec3 PointLightResponse( const PointLightPayload& light, const glm::vec3& surface,
+                                  const glm::vec3& normal, const Material& material )
+    {
+        const glm::vec3 toLight  = light.Position - surface;
+        const float     distance = glm::length( toLight );
+        const glm::vec3 L        = glm::normalize( toLight );
+
+        const float attenuation =
+             LightFalloffFactor( distance, light.MinRadius, light.Radius, light.Falloff );
+        const glm::vec3 radiance = light.Color * light.Intensity * attenuation;
+
+        const glm::vec3 view = glm::normalize( kCameraPosition - surface );
+        const glm::vec3 F0   = glm::mix( kDielectricF0, material.Albedo, material.Metallic );
+
+        // The deferred composite clamps roughness off zero before shading (`max(gb.a, 0.04)` in
+        // DeferredLighting.shader), and the BRDF's contract says the caller must. Clamping here is what
+        // makes this the same evaluation the GPU performs, not a kinder one.
+        return EvaluateDirectLight( L, radiance, view, normal, F0, material.Metallic,
+                                    glm::max( material.Roughness, 0.04f ), material.Albedo );
+    }
+
+    float Luminance( const glm::vec3& c )
+    {
+        return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
+    }
+
+    struct Fixture
+    {
+        rfl::Generic::Object Scene;
+        Entity               Left;
+        Entity               Right;
+        PointLightPayload    Light;
+        Material             LeftMaterial;
+        Material             RightMaterial;
+        glm::vec3            LeftFace{ 0.0f };  // a point on the inner face, at wall centre height
+        glm::vec3            RightFace{ 0.0f };
+        glm::vec3            LeftNormal{ 0.0f };
+        glm::vec3            RightNormal{ 0.0f };
+    };
+
+    Fixture LoadFixture()
+    {
+        const std::string root = RepoRoot();
+        EXPECT_FALSE( root.empty() ) << "repository root not found from the test's working directory";
+
+        const std::string scenePath = root + "Editor/Resources/Assets/Scenes/CornellDemo.desce";
+
+        Fixture fixture;
+        fixture.Scene = ParseObject( ReadAll( scenePath ), scenePath );
+        fixture.Left  = EntityByTag( fixture.Scene, "CB_LeftRed" );
+        fixture.Right = EntityByTag( fixture.Scene, "CB_RightGreen" );
+        fixture.Light = LoadPointLight( fixture.Scene, "CB_BackLight" );
+
+        fixture.LeftMaterial  = LoadMaterial( root, MaterialPathOf( fixture.Left ) );
+        fixture.RightMaterial = LoadMaterial( root, MaterialPathOf( fixture.Right ) );
+
+        // Inner faces: the left wall sits at negative x and faces +X, the right wall mirrors it. Sampled
+        // at the wall's own centre in y and z so the two samples are mirror images of one another and
+        // nothing but x differs.
+        const float leftInnerX  = fixture.Left.Translation.x + kCubeHalfExtent * fixture.Left.Scale.x;
+        const float rightInnerX = fixture.Right.Translation.x - kCubeHalfExtent * fixture.Right.Scale.x;
+
+        fixture.LeftFace  = { leftInnerX, fixture.Left.Translation.y, fixture.Left.Translation.z };
+        fixture.RightFace = { rightInnerX, fixture.Right.Translation.y, fixture.Right.Translation.z };
+
+        fixture.LeftNormal  = { 1.0f, 0.0f, 0.0f };
+        fixture.RightNormal = { -1.0f, 0.0f, 0.0f };
+        return fixture;
+    }
+} // namespace
+
+// The premise. Everything below is a statement about two surfaces symmetric ABOUT THE LIGHT, and it is
+// only well-formed while the fixture really is arranged that way — so the arrangement is asserted, not
+// assumed. If a future edit moves the light or a wall, this is the test that says so, and the two
+// equality tests below stop being claims about a defect and start being claims about a changed scene.
+TEST( CornellSymmetry, TheTwoSideWallsStandSymmetricallyAboutThePointLightAndTheCamera )
+{
+    const Fixture fixture = LoadFixture();
+
+    EXPECT_NEAR( fixture.Light.Position.x, 0.5f * ( fixture.Left.Translation.x + fixture.Right.Translation.x ),
+                 0.01f )
+         << "CB_BackLight is not on the mid-plane of the two side walls";
+    EXPECT_NEAR( kCameraPosition.x, fixture.Light.Position.x, 0.01f )
+         << "the acceptance camera is off the symmetry plane, so N.V differs between the walls";
+
+    EXPECT_NEAR( fixture.Left.Translation.y, fixture.Right.Translation.y, 0.01f );
+    EXPECT_NEAR( fixture.Left.Translation.z, fixture.Right.Translation.z, 0.01f );
+    EXPECT_NEAR( fixture.Left.Scale.x, fixture.Right.Scale.x, 1e-4f );
+    EXPECT_NEAR( fixture.Left.Scale.y, fixture.Right.Scale.y, 1e-4f );
+    EXPECT_NEAR( fixture.Left.Scale.z, fixture.Right.Scale.z, 1e-4f );
+}
+
+// The geometry the BRDF actually consumes, rather than the transforms it is derived from. Measured on
+// the shipped fixture: distance 386.1 cm, N.L 0.7510, attenuation 0.4600, N.V 0.2028 — on BOTH walls.
+// This is the test that makes "the left wall is dark" a statement about the material and nothing else.
+TEST( CornellSymmetry, BothInnerFacesSeeThePointLightIdentically )
+{
+    const Fixture fixture = LoadFixture();
+
+    const glm::vec3 toLeft  = fixture.Light.Position - fixture.LeftFace;
+    const glm::vec3 toRight = fixture.Light.Position - fixture.RightFace;
+
+    const float distanceLeft  = glm::length( toLeft );
+    const float distanceRight = glm::length( toRight );
+    EXPECT_NEAR( distanceLeft, distanceRight, 1e-3f );
+
+    EXPECT_NEAR( glm::dot( fixture.LeftNormal, glm::normalize( toLeft ) ),
+                 glm::dot( fixture.RightNormal, glm::normalize( toRight ) ), 1e-5f );
+
+    EXPECT_NEAR( LightFalloffFactor( distanceLeft, fixture.Light.MinRadius, fixture.Light.Radius,
+                                     fixture.Light.Falloff ),
+                 LightFalloffFactor( distanceRight, fixture.Light.MinRadius, fixture.Light.Radius,
+                                     fixture.Light.Falloff ),
+                 1e-6f );
+
+    EXPECT_NEAR( glm::dot( fixture.LeftNormal, glm::normalize( kCameraPosition - fixture.LeftFace ) ),
+                 glm::dot( fixture.RightNormal, glm::normalize( kCameraPosition - fixture.RightFace ) ),
+                 1e-5f );
+}
+
+// THE RELATION. Same light, same geometry, same albedo — the two walls must reflect the same radiance.
+// Albedo is held common on purpose: a Cornell box's walls differ in COLOUR by design and in nothing
+// else, so making them differ in colour only is what isolates the thing that is allowed to vary from
+// the things that are not. Evaluated through Mesh/DirectLighting.glslh itself.
+//
+// RED before the fix, on the shipped assets: left 0.000041 against right 0.407380, a factor of 9900,
+// because CB_Red.demat carried metalness 1 (kd = (1 - F)(1 - metalness) = 0, no diffuse lobe at all)
+// and roughness 0 (a mirror lobe that a delta light never lands in).
+TEST( CornellSymmetry, TheTwoWallsReflectThePointLightEquallyOnceColourIsHeldCommon )
+{
+    const Fixture fixture = LoadFixture();
+
+    // A neutral mid-grey: not a value either wall carries, so neither is favoured.
+    const glm::vec3 commonAlbedo{ 0.5f };
+
+    Material left     = fixture.LeftMaterial;
+    Material right    = fixture.RightMaterial;
+    left.Albedo       = commonAlbedo;
+    right.Albedo      = commonAlbedo;
+
+    const float lit = Luminance( PointLightResponse( fixture.Light, fixture.RightFace,
+                                                     fixture.RightNormal, right ) );
+    const float dark = Luminance( PointLightResponse( fixture.Light, fixture.LeftFace,
+                                                      fixture.LeftNormal, left ) );
+
+    ASSERT_GT( lit, 0.0f ) << "the point light lights neither wall — the fixture, not the walls, changed";
+    EXPECT_NEAR( dark, lit, 0.02f * lit )
+         << "CB_LeftRed and CB_RightGreen respond to the same light, at the same distance and the same "
+            "angle, by a factor of "
+         << ( dark > 0.0f ? lit / dark : std::numeric_limits<float>::infinity() )
+         << ". A Cornell box's side walls may differ in colour and in nothing else; check "
+            "MetallicFactor/RoughnessFactor in Editor/Resources/Assets/Materials/.";
+}
+
+// The same claim said as data, one level below the physics: whatever the two walls are made of, they are
+// made of the SAME thing. This is the assertion a reader reaches for when the one above goes red, and it
+// names the two fields that can break it.
+TEST( CornellSymmetry, TheTwoSideWallsDifferInColourAndInNothingElse )
+{
+    const Fixture fixture = LoadFixture();
+
+    EXPECT_NEAR( fixture.LeftMaterial.Metallic, fixture.RightMaterial.Metallic, 1e-5f )
+         << "one side wall of the Cornell box is a conductor and the other is not";
+    EXPECT_NEAR( fixture.LeftMaterial.Roughness, fixture.RightMaterial.Roughness, 1e-5f )
+         << "the two side walls of the Cornell box have different roughness";
+}
+
+int main( int argc, char** argv )
+{
+    ::testing::InitGoogleTest( &argc, argv );
+    return RUN_ALL_TESTS();
+}
