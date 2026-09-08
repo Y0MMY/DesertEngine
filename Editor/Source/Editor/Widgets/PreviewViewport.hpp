@@ -233,11 +233,33 @@ namespace Desert::Editor
         [[nodiscard]] SceneSetup&       Setup();
         [[nodiscard]] const SceneSetup& Setup() const;
 
-        // True once something has been set (and so there is anything to draw).
-        [[nodiscard]] bool HasContent() const
-        {
-            return m_HasContent;
-        }
+        /**
+         * @brief IS THERE ANYTHING TO SHOW — not "was anything assigned".
+         *
+         * The two are different for exactly one kind of content, and it is the kind that matters. SetMesh
+         * raises m_HasContent from a HANDLE, before anything has looked to see whether that handle names
+         * geometry; the material and primitive paths hand over something drawable in the same breath, so
+         * for them the flag alone is the whole answer.
+         *
+         * A mesh therefore has to be asked about, and the question is asked of the RUNTIME mesh — the object
+         * the renderer would draw — not of the asset behind it. Out of line because it needs the mesh
+         * service; on a hit that is one map lookup, the same one TryFrameMesh already makes every frame
+         * until it succeeds, and asking it every frame is what lets a mesh the service produces LATE turn
+         * this true the frame it lands instead of being written off at selection time.
+         *
+         * NOT m_Framed, WHICH LOOKS LIKE THE SAME QUESTION AND IS NOT. Framing succeeds off the ASSET's
+         * vertex array when it can, so a mesh whose CPU data loaded and whose runtime submeshes did not is
+         * "framed" — the camera knows exactly how big the nothing it is pointing at is. Measured on
+         * `Cooked/Meshes/base.stmesh` in this tree: framed at half-extent 0.6 x 0.9 x 0.2, drawn as an
+         * empty pane. Reaching for m_Framed here would have reproduced the very defect this fixes, one
+         * level down, which is why the flag is named in this comment rather than used.
+         *
+         * WHAT IT WAS COSTING. Every caller reads this to choose between the live preview and the cached
+         * thumbnail, and "something was assigned" always won: the Details 3D Model row would show an empty
+         * lit pane for a mesh with no geometry in preference to a perfectly good picture of it on disk. The
+         * fallback existed, was correct, and was unreachable for the one case it was written for.
+         */
+        [[nodiscard]] bool HasContent() const;
 
         // Is this preview's sky being rebuilt right now?
         //
