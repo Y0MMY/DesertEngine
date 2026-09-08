@@ -455,6 +455,9 @@ namespace Desert::Editor
                     BuildStarterScene();
                     if ( SaveSceneTo( scenePath ) )
                     {
+                        // It was built AND written, so it is now an open file like any other — a later
+                        // Ctrl+S has to go back to it rather than to a path derived from its name.
+                        m_OpenScenePath = Common::Filepath( scenePath );
                         LOG_INFO( "[Editor] Generated the Starter scene -> {}", scenePath );
                     }
                     else
@@ -5354,9 +5357,13 @@ namespace Desert::Editor
 
         // TextUnformatted, not Text: ImGui::Text takes a printf FORMAT, so this passed runtime-built
         // engine stats as the format string. Today GetFormattedStats() can only produce
-        // "FPS: 60 | Frame: 16.6ms" and contains no '%', so nothing has gone wrong — but the day any
+        // "FPS: 60 | Frame: 16.67ms" and contains no '%', so nothing has gone wrong — but the day any
         // percentage is added to that line (a GPU utilisation, a budget fraction — the obvious next
         // additions) ImGui's vsnprintf reads a vararg that was never passed.
+        //
+        // The example above said "16.6ms" while the function was printing SIX decimals — the argument
+        // was right and the sample output was a different program's. It is two decimals now because
+        // GetFormattedStats was fixed, not because the comment was made to agree with it.
         ImGui::TextUnformatted( text.c_str() );
     }
 
@@ -5740,13 +5747,32 @@ namespace Desert::Editor
         return true;
     }
 
+    Common::Filepath EditorLayer::SceneSaveDestination() const
+    {
+        // The rule itself is a pure function in Editor/Core/SceneSaveRules.hpp so that a test can drive
+        // the case that matters — a file whose name disagrees with the scene's — without an editor. This
+        // call site supplies the two project paths it cannot know.
+        return Common::Filepath( Editor::Core::Rules::SceneSaveDestination(
+             m_OpenScenePath.generic_string(), m_MainScene->GetSceneName(),
+             Common::Constants::Path::SCENE_PATH.generic_string(),
+             Common::Constants::Extensions::SCENE_EXTENSION ) );
+    }
+
     bool EditorLayer::SaveOpenScene()
     {
-        const auto verdict = Editor::Core::Rules::DecideAfterSceneSave(
-             m_MainScene->Serialize( m_AssetManager.get() ), m_MainScene->GetSceneName() );
+        const Common::Filepath destination = SceneSaveDestination();
+        const auto             verdict     = Editor::Core::Rules::DecideAfterSceneSave(
+             m_MainScene->Serialize( m_AssetManager.get(), destination ), m_MainScene->GetSceneName(),
+             destination.string() );
 
         if ( verdict.MarkSceneSaved )
+        {
             s_SavedRevision = CommandHistory::Get().Revision();
+            // The scene now IS this file, whether it already was or was just given one. Without this a
+            // new scene would re-derive its path on every save and a rename between two saves would
+            // leave the user's work split across two files.
+            m_OpenScenePath = destination;
+        }
 
         if ( verdict.IsError )
         {
@@ -5988,6 +6014,9 @@ namespace Desert::Editor
         Core::SelectionManager::ClearSelection();
         m_MainScene->Clear();
         m_MainScene->SetSceneName( "New Scene" );
+        // A new scene is not any file yet. Left pointing at the previous one, the first Ctrl+S would
+        // overwrite the scene the user had just moved away from with an empty world.
+        m_OpenScenePath.clear();
         if ( const auto inited = m_MainScene->Init(); !inited.IsSuccess() )
             LOG_ERROR( "[EditorLayer] new scene failed to initialise: {}", inited.GetError() );
 
@@ -6060,6 +6089,11 @@ namespace Desert::Editor
         // assignment would run it after the new registry already re-registered them.
         m_RenderRegistry.reset();
         m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
+
+        // THE OPEN SCENE IS NOW THIS FILE, and it is set HERE rather than at the top of the function on
+        // purpose: every early return above leaves a scene that was NOT replaced, and adopting a path for
+        // a load that refused would point the next Ctrl+S at a file the user never opened.
+        m_OpenScenePath = path;
 
         // Update recent scenes
         auto it = std::find( m_RecentScenes.begin(), m_RecentScenes.end(), path );

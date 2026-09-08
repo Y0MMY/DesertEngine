@@ -82,7 +82,7 @@ namespace
     // the same three effects, taken from the same verdict.
     bool ApplyVerdictAndOpenAnother( EditorState& state, const Common::BoolResultStr& save )
     {
-        const auto verdict = DecideAfterSceneSave( save, "Subject" );
+        const auto verdict = DecideAfterSceneSave( save, "Subject", "Scene/Subject.desce" );
         if ( verdict.MarkSceneSaved )
             state.SavedRevision = state.Revision;
         state.LastToast         = verdict.Message;
@@ -193,13 +193,53 @@ TEST( SceneSaveOutcome, NeitherPermissionIsEverGrantedByAFailure )
     for ( const char* reason : { "could not open the temporary file", "could not write 42 bytes",
                                  "could not rename over the original" } )
     {
-        const auto verdict = DecideAfterSceneSave( Common::MakeError( reason ), "Subject" );
+        const auto verdict = DecideAfterSceneSave( Common::MakeError( reason ), "Subject", "Scene/Subject.desce" );
         EXPECT_FALSE( verdict.MarkSceneSaved ) << reason;
         EXPECT_FALSE( verdict.MayDiscardScene ) << reason;
         EXPECT_TRUE( verdict.IsError ) << reason;
         EXPECT_NE( verdict.Message.find( reason ), std::string::npos )
              << "the reason the save chain gave did not reach the user: " << verdict.Message;
     }
+}
+
+// ── WHERE THE SAVE GOES ────────────────────────────────────────────────────────────────────────────
+//
+// Reproduced before it was fixed: U52_LockProbe.desce was open, Ctrl+S produced U52_Lock_Probe.desce,
+// and the original was byte-identical to what it had been. The destination was derived from the scene's
+// NAME, so the two disagreed the moment a name carried a space the file name did not — and every
+// symptom was invisible: the write succeeded, the toast was green, the star went out. It surfaced a
+// session later as "my level lost a day's work", with the day's work sitting one filename away.
+//
+// The two sides that must agree are the file a scene was OPENED from and the file a save WRITES. So
+// that is what is asserted, on the case where they can differ.
+TEST( SceneSaveOutcome, ASaveGoesToTheFileTheSceneWasOpenedFromEvenWhenTheNameDisagrees )
+{
+    using Desert::Editor::Core::Rules::SceneSaveDestination;
+
+    // The reproduction, exactly: the open file and the scene name differ by a separator.
+    EXPECT_EQ( SceneSaveDestination( "Scene/U52_LockProbe.desce", "U52 Lock Probe", "Scene", ".desce" ),
+               "Scene/U52_LockProbe.desce" )
+         << "the save went somewhere other than the file that is open — this is the defect itself";
+
+    // And it is not merely tolerant of a space: the name may be anything at all, including the name of
+    // ANOTHER scene, and it still does not decide where the bytes go.
+    EXPECT_EQ( SceneSaveDestination( "Scene/Level_01.desce", "Clouds_Protocol", "Scene", ".desce" ),
+               "Scene/Level_01.desce" );
+
+    // A subdirectory survives too. The old derivation always wrote into Scene/ flat, so saving a scene
+    // opened from Scene/Chapter2/ moved it up a level as well as renaming it.
+    EXPECT_EQ( SceneSaveDestination( "Scene/Chapter2/Boss.desce", "Boss Arena", "Scene", ".desce" ),
+               "Scene/Chapter2/Boss.desce" );
+}
+
+// The one case where a name may still name a file: there is no file. This is the whole of what remains
+// of the derivation, and it has to keep working — File -> New Scene, Ctrl+S is a path a user takes.
+TEST( SceneSaveOutcome, ASceneThatHasNeverBeenOnDiskIsNamedAfterItself )
+{
+    using Desert::Editor::Core::Rules::SceneSaveDestination;
+
+    EXPECT_EQ( SceneSaveDestination( "", "New Scene", "Scene", ".desce" ), "Scene/New_Scene.desce" );
+    EXPECT_EQ( SceneSaveDestination( "", "Boss Arena", "Scene/", ".desce" ), "Scene/Boss_Arena.desce" );
 }
 
 int main( int argc, char** argv )

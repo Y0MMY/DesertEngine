@@ -13,12 +13,10 @@
 #include <Engine/Core/SceneSettings.hpp>
 #include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 #include <Common/Utilities/FileSystem.hpp>
-#include <Common/Core/Constants.hpp>
 #include <Common/Core/Units.hpp>
 #include <rflcpp/rfl/json.hpp>
 #include <map>
 #include <memory>
-#include <regex>
 #include <unordered_set>
 
 namespace Desert::Core
@@ -352,31 +350,29 @@ namespace Desert::Core
         return BOOLSUCCESS;
     }
 
-    Common::Filepath SceneSerializer::TargetPath() const
+    Common::BoolResultStr SceneSerializer::SaveToFile( const Common::Filepath& path ) const
     {
-        auto sceneName = std::regex_replace( m_Scene->GetSceneName(), std::regex( "\\s+" ), "_" );
-        sceneName += Common::Constants::Extensions::SCENE_EXTENSION;
-        return Common::Constants::Path::SCENE_PATH / sceneName;
-    }
-
-    Common::BoolResultStr SceneSerializer::SaveToFile() const
-    {
-        const Common::Filepath pathToSave = TargetPath();
+        // A DESTINATION IS REQUIRED AND CANNOT BE INVENTED. The name-derived fallback that used to stand
+        // here is the whole of this defect: it made "the caller forgot to say where" indistinguishable
+        // from "the caller said here", and the second file it produced looked like a successful save.
+        if ( path.empty() )
+            return Common::MakeFormattedError( "no destination was given for '{}'; the scene was not "
+                                               "written anywhere",
+                                               m_Scene->GetSceneName() );
 
         // The directory is created here rather than assumed: an ofstream silently writes NOTHING when
         // the parent is missing, and a project whose Scene/ folder has never existed is the ordinary
         // case on the first save after "New Project".
         std::error_code ec;
-        std::filesystem::create_directories( pathToSave.parent_path(), ec );
+        std::filesystem::create_directories( path.parent_path(), ec );
         if ( ec )
             return Common::MakeFormattedError( "could not create the directory {} for '{}': {}",
-                                               pathToSave.parent_path().string(), m_Scene->GetSceneName(),
+                                               path.parent_path().string(), m_Scene->GetSceneName(),
                                                ec.message() );
 
-        if ( const auto written =
-                  Common::Utils::FileSystem::WriteContentToFileAtomic( pathToSave, SerializeToJson() );
+        if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic( path, SerializeToJson() );
              !written )
-            return Common::MakeFormattedError( "could not write {}: {}", pathToSave.string(), written.GetError() );
+            return Common::MakeFormattedError( "could not write {}: {}", path.string(), written.GetError() );
 
         return BOOLSUCCESS;
     }

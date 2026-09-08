@@ -150,6 +150,58 @@ namespace Desert::Core::Serialize
             return s;
         }
 
+        // A component whose ENTIRE state is one bool (VisibilityComponent::Visible). It gets its own maker
+        // rather than reusing MakeMarker above, because MakeMarker WOULD COMPILE AND WOULD BE WRONG: it
+        // writes an empty object and re-adds the component on load, so the value comes back at the
+        // struct's default. `Visible = false` would round-trip to `true` — the presence would survive and
+        // the only thing the component carries would not, which is the defect this registration came to
+        // fix wearing the shape of a fix.
+        //
+        // A record that carries the component but not its field is REPORTED and left at the default: an
+        // entity is drawn either way, so a silent choice here is a scene that renders differently from
+        // the file it claims to be.
+        template <class TComponent>
+        ComponentSerializer MakeFlag( std::string key, std::string field, bool TComponent::*member )
+        {
+            ComponentSerializer s;
+            s.Key       = std::move( key );
+            s.Has       = []( ECS::Entity e ) { return e.HasComponent<TComponent>(); };
+            s.Serialize = [field, member]( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
+            {
+                rfl::Generic::Object object;
+                object[field] = rfl::Generic( e.GetComponent<TComponent>().*member );
+                return rfl::Generic( object );
+            };
+            s.Deserialize =
+                 [key = s.Key, field, member]( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
+            {
+                auto& comp =
+                     e.HasComponent<TComponent>() ? e.GetComponent<TComponent>() : e.AddComponent<TComponent>();
+
+                const auto object = g.to_object();
+                if ( !object.has_value() )
+                {
+                    LOG_WARN( "[Scene] component '{0}' is not an object; '{1}' kept its default.", key, field );
+                    return;
+                }
+                const auto value = object.value().get( field );
+                if ( !value.has_value() )
+                {
+                    LOG_WARN( "[Scene] component '{0}' carries no '{1}'; it kept its default.", key, field );
+                    return;
+                }
+                const auto flag = value.value().to_bool();
+                if ( !flag.has_value() )
+                {
+                    LOG_WARN( "[Scene] component '{0}' has a non-boolean '{1}'; it kept its default.", key,
+                              field );
+                    return;
+                }
+                comp.*member = flag.value();
+            };
+            return s;
+        }
+
         // ScriptComponent has no reflected data block (reflection can't do std::string/variant lists), so it
         // gets a manual serializer via a reflect-cpp mirror: the .lua reference + the exposed-property values.
         struct ScriptPropSer
@@ -1266,6 +1318,14 @@ namespace Desert::Core::Serialize
         // The authoring lock. Serialized for the reason Components.hpp gives: a lock that does not
         // survive a reload protects nothing. No version bump — an added key is what ForeignKeys is for.
         Register( MakeMarker<ECS::LockComponent>( "Lock" ) );
+
+        // ---- Single-flag components ----
+        // The outliner's eye, for the same reason the lock beside it is here: a hidden object that comes
+        // back visible on the next load is a setting the user made and the file never kept, and nothing
+        // says so — the entity simply reappears. It was the lock's defect, already live for visibility,
+        // in the same panel and one row up. No version bump: an added key is what ForeignKeys is for.
+        Register(
+             MakeFlag<ECS::VisibilityComponent>( "Visibility", "Visible", &ECS::VisibilityComponent::Visible ) );
 
         // ---- Skybox (now FULLY REFLECTED via RA3) ----
         // No more hand-written SkyboxComponentSer / field mapping: the whole component reflects, and its

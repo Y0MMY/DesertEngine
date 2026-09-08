@@ -207,7 +207,15 @@ namespace Desert::Core
         // The engine's ONE "save this scene" entry point — and therefore the one that has to answer
         // whether the save happened. It used to return void into a void (SceneSerializer::SaveToFile),
         // so the editor could only assume; see SceneSerializer::SaveToFile for what that cost.
-        [[nodiscard]] Common::BoolResultStr Serialize( const Assets::AssetManager* assetManager ) const;
+        //
+        // @param path WHERE. It used to be derived here, from the scene's NAME, and that was the defect:
+        //        a scene opened from Scene/U52_LockProbe.desce whose name is "U52 Lock Probe" was written
+        //        to Scene/U52_Lock_Probe.desce, the file the user had open was never touched, and the
+        //        editor reported success. A name is what a scene is CALLED; it is not which file it is,
+        //        and nothing in the engine can tell the difference — only the caller that opened the file
+        //        knows, so the caller says.
+        [[nodiscard]] Common::BoolResultStr Serialize( const Assets::AssetManager* assetManager,
+                                                       const Common::Filepath&     path ) const;
 
         // Editor Pass API: inject a render pass into the scene render graph from outside the engine
         // (debug draw, gizmos, authoring aids). See Graphic::ExternalPassSpecification for placement.
