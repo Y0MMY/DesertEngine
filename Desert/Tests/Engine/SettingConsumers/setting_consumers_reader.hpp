@@ -117,7 +117,14 @@ namespace Desert::Tests::ConsumerText
         return start < quote && std::isdigit( static_cast<unsigned char>( s[start] ) ) != 0;
     }
 
-    inline std::string StripCommentsAndLiterals( const std::string& src )
+    // ONE PASS, TWO ENTRY POINTS. `keepLiterals` exists because a census whose SUBJECT is a string
+    // literal cannot use a reader that blanks string literals — the resolver census (I13) asks whether
+    // `ComponentRegistry.cpp` contains `type == "FontAsset"`, and the answer is in the literal. Reading
+    // RAW source instead would make a literal inside a COMMENT satisfy the census, which is a false
+    // PASS: a census that certifies a type as handled when it is not is worse than no census. So the
+    // comments still go and the literals stay, through this same reader rather than a second opinion
+    // about where a literal begins and ends.
+    inline std::string StripCommentsMaybeLiterals( const std::string& src, bool keepLiterals )
     {
         std::string out( src.size(), ' ' );
 
@@ -125,6 +132,12 @@ namespace Desert::Tests::ConsumerText
         {
             for ( std::size_t p = from; p < to && p < src.size(); ++p )
                 out[p] = src[p] == '\n' ? '\n' : ' ';
+        };
+
+        const auto keep = [&out, &src]( std::size_t from, std::size_t to )
+        {
+            for ( std::size_t p = from; p < to && p < src.size(); ++p )
+                out[p] = src[p];
         };
 
         // The end of an ordinary string or character literal opened at `open`, or npos when the line
@@ -218,7 +231,10 @@ namespace Desert::Tests::ConsumerText
                 }
                 else
                 {
-                    blank( start, j );
+                    if ( keepLiterals )
+                        keep( start, j );
+                    else
+                        blank( start, j );
                     i = j;
                 }
             }
@@ -234,7 +250,10 @@ namespace Desert::Tests::ConsumerText
                 }
                 else
                 {
-                    blank( start, j );
+                    if ( keepLiterals )
+                        keep( start, j );
+                    else
+                        blank( start, j );
                     i = j;
                 }
             }
@@ -245,6 +264,18 @@ namespace Desert::Tests::ConsumerText
             }
         }
         return out;
+    }
+
+    // The spelling every existing caller uses: comments and literals both gone.
+    inline std::string StripCommentsAndLiterals( const std::string& src )
+    {
+        return StripCommentsMaybeLiterals( src, /*keepLiterals=*/false );
+    }
+
+    // Comments gone, literals INTACT — for a census whose subject is a literal. See the note above.
+    inline std::string StripComments( const std::string& src )
+    {
+        return StripCommentsMaybeLiterals( src, /*keepLiterals=*/true );
     }
 
     inline bool WordAt( const std::string& s, std::size_t at, const std::string& word )
