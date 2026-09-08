@@ -1728,7 +1728,16 @@ namespace Desert::Editor
                                                        Control::DescribeUnknownCommand( wanted, resolved ) );
                 }
 
-                dictionary[resolved.Index].Run();
+                // THE COMMAND'S OWN ANSWER IS THE REPLY'S. `Run()` returned void until A6-2, so this line
+                // reported success for every command that had failed — a document that would not resolve,
+                // a scene that would not save, an Apply that published nothing. A script driving the
+                // editor could not stop on any of them, and the whole point of the exit status is that it
+                // can be trusted (Tools/DesertCtl/Source/Main.cpp says so at the top).
+                if ( const auto ran = dictionary[resolved.Index].Run(); !ran )
+                {
+                    return Control::Response::Failure( request.Id, "'" + request.Group + "' / '" + request.Label +
+                                                                        "' ran and refused: " + ran.GetError() );
+                }
                 return Control::Response::Success( request.Id );
             }
 
@@ -3127,6 +3136,7 @@ namespace Desert::Editor
                                   {
                                       p->GetVisibility() = true;
                                       p->Pinned()        = true; // asked for explicitly: keep it open
+                                      return PaletteCommandDone();
                                   } } );
         }
 
@@ -3139,8 +3149,11 @@ namespace Desert::Editor
         for ( uint32_t i = 0; i < kCloudStageCount; ++i )
         {
             const auto stage = static_cast<CloudStage>( i );
-            commands.push_back( { "Clouds", std::to_string( i + 1 ) + " " + CloudStageName( stage ),
-                                  [stage] { CloudsPanel::OpenAt( stage ); } } );
+            commands.push_back( { "Clouds", std::to_string( i + 1 ) + " " + CloudStageName( stage ), [stage]
+                                  {
+                                      CloudsPanel::OpenAt( stage );
+                                      return PaletteCommandDone();
+                                  } } );
         }
 
         // Documents — FOCUS an open one. A separate category because the verb is different and the
@@ -3150,7 +3163,11 @@ namespace Desert::Editor
         {
             const SubjectId subject = document->Subject();
             commands.push_back( { "Document", "Go to " + DocumentDisplayName( document->GetName() ),
-                                  [this, subject] { FocusDocument( subject ); } } );
+                                  [this, subject]
+                                  {
+                                      FocusDocument( subject );
+                                      return PaletteCommandDone();
+                                  } } );
         }
 
         // Closing one, by name. Never offered before, because a person closes a window with the x on it —
@@ -3166,6 +3183,7 @@ namespace Desert::Editor
                                   {
                                       RequestDocumentClose( subject, "closed from the command "
                                                                      "palette" );
+                                      return PaletteCommandDone();
                                   } } );
         }
 
@@ -3174,8 +3192,11 @@ namespace Desert::Editor
         // cannot differ.
         if ( m_OpenDocuments.Count() > 1 )
         {
-            commands.push_back(
-                 { "Document", "Cycle to the next most recently used", [this] { CycleDocuments(); } } );
+            commands.push_back( { "Document", "Cycle to the next most recently used", [this]
+                                  {
+                                      CycleDocuments();
+                                      return PaletteCommandDone();
+                                  } } );
         }
 
         // Reopening one that was closed. The list the empty well shows, reachable without a mouse — and
@@ -3184,8 +3205,11 @@ namespace Desert::Editor
         for ( const ClosedDocument& closed : m_DocumentWell.RecentlyClosed() )
         {
             const SubjectId subject = closed.Subject;
-            commands.push_back( { "Document", "Reopen " + closed.DisplayName,
-                                  [subject] { Core::SubjectOpenRequests::Request( subject ); } } );
+            commands.push_back( { "Document", "Reopen " + closed.DisplayName, [subject]
+                                  {
+                                      Core::SubjectOpenRequests::Request( subject );
+                                      return PaletteCommandDone();
+                                  } } );
         }
 
         // Entities — select any object in the open scene.
@@ -3199,7 +3223,11 @@ namespace Desert::Editor
                 std::string        name = entity.HasComponent<ECS::TagComponent>()
                                                ? entity.GetComponent<ECS::TagComponent>().Tag
                                                : std::string( "Entity" );
-                commands.push_back( { "Entity", name, [uuid] { Core::SelectionManager::SetSelected( uuid ); } } );
+                commands.push_back( { "Entity", name, [uuid]
+                                      {
+                                          Core::SelectionManager::SetSelected( uuid );
+                                          return PaletteCommandDone();
+                                      } } );
 
                 // DELETING ONE IS ALSO SOMETHING A PERSON DOES, and until now the palette could only
                 // SELECT. The Outliner's context menu and the Delete key both reach
@@ -3211,7 +3239,11 @@ namespace Desert::Editor
                 // destroy an entity without a mouse: the channel runs these closures and nothing else. A
                 // gap in the palette is a gap in what an agent can do at all, which is the one claim the
                 // palette exists to make good on.
-                commands.push_back( { "Entity", "Delete " + name, [uuid] { Commands::DeleteEntity( uuid ); } } );
+                commands.push_back( { "Entity", "Delete " + name, [uuid]
+                                      {
+                                          Commands::DeleteEntity( uuid );
+                                          return PaletteCommandDone();
+                                      } } );
 
                 // ── AND WHAT CAN BE OPENED *FROM* THIS ENTITY ─────────────────────────────────────────
                 //
@@ -3240,7 +3272,11 @@ namespace Desert::Editor
                         continue;
 
                     commands.push_back( { "Open", name + " \xc2\xb7 " + m_SubjectEditors.TypeName( type ),
-                                          [subject] { Core::SubjectOpenRequests::Request( subject ); } } );
+                                          [subject]
+                                          {
+                                              Core::SubjectOpenRequests::Request( subject );
+                                              return PaletteCommandDone();
+                                          } } );
                 }
             }
         }
@@ -3251,10 +3287,17 @@ namespace Desert::Editor
         for ( const char* menu : kMenuBarMenus )
         {
             const std::string name = menu;
-            commands.push_back(
-                 { "Menu", "Open the " + name + " menu", [this, name] { m_HeldOpenMenu = name; } } );
+            commands.push_back( { "Menu", "Open the " + name + " menu", [this, name]
+                                  {
+                                      m_HeldOpenMenu = name;
+                                      return PaletteCommandDone();
+                                  } } );
         }
-        commands.push_back( { "Menu", "Close the open menu", [this] { m_HeldOpenMenu.clear(); } } );
+        commands.push_back( { "Menu", "Close the open menu", [this]
+                              {
+                                  m_HeldOpenMenu.clear();
+                                  return PaletteCommandDone();
+                              } } );
 
         // THE SNAP, AND THE PERF HUD. Both are things a person does with a single click and neither had a
         // name, so neither could be done unattended — and a gap in this dictionary is a gap in what an
@@ -3277,16 +3320,27 @@ namespace Desert::Editor
                 std::snprintf( label, sizeof( label ), "Grid snap %.0f m", step / 100.0f );
             else
                 std::snprintf( label, sizeof( label ), "Grid snap %.0f cm", step );
-            commands.push_back( { "Snap", label, [step] { Core::GizmoState::SetTranslateSnap( step ); } } );
+            commands.push_back( { "Snap", label, [step]
+                                  {
+                                      Core::GizmoState::SetTranslateSnap( step );
+                                      return PaletteCommandDone();
+                                  } } );
         }
         for ( const float step : kAngleSteps )
         {
             char label[48];
             std::snprintf( label, sizeof( label ), "Angle snap %.0f deg", step );
-            commands.push_back( { "Snap", label, [step] { Core::GizmoState::SetRotateSnapDegrees( step ); } } );
+            commands.push_back( { "Snap", label, [step]
+                                  {
+                                      Core::GizmoState::SetRotateSnapDegrees( step );
+                                      return PaletteCommandDone();
+                                  } } );
         }
         commands.push_back( { "Snap", "Toggle snapping", []
-                              { Core::GizmoState::SetPersistentSnap( !Core::GizmoState::PersistentSnap() ); } } );
+                              {
+                                  Core::GizmoState::SetPersistentSnap( !Core::GizmoState::PersistentSnap() );
+                                  return PaletteCommandDone();
+                              } } );
 
         // The View -> Show item, under a name. It is the cheapest action in the editor that saves the
         // preferences file while having nothing whatever to do with the gizmo, which is exactly what makes
@@ -3296,6 +3350,7 @@ namespace Desert::Editor
                               {
                                   EditorPreferences::Get().ShowPerfHud = !EditorPreferences::Get().ShowPerfHud;
                                   EditorPreferences::Save();
+                                  return PaletteCommandDone();
                               } } );
 
         // THE TWO ENDS OF К10's SCENARIO, UNDER NAMES, for the reason К6 named the snap steps and the item
@@ -3311,11 +3366,18 @@ namespace Desert::Editor
                                   auto& view    = EditorPreferences::Get().DebugView;
                                   view.ShowGrid = !view.ShowGrid;
                                   EditorPreferences::Save();
+                                  return PaletteCommandDone();
                               } } );
         commands.push_back( { "View", "Toggle 2D UI mode", [this]
                               {
-                                  if ( m_MainScene )
-                                      Editor::ViewportPanel::ToggleUIMode( *m_MainScene );
+                                  // REFUSES RATHER THAN DOING NOTHING when there is no scene. The mode is
+                                  // a property OF a scene, so "there is none" is a fact the caller has to
+                                  // hear — over the channel it used to come back as a plain success.
+                                  if ( !m_MainScene )
+                                      return Common::MakeError<bool>( "there is no open scene to switch "
+                                                                      "into 2D UI mode." );
+                                  Editor::ViewportPanel::ToggleUIMode( *m_MainScene );
+                                  return PaletteCommandDone();
                               } } );
 
         // THE PALETTE'S OWN DOOR. Ctrl+P is the only other way to it and a keystroke is not available to
@@ -3324,7 +3386,11 @@ namespace Desert::Editor
         // checked against. Г14's rule reaches its own instrument: a capability reachable only by hand does
         // not exist for the channel. Found by needing it, exactly as the snap steps and the entity delete
         // were: A6-1 changed WHEN this list is built and could not photograph the result.
-        commands.push_back( { "View", "Open the command palette", [this] { m_OpenPaletteRequested = true; } } );
+        commands.push_back( { "View", "Open the command palette", [this]
+                              {
+                                  m_OpenPaletteRequested = true;
+                                  return PaletteCommandDone();
+                              } } );
 
         // OPENABLE ASSETS. This is where `--open-panel <path-to-asset>` went — the half of that flag that
         // opened a DOCUMENT rather than a tool, and the only way a document has ever been put on screen
@@ -3363,7 +3429,36 @@ namespace Desert::Editor
                                       // duplication SubjectEditorRegistry::RegisterPathOpener was
                                       // introduced to delete, when the browser and EditorLayer each
                                       // carried one.
-                                      (void)m_SubjectEditors.OpenPath( path );
+                                      //
+                                      // AND THE OUTCOME IS ANSWERED, WHICH IS A6-2 POINT 1. `(void)` stood
+                                      // here: a `.demat` that would not resolve logged its reason and came
+                                      // back over the channel as `{"ok":true}`, so a script opened nothing
+                                      // and carried on. The opener has already said WHY in the log, with
+                                      // the path — this refuses without repeating a guess at the cause,
+                                      // exactly as PathOpenOutcome::Failed is documented to mean.
+                                      switch ( m_SubjectEditors.OpenPath( path ) )
+                                      {
+                                          case SubjectEditorRegistry::PathOpenOutcome::Requested:
+                                              return PaletteCommandDone();
+                                          case SubjectEditorRegistry::PathOpenOutcome::Failed:
+                                              return Common::MakeFormattedError<bool>(
+                                                   "'{}' is a document this editor opens and it would not "
+                                                   "resolve; the log line above names the reason.",
+                                                   path );
+                                          case SubjectEditorRegistry::PathOpenOutcome::NotMine:
+                                              // The palette offered it, so an opener claimed its
+                                              // extension — NotMine here means the file has GONE since
+                                              // the dictionary was built, which is a fact and not a
+                                              // no-op.
+                                              return Common::MakeFormattedError<bool>(
+                                                   "'{}' is no longer there — no registered opener claims "
+                                                   "it now. It existed when this list was built.",
+                                                   path );
+                                      }
+                                      return Common::MakeFormattedError<bool>(
+                                           "opening '{}' produced an outcome this build does not handle; "
+                                           "that is a defect in the palette, not in the request.",
+                                           path );
                                   } } );
         }
 
@@ -3379,8 +3474,11 @@ namespace Desert::Editor
         for ( const Common::Filepath& scene : CollectAvailableScenes() )
         {
             const std::string path = scene.string();
-            commands.push_back( { "Scene", "Open Scene " + SceneLabel( scene ),
-                                  [path] { Editor::Core::SceneOpenRequest::Request( path ); } } );
+            commands.push_back( { "Scene", "Open Scene " + SceneLabel( scene ), [path]
+                                  {
+                                      Editor::Core::SceneOpenRequest::Request( path );
+                                      return PaletteCommandDone();
+                                  } } );
         }
 
         // A SECOND LIVE SCENE, for the same reason the levels above are here: the channel's vocabulary IS
@@ -3391,7 +3489,11 @@ namespace Desert::Editor
         //
         // Sets the same deferred flag the menu item does rather than calling AddSceneView(): it allocates a
         // renderer slot and GPU resources, which must not happen inside the ImGui pass.
-        commands.push_back( { "Scene", "New Scene View", [this] { m_AddSceneViewRequested = true; } } );
+        commands.push_back( { "Scene", "New Scene View", [this]
+                              {
+                                  m_AddSceneViewRequested = true;
+                                  return PaletteCommandDone();
+                              } } );
 
         // NAMED VIEWPOINTS for the focused document's preview — the replacement for `--preview-orbit
         // yaw,pitch`, whose continuous angle pair a palette entry has nowhere to carry. See
@@ -3410,12 +3512,20 @@ namespace Desert::Editor
                                           // Re-resolved rather than captured: the focus can move, and the
                                           // document can be destroyed, between this list being built and
                                           // the entry being run.
-                                          if ( ISubjectDocument* target =
-                                                    m_OpenDocuments.Find( m_FocusedDocument );
-                                               target && target->HasPreview() )
+                                          ISubjectDocument* target = m_OpenDocuments.Find( m_FocusedDocument );
+                                          if ( !target || !target->HasPreview() )
                                           {
-                                              target->SetPreviewViewpoint( *aim );
+                                              // REFUSES INSTEAD OF SLIPPING PAST. That re-resolution is
+                                              // exactly a case that can come back empty, and the `if`
+                                              // used to swallow it: the command answered success having
+                                              // aimed nothing at anything.
+                                              return Common::MakeError<bool>(
+                                                   "the document this viewpoint was offered for no longer "
+                                                   "has a preview; the focus moved between the list being "
+                                                   "built and this command running." );
                                           }
+                                          target->SetPreviewViewpoint( *aim );
+                                          return PaletteCommandDone();
                                       } } );
             }
         }
@@ -3440,22 +3550,50 @@ namespace Desert::Editor
                 // Re-resolved inside, not captured: the focus can move and the document can be destroyed
                 // between this list being built and the entry being run — the same rule the Preview
                 // viewpoints above follow, for the same reason.
+                // THE THREE `(void)` CASTS THAT USED TO BE HERE ARE A6-2 POINT 1 IN ONE PLACE. Each of
+                // these operations already returns "did anything actually move" — ISubjectDocument says
+                // so at length, and says WHY: "a caller must not report a save that did not happen". The
+                // palette then threw the answer away, so over the channel an Apply that published nothing
+                // and a Save that wrote no file both came back `{"ok":true}`.
+                //
+                // The reason cannot be richer than this, and that is a limit worth naming rather than
+                // dressing up: those three virtuals return a bare `bool` and carry no message, so what
+                // the editor honestly knows is THAT the document declined. Turning the interface into
+                // BoolResultStr would touch every document type and belongs to whoever owns them.
                 commands.push_back( { "Document", "Apply this document's edits to the scene", [this, subject]
                                       {
-                                          if ( ISubjectDocument* target = m_OpenDocuments.Find( subject ) )
-                                              (void)target->ApplyEdits();
+                                          ISubjectDocument* target = m_OpenDocuments.Find( subject );
+                                          if ( !target )
+                                              return Common::MakeError<bool>(
+                                                   "the document that had these edits is no longer open." );
+                                          return PaletteCommandOutcome(
+                                               target->ApplyEdits(),
+                                               "the document published nothing: it had no outstanding edit "
+                                               "by the time the command ran, so the scene is unchanged." );
                                       } } );
                 commands.push_back( { "Document", "Discard this document's unapplied edits", [this, subject]
                                       {
-                                          if ( ISubjectDocument* target = m_OpenDocuments.Find( subject ) )
-                                              (void)target->DiscardEdits();
+                                          ISubjectDocument* target = m_OpenDocuments.Find( subject );
+                                          if ( !target )
+                                              return Common::MakeError<bool>(
+                                                   "the document that had these edits is no longer open." );
+                                          return PaletteCommandOutcome(
+                                               target->DiscardEdits(),
+                                               "the document discarded nothing: it had no outstanding edit "
+                                               "by the time the command ran." );
                                       } } );
             }
 
             commands.push_back( { "Document", "Save this document", [this, subject]
                                   {
-                                      if ( ISubjectDocument* target = m_OpenDocuments.Find( subject ) )
-                                          (void)target->SaveDocument();
+                                      ISubjectDocument* target = m_OpenDocuments.Find( subject );
+                                      if ( !target )
+                                          return Common::MakeError<bool>( "the document to save is no longer "
+                                                                          "open." );
+                                      return PaletteCommandOutcome(
+                                           target->SaveDocument(),
+                                           "the document was NOT written. Its own log line says why; this "
+                                           "command only knows that no file was produced." );
                                   } } );
         }
 
@@ -3472,11 +3610,37 @@ namespace Desert::Editor
                               {
                                   Assets::AssetEvictionSchedule::Request( "asked for from the command "
                                                                           "palette" );
+                                  return PaletteCommandDone();
                               } } );
-        commands.push_back( { "Action", "Save Scene", [this] { (void)SaveOpenScene(); } } );
-        commands.push_back( { "Action", "Undo", [] { CommandHistory::Get().Undo(); } } );
-        commands.push_back( { "Action", "Redo", [] { CommandHistory::Get().Redo(); } } );
-        commands.push_back( { "Action", "Close All Documents", [this] { RequestCloseAllDocuments(); } } );
+
+        // SAVE SCENE ANSWERS WHETHER IT SAVED. `(void)SaveOpenScene()` stood here against a
+        // `[[nodiscard]] bool` — the attribute was on the declaration and the cast silenced it — so a
+        // scene that could not be written came back over the channel as a success. This is the same
+        // family as the toast that once said "Saved 'X'" for a file that had not been written
+        // (FileSystem.hpp's note on the write primitive that is gone).
+        commands.push_back( { "Action", "Save Scene", [this]
+                              {
+                                  return PaletteCommandOutcome(
+                                       SaveOpenScene(), "the scene was NOT saved; the log line above says "
+                                                        "why, and the unsaved-changes mark is still set." );
+                              } } );
+
+        // UNDO AND REDO ALREADY ANSWERED "was there anything to undo" and the answer went nowhere.
+        // Nothing to undo is not a failure of the editor, but it IS the difference between a script that
+        // walked the history back one step and a script that believes it did.
+        commands.push_back( { "Action", "Undo", [] {
+                                 return PaletteCommandOutcome( CommandHistory::Get().Undo(),
+                                                               "there was nothing left to undo." );
+                             } } );
+        commands.push_back( { "Action", "Redo", [] {
+                                 return PaletteCommandOutcome( CommandHistory::Get().Redo(),
+                                                               "there was nothing to redo." );
+                             } } );
+        commands.push_back( { "Action", "Close All Documents", [this]
+                              {
+                                  RequestCloseAllDocuments();
+                                  return PaletteCommandDone();
+                              } } );
 
         return commands;
     }
@@ -3523,7 +3687,13 @@ namespace Desert::Editor
         if ( !m_CommandPalette.IsOpen() )
             return;
 
-        m_CommandPalette.Draw();
+        // AND THE PERSON WHO CLICKED HEARS IT TOO. The palette hands back what the chosen entry answered
+        // (A6-2 point 1); before that, a command picked from Ctrl+P that failed simply closed the overlay
+        // and left the editor looking as though it had obeyed. The toast is raised HERE and not inside
+        // CommandPalette so that class keeps one UI dependency instead of two — the layer that owns the
+        // toasts owns how a refusal is shown.
+        if ( const auto chosen = m_CommandPalette.Draw(); !chosen )
+            Editor::ToastManager::Push( chosen.GetError(), Editor::ToastLevel::Error );
     }
 
     void EditorLayer::DrawDocumentWell()

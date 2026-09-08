@@ -1,19 +1,62 @@
 #pragma once
 
+#include <Common/Core/ResultStr.hpp>
+
 #include <functional>
 #include <string>
 #include <vector>
 
 namespace Desert::Editor
 {
-    // One entry in the command palette. Group is a short category ("View", "Entity", "Action") shown
-    // dimmed beside the label; Run is invoked when the entry is chosen.
+    /**
+     * @brief One entry in the command palette. Group is a short category ("View", "Entity", "Action")
+     *        shown dimmed beside the label; Run is invoked when the entry is chosen.
+     *
+     * ── RUN RETURNS ITS OUTCOME, AND THAT IS THE WHOLE OF A6-2 POINT 1 ──────────────────────────────
+     *
+     * It used to return `void`. The dictionary is also the control channel's vocabulary, so `run` over
+     * the socket answered `{"ok":true}` for a command that had FAILED — a document that would not
+     * resolve, a scene that would not save — and the only trace was a line in a log the client was not
+     * reading. Failure read as success, which is the Ф4/Г13 shape this codebase spent a day removing:
+     * a result that exists, is known, and is thrown away at the boundary.
+     *
+     * `Common::BoolResultStr`, exactly as `SetData` and the rest: the outcome is a VALUE that carries
+     * its reason, not a severity in a log. Two consumers need it and neither could have it before —
+     * the channel turns it into a refusal a script can stop on, and the palette turns it into a toast
+     * the person who clicked can read.
+     *
+     * A SUCCESS FROM AN ENTRY THAT CANNOT FAIL IS NOT A PRETENCE, provided it says so. Most entries set
+     * a flag, flip a preference or select an entity, and for those `PaletteCommandDone()` below is the
+     * spelling — it is greppable, it reads as "there is no failure mode here", and it is distinguishable
+     * from a genuine result that was tested and passed. What is forbidden is the third thing: an entry
+     * that calls something fallible and returns Done anyway.
+     */
     struct PaletteCommand
     {
-        std::string           Group;
-        std::string           Label;
-        std::function<void()> Run;
+        std::string                            Group;
+        std::string                            Label;
+        std::function<Common::BoolResultStr()> Run;
     };
+
+    /// "This entry has no failure mode." Named rather than written as a bare MakeSuccess so the census
+    /// is greppable: `PaletteCommandDone` marks the entries that CANNOT fail, and every other entry is
+    /// expected to return something it actually got back from the thing it called.
+    [[nodiscard]] inline Common::BoolResultStr PaletteCommandDone()
+    {
+        return Common::MakeSuccess( true );
+    }
+
+    /// The outcome of a `bool`-returning editor operation, given the words to explain a false.
+    ///
+    /// EXISTS BECAUSE THREE DOCUMENT OPERATIONS ANSWER `bool` AND NOTHING ELSE. ISubjectDocument's
+    /// ApplyEdits, DiscardEdits and SaveDocument each return "did anything move", with no reason
+    /// attached — so the palette can report THAT the command did nothing, and cannot report why. That is
+    /// a real limit of that interface and it is named here rather than papered over: the message says
+    /// what the editor knows, which is that the document declined, and does not invent a cause.
+    [[nodiscard]] inline Common::BoolResultStr PaletteCommandOutcome( bool moved, const std::string& whenFalse )
+    {
+        return moved ? Common::MakeSuccess( true ) : Common::MakeError<bool>( whenFalse );
+    }
 
     // A Ctrl+P "go to anything" overlay. The owner calls Open() on the hotkey, fills SetCommands() ONCE
     // per opening with that moment's candidates (panels, entities, actions, openable files), and calls
@@ -53,7 +96,19 @@ namespace Desert::Editor
             m_Commands = std::move( commands );
         }
 
-        void Draw();
+        /**
+         * @brief Draw the overlay, and hand back what the chosen entry answered.
+         *
+         * SUCCESS ALSO MEANS "NOTHING WAS CHOSEN THIS FRAME", which is the common case sixty times a
+         * second, and that conflation is deliberate: the caller's only job with this value is to show a
+         * refusal, and "no command ran" has no refusal to show.
+         *
+         * THE REFUSAL IS HANDED OUT RATHER THAN SHOWN HERE. A toast raised from inside this file would
+         * put a second UI dependency in the one class A6-2 point 3 is trying to make testable, and it
+         * would decide for every caller how a refusal is presented. The layer that owns the toasts owns
+         * that decision; this owns knowing what happened.
+         */
+        [[nodiscard]] Common::BoolResultStr Draw();
 
     private:
         bool                        m_Open       = false;

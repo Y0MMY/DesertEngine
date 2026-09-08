@@ -20,10 +20,10 @@ namespace Desert::Editor
         m_Query[0]      = '\0';
     }
 
-    void CommandPalette::Draw()
+    Common::BoolResultStr CommandPalette::Draw()
     {
         if ( !m_Open )
-            return;
+            return PaletteCommandDone();
 
         constexpr const char* kPopupId = "##CommandPalette";
         if ( m_JustOpened )
@@ -38,8 +38,12 @@ namespace Desert::Editor
         if ( !ImGui::BeginPopup( kPopupId ) )
         {
             m_Open = false; // popup dismissed (click outside)
-            return;
+            return PaletteCommandDone();
         }
+
+        // WHAT THE CHOSEN ENTRY ANSWERED. Success until something runs and refuses; a frame in which
+        // nobody chose anything is a success with nothing to say, which is what the caller wants.
+        Common::BoolResultStr chosen = PaletteCommandDone();
 
         // Rank the commands against the current query.
         struct Scored
@@ -92,7 +96,10 @@ namespace Desert::Editor
             const bool            selected = ( i == m_Selected );
             if ( ImGui::Selectable( ( c.Label + "##" + std::to_string( i ) ).c_str(), selected ) )
             {
-                c.Run();
+                // The outcome is CAPTURED rather than returned from here: the popup still has to be
+                // closed and EndChild/EndPopup still have to be called, and an early return would leave
+                // ImGui's stack unbalanced. Returned once, at the bottom, after the frame is well-formed.
+                chosen = c.Run();
                 ImGui::CloseCurrentPopup();
                 m_Open = false;
             }
@@ -105,7 +112,7 @@ namespace Desert::Editor
 
         if ( enter && !hits.empty() )
         {
-            hits[m_Selected].Cmd->Run();
+            chosen = hits[m_Selected].Cmd->Run();
             ImGui::CloseCurrentPopup();
             m_Open = false;
         }
@@ -116,5 +123,6 @@ namespace Desert::Editor
         }
 
         ImGui::EndPopup();
+        return chosen;
     }
 } // namespace Desert::Editor
