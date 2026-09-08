@@ -463,9 +463,9 @@ TEST( PackagedContent, PackageGameProducesTheLauncherAndBinaryTheHostDescription
     // ...and it is that host's shell, not merely that host's file name. The two can disagree, and a
     // `run.bat` full of bash is the failure the file name alone would not catch.
     const auto launcherRead = Common::Utils::FileSystem::ReadFileContent( root / host.LauncherName );
-        ASSERT_TRUE( launcherRead.IsSuccess() )
-             << "the launcher script did not read back: " << launcherRead.GetError();
-        const std::string launcher = launcherRead.GetValue();
+    ASSERT_TRUE( launcherRead.IsSuccess() )
+         << "the launcher script did not read back: " << launcherRead.GetError();
+    const std::string launcher = launcherRead.GetValue();
     ASSERT_FALSE( launcher.empty() );
     if ( host.Platform == Desert::Editor::TargetPlatform::Windows )
         EXPECT_NE( launcher.find( "@echo off" ), std::string::npos ) << launcher;

@@ -82,7 +82,7 @@ TEST( Pak, VfsMountResolvesAbsolutePathsAndFileSystemFallsBack )
     EXPECT_TRUE( Common::Utils::VFS::Exists( virtualPath ) );
     EXPECT_TRUE( Common::Utils::FileSystem::Exists( virtualPath ) );                 // VFS-aware
     DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( virtualPath ), // read via pak
-               "{\"scene\":true}" );
+                             "{\"scene\":true}" );
     EXPECT_EQ( Common::Utils::FileSystem::GetFileSize( virtualPath ), 14u );
 
     // Paths outside the mount root stay unresolved.

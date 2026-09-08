@@ -25,21 +25,21 @@
 #include <gtest/gtest.h>
 
 // Assert @p expr succeeded, then compare its value with @p expected.
-#define DESERT_EXPECT_RESULT_EQ( expr, expected )                                                          \
-    do                                                                                                     \
-    {                                                                                                      \
-        auto desertResult_ = ( expr );                                                                     \
-        ASSERT_TRUE( desertResult_.IsSuccess() ) << #expr " failed: " << desertResult_.GetError();          \
-        EXPECT_EQ( desertResult_.GetValue(), expected );                                                    \
+#define DESERT_EXPECT_RESULT_EQ( expr, expected )                                                                 \
+    do                                                                                                            \
+    {                                                                                                             \
+        auto desertResult_ = ( expr );                                                                            \
+        ASSERT_TRUE( desertResult_.IsSuccess() ) << #expr " failed: " << desertResult_.GetError();                \
+        EXPECT_EQ( desertResult_.GetValue(), expected );                                                          \
     } while ( false )
 
 // Assert @p expr succeeded and hand the value to @p stmt as `value`. For the cases that do something
 // other than compare — a substring search, a size check, a second parse.
-#define DESERT_WITH_RESULT( expr, stmt )                                                                   \
-    do                                                                                                     \
-    {                                                                                                      \
-        auto desertResult_ = ( expr );                                                                     \
-        ASSERT_TRUE( desertResult_.IsSuccess() ) << #expr " failed: " << desertResult_.GetError();          \
-        const auto& value = desertResult_.GetValue();                                                      \
-        stmt;                                                                                              \
+#define DESERT_WITH_RESULT( expr, stmt )                                                                          \
+    do                                                                                                            \
+    {                                                                                                             \
+        auto desertResult_ = ( expr );                                                                            \
+        ASSERT_TRUE( desertResult_.IsSuccess() ) << #expr " failed: " << desertResult_.GetError();                \
+        const auto& value = desertResult_.GetValue();                                                             \
+        stmt;                                                                                                     \
     } while ( false )

@@ -490,7 +490,7 @@ TEST( ProjectHubCreate, TheProjectItWritesIsTheProjectItReadsBack )
     EXPECT_EQ( entry.Name, name ) << "the tile would show the file stem instead of the name the engine will read";
 
     const fs::path root   = fs::path( deprojPath ).parent_path();
-    const auto deprojText = Hub::ReadTextFile( deprojPath );
+    const auto     deprojText = Hub::ReadTextFile( deprojPath );
     ASSERT_TRUE( deprojText.IsSuccess() ) << "the .deproj did not read back: " << deprojText.GetError();
     const auto parsed = Common::Project::ReadProjectFile( deprojText.GetValue() );
     ASSERT_TRUE( parsed.IsSuccess() ) << parsed.GetError();
@@ -534,8 +534,7 @@ TEST( ProjectHubCreate, ThePayloadIsCopiedByteForByteWithNoSubstitutions )
 
     // And the descriptor points at the scene the manifest named.
     const auto createdText = Hub::ReadTextFile( created.GetValue() );
-    ASSERT_TRUE( createdText.IsSuccess() )
-         << "the created .deproj did not read back: " << createdText.GetError();
+    ASSERT_TRUE( createdText.IsSuccess() ) << "the created .deproj did not read back: " << createdText.GetError();
     const auto parsed = Common::Project::ReadProjectFile( createdText.GetValue() );
     ASSERT_TRUE( parsed.IsSuccess() );
     EXPECT_EQ( parsed.GetValue().DefaultScene, "Assets/Scenes/Main.desce" );

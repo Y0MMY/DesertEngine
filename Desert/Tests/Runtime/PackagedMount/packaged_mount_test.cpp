@@ -109,9 +109,9 @@ TEST( PackagedMount, AnIntactUpdateMountsAndTheGameSeesItsContent )
     // The point of mounting at all: the bytes the game reads are the UPDATED ones, and the files the
     // update did not touch still come from the base.
     DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( dir / "Assets/level.desce" ),
-               "the fix the player downloaded" );
+                             "the fix the player downloaded" );
     DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( dir / "Assets/music.wav" ),
-               "untouched by the update" );
+                             "untouched by the update" );
 }
 
 TEST( PackagedMount, AnUpdateThatREMOVESAFileIsAppliedAtStartup )
@@ -148,7 +148,7 @@ TEST( PackagedMount, AnUpdateThatREMOVESAFileIsAppliedAtStartup )
     EXPECT_FALSE( Common::Utils::FileSystem::Exists( dir / "Assets/cut_character.mesh" ) );
     EXPECT_FALSE( Common::Utils::FileSystem::ReadFileContent( dir / "Assets/cut_character.mesh" ).IsSuccess() );
     DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( dir / "Assets/level.desce" ),
-               "the fix the player downloaded" );
+                             "the fix the player downloaded" );
 }
 
 TEST( PackagedMount, AnUpdateBuiltAgainstADifferentBaseStopsStartup )
