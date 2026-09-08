@@ -80,7 +80,7 @@ namespace Desert::Assets
         }
     } // namespace
 
-    void AssetPreloader::PreloadMeshes()
+    void AssetPreloader::PreloadCookedAssetsAndMaterials()
     {
         // Meshes are scanned as UNPARSED shells (loadAfterCreate=false): the handle is path-derived in the
         // ctor, so the big .stmesh parse + GPU build are deferred to the first Get (lazy). Textures/materials
@@ -108,9 +108,6 @@ namespace Desert::Assets
         ProcessAssetFiles<SkinnedMeshAsset>( Common::Constants::Path::MESH_PATH_COOKED,
                                              SUPPORTED_SKINNED_MESH_EXTENSIONS, m_AssetManager,
                                              AssetPriority::Low, /*loadAfterCreate=*/false );
-
-        /* ProcessAssetFiles<MaterialAsset>( Common::Constants::Path::MESH_PATH, SUPPORTED_MESH_EXTENSIONS,
-                                          m_AssetManager, AssetPriority::Low );*/
 
         if ( auto manager = m_AssetManager.lock() )
         {
@@ -151,10 +148,17 @@ namespace Desert::Assets
 
     void AssetPreloader::ReloadCooked()
     {
-        // Re-process cooked files (new ones get created) and re-register meshes/textures/materials.
+        // Re-scan and re-register, and the scan is NOT confined to the cooked tree even though this
+        // function's name is: PreloadCookedAssetsAndMaterials also walks MATERIAL_PATH, which is editable
+        // project content. The name is the editor command's ("Rebuild Cooked Assets"), and the extra root
+        // is deliberate — a re-cook that rebuilt runtime materials against reloaded textures while leaving
+        // newly authored .demat files unregistered would be a rebuild that misses half of what the
+        // materials it rebuilds are made of. Said out loud because the comment that stood here promised
+        // "cooked files" and the code has never meant only those.
+        //
         // Register reloads texture pixels from source and rebuilds runtime materials against the new
-        // images (textures are re-registered before materials in PreloadMeshes, so no dangling images).
-        PreloadMeshes();
+        // images (textures are re-registered before materials, so no dangling images).
+        PreloadCookedAssetsAndMaterials();
     }
 
     void AssetPreloader::PreloadSkyboxes()
