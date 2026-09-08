@@ -147,7 +147,8 @@ namespace Desert::Editor
             // "the cloud preview still doesn't update straight away".
             //
             // 128 AND NOT 64, AND THE NUMBER IS A MEASUREMENT RATHER THAN AN ARGUMENT. 128 quarters the
-            // bake — 1 461 ms against 5 915 ms on this machine, Debug, minimum of six — and the six-point
+            // bake — 229 ms against 961 ms on this machine, Debug, minimum of six, re-measured after Г10
+            // put the bake on the whole pool; it was 1 461 against 5 915 on one worker — and the six-point
             // sweep against the shipped 256 is the same clouds in the same places with softer edges (mean
             // 1.1 to 6.2 of 255, against a repeat floor of exactly zero). 64 would quarter it again and
             // does not survive the same check: it covers four more points of the sky than 256 does, and in
