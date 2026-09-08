@@ -34,6 +34,7 @@
 #include "Editor/Core/SceneOpenRequest.hpp"
 #include "Editor/Core/SceneSaveRules.hpp"
 #include "Editor/Core/ShotOptions.hpp"
+#include "Editor/Core/DemoMaterials.hpp"
 #include "Editor/Core/MaterialAssetUtils.hpp"
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Common/Utilities/FileSystem.hpp>
@@ -5391,7 +5392,14 @@ namespace Desert::Editor
             tf.Scale       = scale;
         };
         auto mat = [&]( const std::string& name, std::initializer_list<std::pair<const char*, glm::vec4>> params )
-        { return Editor::MaterialAssetUtils::CreatePBRMaterialAsset( m_AssetManager.get(), name, params ); };
+        {
+            // .Handle drops the rest of the answer on purpose: this builder has nothing to do about a
+            // demo material the user has since edited, and the disagreement is already reported by name
+            // and value from inside the call. See Editor/Core/MaterialAssetUtils.hpp.
+            return Editor::MaterialAssetUtils::FindOrCreatePBRMaterialAsset( m_AssetManager.get(), name,
+                                                                            params )
+                 .Handle;
+        };
 
         // Sun (Translation encodes the direction the light TRAVELS; the sky uses -normalize(T)) + sky.
         // This is the site that MINTED the upside-down sun the shipped Sandbox/Starter scenes carried:
@@ -5482,37 +5490,50 @@ namespace Desert::Editor
         // Cornell-Box GI + glass showcase. Red/green walls bleed onto the white objects (SSGI); a
         // clear glass sphere sits in front of an orange cube (visible THROUGH it); a point light
         // backlights the set. Colours live in REAL material assets in the mesh slots.
-        auto tinted =
-             [&]( const char* name, glm::vec3 pos, glm::vec3 scale, const char* matName, glm::vec4 albedo )
+        // The colours are NOT literals here any more. They are Editor/Core/DemoMaterials.hpp, because a
+        // value that only exists as an argument to a find-or-create is a value nothing can check the
+        // shipped .demat against — which is exactly how CB_Red.demat came to be a chrome mirror while
+        // this site asked for a diffuse red wall, invisibly, for as long as the file existed.
+        auto tinted = [&]( const char* name, glm::vec3 pos, glm::vec3 scale, const char* matName )
         {
             auto& e       = m_MainScene->CreateNewEntity( std::string( name ) );
             auto& smc     = e.AddComponent<ECS::StaticMeshComponent>();
             smc.Primitive = Geometry::PrimitiveType::Cube;
-            smc.MaterialSlots.push_back( Editor::MaterialAssetUtils::CreatePBRMaterialAsset(
-                 m_AssetManager.get(), matName, albedo, 0.9f ) );
+            const auto* params = Editor::MaterialAssetUtils::FindDemoMaterial( matName );
+            if ( !params )
+            {
+                LOG_ERROR( "[Cornell] '{}' is not in the demo material table; '{}' gets no material.",
+                           matName, name );
+            }
+            else
+            {
+                smc.MaterialSlots.push_back(
+                     Editor::MaterialAssetUtils::FindOrCreatePBRMaterialAsset( m_AssetManager.get(),
+                                                                              matName, *params )
+                          .Handle );
+            }
             auto& tf       = e.GetComponent<ECS::TransformComponent>();
             tf.Translation = pos * Common::Units::UnitsPerMetre; // authored in metres (see BuildStarterScene)
             tf.Scale       = scale;
         };
-        const glm::vec4 white( 0.82f, 0.82f, 0.80f, 1 ), red( 0.85f, 0.10f, 0.10f, 1 ),
-             green( 0.10f, 0.70f, 0.15f, 1 );
-        tinted( "CB_Floor", { 0, 0, 0 }, { 6, 0.2f, 6 }, "CB_White", white );
-        tinted( "CB_Back", { 0, 3, -3 }, { 6, 6, 0.2f }, "CB_White", white );
-        tinted( "CB_LeftRed", { -3, 3, 0 }, { 0.2f, 6, 6 }, "CB_Red", red );
-        tinted( "CB_RightGreen", { 3, 3, 0 }, { 0.2f, 6, 6 }, "CB_Green", green );
+        tinted( "CB_Floor", { 0, 0, 0 }, { 6, 0.2f, 6 }, "CB_White" );
+        tinted( "CB_Back", { 0, 3, -3 }, { 6, 6, 0.2f }, "CB_White" );
+        tinted( "CB_LeftRed", { -3, 3, 0 }, { 0.2f, 6, 6 }, "CB_Red" );
+        tinted( "CB_RightGreen", { 3, 3, 0 }, { 0.2f, 6, 6 }, "CB_Green" );
         // Orange opaque cube directly behind the glass sphere (seen through it).
-        tinted( "CB_OrangeCube", { 0, 1.3f, -1.2f }, { 1.4f, 1.4f, 1.4f }, "CB_Orange",
-                glm::vec4( 0.95f, 0.5f, 0.08f, 1 ) );
+        tinted( "CB_OrangeCube", { 0, 1.3f, -1.2f }, { 1.4f, 1.4f, 1.4f }, "CB_Orange" );
 
         // Clear glass sphere in front of the cube.
         auto& glass    = m_MainScene->CreateNewEntity( std::string( "CB_GlassSphere" ) );
         auto& gsmc     = glass.AddComponent<ECS::StaticMeshComponent>();
         gsmc.Primitive = Geometry::PrimitiveType::Sphere;
-        gsmc.MaterialSlots.push_back( Editor::MaterialAssetUtils::CreatePBRMaterialAsset(
-             m_AssetManager.get(), "CB_Glass",
-             { { "Transmission", glm::vec4( 0.9f, 0.0f, 0.0f, 0.0f ) },
-               { "IOR", glm::vec4( 1.5f, 0.0f, 0.0f, 0.0f ) },
-               { "GlassTint", glm::vec4( 0.75f, 0.9f, 1.0f, 1 ) } } ) );
+        if ( const auto* glassParams = Editor::MaterialAssetUtils::FindDemoMaterial( "CB_Glass" ) )
+        {
+            gsmc.MaterialSlots.push_back(
+                 Editor::MaterialAssetUtils::FindOrCreatePBRMaterialAsset( m_AssetManager.get(),
+                                                                          "CB_Glass", *glassParams )
+                      .Handle );
+        }
         auto& gtf       = glass.GetComponent<ECS::TransformComponent>();
         gtf.Translation = Common::Units::Metres( 1.0f ) * glm::vec3( 0.0f, 1.5f, 0.7f );
         gtf.Scale       = glm::vec3( 1.6f );

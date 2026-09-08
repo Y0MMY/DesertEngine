@@ -1,6 +1,5 @@
 #include "SceneHierarchyPanel.hpp"
 #include <Editor/Core/DragPayloads.hpp>
-#include <Editor/Core/MaterialAssetUtils.hpp>
 #include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
@@ -36,10 +35,6 @@
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
-
-    // Demo builders colour meshes through real material assets in slots — the shared helper in
-    // Editor/Core/MaterialAssetUtils.hpp (reuse-by-name, never rewrites an existing file).
-    using MaterialAssetUtils::CreatePBRMaterialAsset;
 
     namespace
     {
