@@ -239,9 +239,12 @@ namespace Desert::Editor
 
     void NodeGraphPanel::LoadGraphFromPath( const std::string& fullPath )
     {
-        if ( !std::filesystem::exists( fullPath ) )
-            return;
-
+        // NO `std::filesystem::exists` GUARD. One stood here and returned silently — so a graph offered
+        // by the popup above and then not loaded left the panel showing the previous document with no
+        // word anywhere about why. It was also the second half of the same defect the popup had: it
+        // consults the DISK only, so a graph the shared enumeration found inside a mounted .dpak was
+        // listed and then refused without a message. The read below already answers a missing or
+        // unreadable file through the status line, which is this panel's own error channel.
         const auto raw = Common::Utils::FileSystem::ReadFileContent( fullPath );
         if ( !raw )
         {
@@ -552,17 +555,34 @@ namespace Desert::Editor
             ImGui::OpenPopup( "##loadGraph" );
         if ( ImGui::BeginPopup( "##loadGraph" ) )
         {
-            bool any = false;
-            std::error_code ec;
-            for ( const auto& entry : std::filesystem::directory_iterator( GraphsDirectory(), ec ) )
+            // THROUGH THE ONE ENUMERATION (Common::Utils::FileSystem::ListFilesRecursive), which returns
+            // both halves of the content world. A raw directory walk stood here, and a project served
+            // from a mounted .dpak offered "no saved graphs" for a folder full of them.
+            //
+            // NAMED BY THE PATH RELATIVE TO THE GRAPHS FOLDER, not by the file name. The shared
+            // enumeration is RECURSIVE where the old walk was one level deep, so a graph in a subfolder
+            // is now offered — and it has to be addressable, or the menu would list a name that
+            // LoadGraph could not resolve. Sorted, because neither half of the enumeration promises an
+            // order and a menu that reshuffles between sessions is one nobody can learn.
+            std::vector<std::string> graphs;
+            for ( const std::filesystem::path& file :
+                  Common::Utils::FileSystem::ListFilesRecursive( GraphsDirectory() ) )
             {
-                if ( entry.path().extension() != ".dgraph" )
+                if ( file.extension() != ".dgraph" )
                     continue;
-                any = true;
-                if ( ImGui::MenuItem( entry.path().filename().string().c_str() ) )
-                    LoadGraph( entry.path().filename().string() );
+                std::error_code   relEc;
+                const std::string relative =
+                     std::filesystem::relative( file, GraphsDirectory(), relEc ).generic_string();
+                graphs.push_back( relEc || relative.empty() ? file.filename().generic_string() : relative );
             }
-            if ( !any )
+            std::sort( graphs.begin(), graphs.end() );
+
+            for ( const std::string& graph : graphs )
+            {
+                if ( ImGui::MenuItem( graph.c_str() ) )
+                    LoadGraph( graph );
+            }
+            if ( graphs.empty() )
                 ImGui::TextDisabled( "no saved graphs" );
             ImGui::EndPopup();
         }

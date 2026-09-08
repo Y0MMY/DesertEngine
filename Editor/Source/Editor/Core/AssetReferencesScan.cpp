@@ -67,15 +67,15 @@ namespace Desert::Editor
         const fs::path assetsRoot = Common::Constants::Path::ASSETS_PATH;
         const fs::path projectDir = ::Desert::Project::ProjectContext::Directory();
 
+        // THROUGH THE ONE ENUMERATION, so this index describes the content world and not the loose half
+        // of it. A raw walk of the assets root stood here, and in a project served from a mounted .dpak
+        // — where the loose directories do not exist at all — it returned nothing: the index came out
+        // EMPTY and every asset in the project read as referenced by nobody. That is worse than a
+        // failure, because "no references" is the answer this index gives about a genuinely unused
+        // asset, so the two are indistinguishable to every caller (§1.4).
         std::error_code ec;
-        for ( const auto& de : fs::recursive_directory_iterator( assetsRoot, ec ) )
+        for ( const fs::path& p : Common::Utils::FileSystem::ListFilesRecursive( assetsRoot ) )
         {
-            if ( ec )
-                break;
-            if ( !de.is_regular_file( ec ) )
-                continue;
-            const fs::path& p = de.path();
-
             AssetReferenceIndex::Entry e;
             e.Path = fs::relative( p, assetsRoot, ec ).generic_string();
             e.Ext  = Lower( p.extension().string() );

@@ -1478,6 +1478,54 @@ namespace
 
     const int _desert_uilayout_component_reg =
          ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeUILayoutEntry() );
+
+    // ── THE SCRIPT PICKER'S LIST, and the two things it used to get wrong at once ──────────────────
+    //
+    // It walked the LITERAL relative path "Resources" with a raw recursive_directory_iterator. That is
+    // two defects in one expression, and they fail in different directions:
+    //
+    //   1. it bypassed the shared enumeration, so a project served from a mounted .dpak offered an
+    //      empty dropdown — indistinguishable from a project with no scripts (§1.4);
+    //   2. it bypassed the PROJECT PATH census entirely. "Resources" is resolved against the PROCESS's
+    //      working directory and is never remapped by SetProjectRoot, so opening a second project still
+    //      listed the FIRST tree's scripts and wrote a path pointing outside the open project into the
+    //      scene. That is the same sentence four other defects in this engine were: a path resolved
+    //      from where the process is standing rather than from the content it is about.
+    //
+    // The list now comes from Constants::Path::SCRIPT_PATH — the census row for a project's scripts —
+    // through Common::Utils::FileSystem::ListFilesRecursive, which returns the loose files and the
+    // mounted ones together. Moving the project moves the list; there is nothing here to forget.
+    //
+    // The examples that used to sit in the ENGINE resource tree (Resources/Scripts/Examples) were moved
+    // under the assets root by the same change, because that is where this census row says a project's
+    // scripts live — and the engine tree is not one of the five trees a package is built from, so
+    // nothing under it could ever have shipped with a game.
+    std::vector<std::string> ProjectScriptPaths()
+    {
+        std::vector<std::string> scripts;
+        for ( const std::filesystem::path& file :
+              Common::Utils::FileSystem::ListFilesRecursive( Common::Constants::Path::SCRIPT_PATH ) )
+        {
+            if ( file.extension() == ".lua" )
+                scripts.push_back( file.generic_string() );
+        }
+        // Neither half of the enumeration promises an order, and a dropdown that reshuffles between
+        // sessions is one nobody can learn.
+        std::sort( scripts.begin(), scripts.end() );
+        return scripts;
+    }
+
+    // What to CALL a script in the dropdown. The file name alone was ambiguous the moment two folders
+    // held a `Main.lua`, and the walk was recursive even before this change — so the label is the path
+    // relative to the scripts root, which is unique by construction.
+    std::string ScriptLabel( const std::string& scriptPath )
+    {
+        std::error_code   ec;
+        const std::string relative =
+             std::filesystem::relative( scriptPath, Common::Constants::Path::SCRIPT_PATH, ec ).generic_string();
+        return ( ec || relative.empty() ) ? std::filesystem::path( scriptPath ).filename().generic_string()
+                                          : relative;
+    }
 } // namespace
 
 // SINGLE SOURCE OF TRUTH: materials (shader + params + textures) are authored ONLY in the Material Editor
@@ -1510,23 +1558,22 @@ DESERT_REGISTER_CUSTOM_COMPONENT(
                   ImGui::SetNextItemWidth( -60.0f ); // leave room for the remove button
                   if ( ImGui::BeginCombo( "##ScriptSel", preview.c_str() ) )
                   {
-                      std::error_code ec;
-                      if ( fs::exists( "Resources", ec ) )
+                      const std::vector<std::string> scripts = ProjectScriptPaths();
+                      for ( const std::string& script : scripts )
                       {
-                          for ( const auto& it : fs::recursive_directory_iterator( "Resources", ec ) )
+                          if ( ImGui::Selectable( ScriptLabel( script ).c_str(), slot.ScriptPath == script ) )
                           {
-                              if ( !it.is_regular_file() || it.path().extension() != ".lua" )
-                                  continue;
-                              const std::string rel = it.path().generic_string();
-                              if ( ImGui::Selectable( it.path().filename().string().c_str(),
-                                                      slot.ScriptPath == rel ) )
-                              {
-                                  slot.ScriptPath = rel;
-                                  slot.Started    = false;
-                                  slot.Properties.clear(); // re-seed from the new script's schema below
-                              }
+                              slot.ScriptPath = script;
+                              slot.Started    = false;
+                              slot.Properties.clear(); // re-seed from the new script's schema below
                           }
                       }
+                      // AN EMPTY LIST SAYS SO, and says where it looked. An empty popup is the shape
+                      // §1.4 forbids: "this project has no scripts" and "the picker is looking in the
+                      // wrong place" used to render as the same three blank pixels.
+                      if ( scripts.empty() )
+                          ImGui::TextDisabled( "no .lua under %s",
+                                               Common::Constants::Path::SCRIPT_PATH.generic_string().c_str() );
                       ImGui::EndCombo();
                   }
 
