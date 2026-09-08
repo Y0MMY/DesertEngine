@@ -1,5 +1,6 @@
 #include "ThumbnailService.hpp"
 
+#include <Editor/Widgets/PreviewSlotBudget.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Editor/Widgets/ThumbnailFreshness.hpp>
 #include <Editor/Widgets/ThumbnailKey.hpp>
@@ -34,20 +35,6 @@ namespace Desert::Editor
         // clicks.
         constexpr int kIdleTicksBeforeRelease = 300;
 
-        // HOW MANY RENDERER SLOTS MUST STILL BE FREE BEFORE THIS SERVICE MAY CLAIM ONE.
-        //
-        // A capture is BACKGROUND work: nobody clicked for it, and the picture it produces is a nicety on a
-        // row that already draws a placeholder. A scene view, a material document, the Details preview are
-        // the opposite — a person opened them and is looking at them now. There are six slots
-        // (Engine/Core/RendererSlotPool.hpp) and a SceneRenderer that finds none free does NOT fail: it
-        // records into slot 0 and shares the main viewport's per-frame state, which reads as "my preview
-        // moved when I moved the scene camera" and has cost days to diagnose.
-        //
-        // So the background consumer yields first, and it yields BEFORE the situation is critical rather
-        // than at it: one free slot is kept so that the next surface the user opens has somewhere to go.
-        // This is the standing condition on any bulk "generate the missing thumbnails" action too — the
-        // queue is what such an action fills, and this is the gate every request in it passes through.
-        constexpr uint32_t kSlotsKeptFreeForTheUser = 1;
     } // namespace
 
     ThumbnailService& ThumbnailService::Get()
@@ -157,8 +144,14 @@ namespace Desert::Editor
     {
         // THE ONE PLACE THIS SERVICE MAY TAKE A SLOT, so the condition cannot be true in one caller and
         // forgotten in the next — and so the refusal has exactly one voice.
+        //
+        // Background, and that is the whole entitlement: a capture is work nobody asked for by name, and
+        // the picture it makes is what the Details row shows precisely when the live preview could not be
+        // had. Taking the last slot would starve the surface the person is about to open AND would be
+        // taking it to produce the consolation prize for not having it (Editor/Widgets/PreviewSlotBudget.hpp).
         const uint32_t live = Graphic::SceneRenderer::GetLiveRendererCount();
-        if ( live + kSlotsKeptFreeForTheUser >= EngineContext::kMaxRendererSlots )
+        if ( !PreviewSlotBudget::MayClaim( PreviewSlotBudget::Demand::Background, live,
+                                           EngineContext::kMaxRendererSlots ) )
         {
             // IT SAYS SO. A queue that quietly stops draining is indistinguishable from a queue that has
             // nothing in it, and "nothing to do" is the reading a person will reach for — the same empty

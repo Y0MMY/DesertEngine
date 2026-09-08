@@ -11,6 +11,7 @@
 #include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Widgets/Controls/Controls.hpp>
 #include <ImGui/imgui.h>
+#include <Editor/Widgets/PreviewSlotBudget.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
@@ -122,10 +123,17 @@ namespace Desert::Editor
         // the editor to reach that state: opening a sixth surface costs a deliberate click, but the
         // Details preview appears the moment anything with a mesh is CLICKED.
         //
-        // So the panel declines, and the 3D Model row falls back to the rendered thumbnail it asks the
-        // ThumbnailService for. Declining is checked every frame, not once: a scene view or a material
-        // window closing hands its slot back, and the next frame builds the preview after all.
-        if ( Graphic::SceneRenderer::GetLiveRendererCount() >= EngineContext::kMaxRendererSlots )
+        // Through the SHARED rule, not a comparison written out here: ThumbnailService asks the same
+        // question with a different entitlement, and two spellings of one policy is how they come to
+        // disagree (Editor/Widgets/PreviewSlotBudget.hpp). This one is a UserSurface — somebody clicked an
+        // entity and is looking at the row — so it is allowed the last slot; the background captures are
+        // not, which is what keeps a picture in the cache for the moment this refusal fires.
+        //
+        // Declining is checked every frame, not once: a scene view or a material window closing hands its
+        // slot back, and the next frame builds the preview after all.
+        if ( !PreviewSlotBudget::MayClaim( PreviewSlotBudget::Demand::UserSurface,
+                                           Graphic::SceneRenderer::GetLiveRendererCount(),
+                                           EngineContext::kMaxRendererSlots ) )
         {
             // Once per stretch of scarcity, not once per frame: this is a state the user can leave by
             // closing a window, and a line every frame would bury the log it belongs in.
