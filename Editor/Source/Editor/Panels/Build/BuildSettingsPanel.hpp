@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 #include "../IPanel.hpp"
 
 #include <atomic>
@@ -41,8 +43,15 @@ namespace Desert::Editor
         std::atomic<bool> m_Building{ false };
         std::atomic<bool> m_HasResult{ false };
         bool              m_LastSuccess = false;
-        std::string       m_LastMessage; // guarded by the m_Building/m_HasResult handshake
-        std::string       m_LastPackageDir;
+        // COMPLETE IS NOT SUCCESS, and the panel has to paint the difference: a package exists in both
+        // cases, but an incomplete one ships assets the player's machine will cook at every start (or
+        // that are broken outright). Before I12 both were the same green, so the last step before a
+        // build reaches a player was the one step that could not report a partial result.
+        bool        m_LastComplete      = false;
+        size_t      m_LastCookFailures  = 0;
+        size_t      m_LastCookUnwritten = 0;
+        std::string m_LastMessage; // guarded by the m_Building/m_HasResult handshake
+        std::string m_LastPackageDir;
 
         // Startup-scene picker: the .desce scenes found under the project (relative to the project
         // dir), scanned lazily on first render and via the Rescan button.

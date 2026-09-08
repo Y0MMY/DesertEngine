@@ -195,10 +195,13 @@ namespace Desert::Editor
             Common::JobSystem::Get().Submit(
                  [this, options]
                  {
-                     const auto result = PackageGame( options );
-                     m_LastSuccess     = result.Success;
-                     m_LastMessage     = result.Message;
-                     m_LastPackageDir  = result.PackageDir;
+                     const auto result   = PackageGame( options );
+                     m_LastSuccess       = result.Success;
+                     m_LastComplete      = result.Complete();
+                     m_LastCookFailures  = result.CookFailures;
+                     m_LastCookUnwritten = result.CookUnwritten;
+                     m_LastMessage       = result.Message;
+                     m_LastPackageDir    = result.PackageDir;
                      m_HasResult.store( true );
                      m_Building.store( false );
                  } );
@@ -217,10 +220,13 @@ namespace Desert::Editor
             Common::JobSystem::Get().Submit(
                  [this]
                  {
-                     const auto result = BuildContentPak();
-                     m_LastSuccess     = result.Success;
-                     m_LastMessage     = result.Message;
-                     m_LastPackageDir  = result.PackageDir;
+                     const auto result   = BuildContentPak();
+                     m_LastSuccess       = result.Success;
+                     m_LastComplete      = result.Complete();
+                     m_LastCookFailures  = result.CookFailures;
+                     m_LastCookUnwritten = result.CookUnwritten;
+                     m_LastMessage       = result.Message;
+                     m_LastPackageDir    = result.PackageDir;
                      m_HasResult.store( true );
                      m_Building.store( false );
                  } );
@@ -234,9 +240,20 @@ namespace Desert::Editor
         {
             ImGui::Spacing();
             ImGui::PushTextWrapPos( 0.0f );
-            ImGui::TextColored( m_LastSuccess ? ImVec4( 0.5f, 0.9f, 0.5f, 1.0f )
-                                              : ImVec4( 1.0f, 0.4f, 0.4f, 1.0f ),
-                                "%s", m_LastMessage.c_str() );
+            // THREE STATES, THREE COLOURS. Green is "a package exists and everything the cook was asked
+            // to produce is in it"; AMBER is "a package exists and something is missing from it"; red is
+            // "no package". The middle one had no colour of its own before I12 and was painted green,
+            // which is the whole defect: the person who built the game saw the same thing whether or not
+            // it was complete, and the first reader of the difference was the player.
+            const ImVec4 colour = !m_LastSuccess   ? ImVec4( 1.0f, 0.4f, 0.4f, 1.0f )
+                                  : m_LastComplete ? ImVec4( 0.5f, 0.9f, 0.5f, 1.0f )
+                                                   : ImVec4( 1.0f, 0.75f, 0.35f, 1.0f );
+            ImGui::TextColored( colour, "%s", m_LastMessage.c_str() );
+            // The counts, said as numbers under the message rather than left inside it: the message is
+            // one long sentence and this is the line somebody scanning a build result reads first.
+            if ( m_LastSuccess && !m_LastComplete )
+                ImGui::TextColored( colour, "INCOMPLETE: %zu asset(s) not cooked, %zu artifact(s) not written",
+                                    m_LastCookFailures, m_LastCookUnwritten );
             ImGui::PopTextWrapPos();
             // REVEAL IS macOS-ONLY ON PURPOSE, and this is a decision rather than an omission.
             //

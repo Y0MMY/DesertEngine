@@ -363,16 +363,20 @@ namespace Desert::Editor
             << stats.Files << " files, " << ( stats.Bytes / ( 1024 * 1024 ) ) << " MB, " << options.Config
             << " runtime" << ( bundle ? ( bundledVulkan ? ", Vulkan bundled" : ", Vulkan NOT bundled" ) : "" )
             << ")";
-        // An artifact the cook could not write is a hole in the shipped cache that nothing downstream
-        // can notice — the pak packs whatever is there and the game starts, just slowly, on the
-        // player's machine. So it is said HERE, in the result the packaging UI shows, and not left to
-        // a log line nobody reads. (Compile/bake failures are NOT raised this way: a project may ship
-        // a deliberately broken shader, and the runtime reports that one for itself.)
+        // WHAT THE COOK COULD NOT PUT IN, said in the result rather than left to a log line nobody
+        // reads — and carried as NUMBERS on PackageResult as well as prose, because a caller has to be
+        // able to BRANCH on it (see PackageResult's own note). Both kinds are named because they are
+        // different facts: content that could not be read is already-broken content the project may
+        // have chosen to ship, an artifact that could not be written is a hole in the shipped cache.
+        if ( cook.Failures > 0 )
+            msg << "  WARNING: " << cook.Failures
+                << " asset(s) could not be cooked; the game will read the sources at every start (or "
+                   "report them broken)";
         if ( cook.StoreFailures > 0 )
             msg << "  WARNING: " << cook.StoreFailures
                 << " cooked artifact(s) could not be written; the game will rebuild them at every start";
         LOG_INFO( "[Package] {}", msg.str() );
-        return { true, msg.str(), fs::absolute( root, ec ).string() };
+        return { true, msg.str(), fs::absolute( root, ec ).string(), cook.Failures, cook.StoreFailures };
     }
     PackageResult BuildContentPak()
     {
@@ -407,10 +411,15 @@ namespace Desert::Editor
         std::ostringstream msg;
         msg << "Content.dpak rebuilt: " << stats.Files << " file(s), " << ( stats.Bytes / ( 1024 * 1024 ) )
             << " MB -> " << fs::absolute( pakPath, ec ).string();
+        // Both counts, for the reason PackageGame's twin above states at length.
+        if ( cook.Failures > 0 )
+            msg << "  WARNING: " << cook.Failures
+                << " asset(s) could not be cooked; the game will read the sources at every start (or "
+                   "report them broken)";
         if ( cook.StoreFailures > 0 )
             msg << "  WARNING: " << cook.StoreFailures
                 << " cooked artifact(s) could not be written; the game will rebuild them at every start";
         LOG_INFO( "[Package] {}", msg.str() );
-        return { true, msg.str(), fs::absolute( pakPath, ec ).string() };
+        return { true, msg.str(), fs::absolute( pakPath, ec ).string(), cook.Failures, cook.StoreFailures };
     }
 } // namespace Desert::Editor

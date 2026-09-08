@@ -110,6 +110,13 @@ namespace
          { "m_HasResult", nullptr,
            "the other half of that handshake — whether the strings below are readable yet." },
          { "m_LastSuccess", nullptr, "the finished job's outcome, displayed and nothing else." },
+         { "m_LastComplete", nullptr,
+           "whether the finished package shipped everything the cook was asked to produce — the THIRD "
+           "state (I12). Displayed as a colour and nothing else; not a choice anybody makes." },
+         { "m_LastCookFailures", nullptr,
+           "how many assets the cook could not read, displayed under the message. Not a choice." },
+         { "m_LastCookUnwritten", nullptr,
+           "how many cooked artifacts did not reach the disk, displayed likewise. Not a choice." },
          { "m_LastMessage", nullptr, "the finished job's message, displayed and nothing else." },
          { "m_LastPackageDir", nullptr,
            "where the finished job wrote, so Reveal in Finder has somewhere to open." },
@@ -313,6 +320,18 @@ namespace
         return out;
     }
 
+    // The OTHER direction of the same relation, and it had none until I12. This suite censused what the
+    // packager is TOLD; nothing censused what it ANSWERS — so `CookStats::Failures` was counted, logged
+    // and dropped, and a package with an unbakeable font came back indistinguishable from a clean one.
+    // A result field nobody reads is a dead setting with the blast radius of a shipped build.
+    std::vector<std::string> PackageResultFields()
+    {
+        std::vector<std::string> out;
+        for ( const auto& meta : rfl::fields<Desert::Editor::PackageResult>() )
+            out.push_back( meta.name() );
+        return out;
+    }
+
     struct Sources
     {
         std::string Header;
@@ -354,6 +373,44 @@ TEST( BuildSettingsConsumers, TheSourcesThisSuiteReadsAreWhereItThinksTheyAre )
          << "no editing widget was found in the panel — either the panel stopped offering anything, or "
             "kEditingWidgets no longer names the calls it uses";
     EXPECT_FALSE( PackageOptionFields().empty() ) << "PackageOptions enumerated to no fields";
+    EXPECT_FALSE( PackageResultFields().empty() ) << "PackageResult enumerated to no fields";
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 1a. WHAT THE PACKAGER ANSWERS IS READ BY THE PANEL THAT SHOWS IT
+// ---------------------------------------------------------------------------------------------------
+//
+// The mirror of `EveryPackageOptionIsOfferedBySomething`, and the direction that was missing. Packaging
+// is the LAST step before a build reaches a player, so a fact the packager reports and the panel drops
+// is a fact nobody learns until somebody runs the game: `Failures` was exactly that, and the panel
+// painted an incomplete package the same green as a complete one.
+//
+// Read against the panel's SOURCE, because that is where a result is consumed — the panel copies the
+// fields it cares about into its own members on a worker thread. `Complete()` is a member FUNCTION and
+// so is not in this census; it is covered by the panel having to read it to pick a colour, which the
+// assertion below states as its own row.
+TEST( BuildSettingsConsumers, EveryPackageResultFieldIsReadByThePanel )
+{
+    const Sources src = ReadSources();
+    ASSERT_FALSE( src.Panel.empty() );
+
+    const std::vector<std::string> fields = PackageResultFields();
+    ASSERT_FALSE( fields.empty() );
+
+    for ( const std::string& field : fields )
+    {
+        EXPECT_TRUE( AnchorReadsField( src.Panel, "result", field ) )
+             << "PackageResult::" << field
+             << " is reported by the packager and read by nothing in the Build Settings panel. A result "
+                "field with no reader is a fact the person who built the game never sees - which is the "
+                "defect I12 removed, arriving again under a new name.";
+    }
+
+    // The named third state, which is what makes the counts actionable rather than decorative: the panel
+    // has to ASK it, or it is back to painting one colour for two different outcomes.
+    EXPECT_NE( src.Panel.find( "result.Complete()" ), std::string::npos )
+         << "the panel does not ask whether the package is COMPLETE, so it cannot distinguish a package "
+            "that shipped everything from one that did not.";
 }
 
 // ---------------------------------------------------------------------------------------------------
