@@ -127,7 +127,12 @@ Shader "DeferredLighting"
         vec3 GatherIndirectGI(vec2 uv, vec3 worldPos, vec3 N, vec3 sunL, vec3 sunRadiance)
         {
         	const int   SAMPLES = 12;     // GI sample count (perf/quality knob)
-        	const float RADIUS  = 0.12;   // screen-space gather radius (UV) — wider = longer-range bleed, but noisier
+        	// NOT a range knob, measured: because the sum below is divided by SAMPLES whether or not a
+        	// sample found an emitter, and BounceFalloff grows with distance, a WIDER radius spreads the
+        	// same fixed budget over dimmer contributions. At 0.45 instead of 0.12 the only non-zero
+        	// reading on CornellDemo's floor fell from 0.001 to 0.000. The line used to say "wider =
+        	// longer-range bleed, but noisier"; the first half of that is false.
+        	const float RADIUS  = 0.12;   // screen-space gather radius (UV)
         	const float GOLDEN  = 2.3999632; // golden angle for an even spiral
 
         	float ang      = ssgiHash(uv * 2048.0) * 6.2831853;
