@@ -27,8 +27,10 @@
 //   2. THE CALL SITES could stop using it — most cheaply by doing what the task forbade in as many
 //      words: adding a registration to the found branch and leaving the created branch's one in place.
 //      Two registration sites is the same disagreement waiting to happen, so the census below asserts
-//      that each service has EXACTLY ONE registration site in the resolver. On the tree before this
-//      task it counted two per service, which is the red this suite was shown in.
+//      that each of the three services the resolver touches is reached from EXACTLY ONE place, and that
+//      BOTH spellings of a reference (a path and a stable handle) go through it. On the tree before this
+//      task the counts were 2 for meshes, 3 for materials and 1 for textures — and the texture case is
+//      why the census needs both halves, because its single site served only one of the two spellings.
 //
 // NO GPU, NO WINDOW, NO ASSET MANAGER. The rule is a template over three callables and the census is a
 // text scan, so this suite runs anywhere the sweep does.
@@ -116,10 +118,9 @@ TEST( SceneAssetRegistration, AFoundRecordIsRegistered )
 {
     Ledger ledger;
 
-    const Record resolved = ResolveSceneReference( [] { return Record{ 7 }; },
-                                                   [] { return Record{ 0 }; }, // must not be reached
-                                                   [&ledger]( const Record& r, ReferenceOrigin o )
-                                                   { ledger.Registered.push_back( { r.Id, o } ); } );
+    const Record resolved = ResolveSceneReference(
+         [] { return Record{ 7 }; }, [] { return Record{ 0 }; }, // must not be reached
+         [&ledger]( const Record& r, ReferenceOrigin o ) { ledger.Registered.push_back( { r.Id, o } ); } );
 
     EXPECT_EQ( resolved.Id, 7 );
     ASSERT_EQ( ledger.Registered.size(), 1u );
@@ -180,9 +181,18 @@ TEST( SceneAssetRegistration, TheRouteNotTakenIsNotRun )
 {
     int finds = 0, creates = 0;
 
-    ResolveSceneReference( [&finds] { ++finds; return Record{ 4 }; },
-                           [&creates] { ++creates; return Record{ 5 }; },
-                           []( const Record&, ReferenceOrigin ) {} );
+    ResolveSceneReference(
+         [&finds]
+         {
+             ++finds;
+             return Record{ 4 };
+         },
+         [&creates]
+         {
+             ++creates;
+             return Record{ 5 };
+         },
+         []( const Record&, ReferenceOrigin ) {} );
 
     EXPECT_EQ( finds, 1 );
     EXPECT_EQ( creates, 0 );

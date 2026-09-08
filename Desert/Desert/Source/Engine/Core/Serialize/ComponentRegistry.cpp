@@ -273,8 +273,7 @@ namespace Desert::Core::Serialize
                 return;
             LOG_WARN( "[F6PROBE] mesh '{}' was NOT in the service when the scene named it", named );
 
-            if ( const auto registered = service->RegisterAsset( mesh, registry.weak_from_this() );
-                 !registered )
+            if ( const auto registered = service->RegisterAsset( mesh, registry.weak_from_this() ); !registered )
             {
                 LOG_ERROR( "[Mesh] '{}' named by the scene could not be registered: {}", named,
                            registered.GetError() );
@@ -458,8 +457,7 @@ namespace Desert::Core::Serialize
                      [&]
                      {
                          return Assets::Asset<Assets::MaterialAsset>(
-                              m.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High,
-                                                                           full ) );
+                              m.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, full ) );
                      },
                      []( const Assets::Asset<Assets::MaterialAsset>& material, ReferenceOrigin origin )
                      {

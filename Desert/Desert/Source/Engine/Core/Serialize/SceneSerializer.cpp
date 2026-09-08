@@ -356,7 +356,7 @@ namespace Desert::Core
         LOG_INFO( "[F6TIME] '{}': {} entity record(s) deserialized in {} ms", scene.SceneName,
                   scene.Entities.size(),
                   std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() -
-                                                                        f6DeserializeStart )
+                                                                         f6DeserializeStart )
                        .count() );
 
         return BOOLSUCCESS;
