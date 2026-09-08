@@ -4,6 +4,7 @@
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <typeinfo>
 #include <unordered_map>
@@ -11,7 +12,26 @@
 
 namespace Desert::Assets
 {
-    class AssetManager final
+    // OWNED BY A shared_ptr, AND IT CAN NOW SAY SO — `weak_from_this()`.
+    //
+    // Not decoration. `MeshService::RegisterAsset` requires a `weak_ptr<AssetManager>` because a lazily
+    // registered `.stmesh` shell defers its parse, and the parse is the first moment a `.skmesh` learns
+    // which skeleton it needs; without a registry to ask, that deferred load fails and the mesh is
+    // invisible. Until this line, the ONLY caller able to satisfy that requirement was `AssetPreloader`,
+    // which happens to hold the `weak_ptr` the layer gave it. Everybody else — including the scene parse,
+    // which is where a scene's own meshes are resolved — had a bare `const AssetManager&` and could
+    // therefore only use the EAGER `Register`, whose deferred-load path then failed for exactly the same
+    // reason with `no AssetManager is bound`. MEASURED: with the preloader's registration loop switched
+    // off, `M10_MeshSlot` renders no mesh and prints that error once per frame, ninety times.
+    //
+    // So the requirement was satisfiable by one caller by accident of who held what, which is the same
+    // "it works because somebody else did the work earlier" this file's neighbours keep paying for. A
+    // registry that can hand out its own weak reference makes it satisfiable by construction.
+    //
+    // STILL HEADER-ONLY (a base class needs no translation unit), which eleven suites depend on. A
+    // manager built on the stack — as those suites build it — returns an EMPTY weak_ptr here, and
+    // `RegisterAsset` refuses that by name rather than storing a reference that can never lock.
+    class AssetManager final : public std::enable_shared_from_this<AssetManager>
     {
     public:
         /**

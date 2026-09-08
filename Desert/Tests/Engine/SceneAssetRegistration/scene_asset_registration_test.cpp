@@ -212,16 +212,41 @@ TEST( SceneAssetRegistration, TheResolverHasExactlyOneRegistrationSitePerService
     // MEASURED ON THE TREE THIS TASK STARTED FROM: 2 for the mesh service (FromPath's create branch,
     // FromGuid's guard) and 3 for the material service (the same two plus FromGuid's `Get`-as-a-guard).
     // That is the red this suite was shown in.
+    //
+    // THE TEXTURE COUNT WAS ALREADY 1 AND THE TEXTURE RELATION WAS STILL BROKEN, which is exactly what a
+    // count cannot see: the one site was in `FromPath` and `FromGuid` registered NOTHING. So the count
+    // below is only half the census, and the second half — every spelling reaching that one site — is the
+    // assertion after it.
     const size_t meshSites     = CountOccurrences( source, "GetMeshService()" );
     const size_t materialSites = CountOccurrences( source, "GetMaterialService()" );
+    const size_t textureSites  = CountOccurrences( source, "GetTextureService()" );
 
     EXPECT_EQ( meshSites, 1u ) << "the mesh reference must reach the service in ONE place, so the found "
                                   "and created routes cannot drift apart";
     EXPECT_EQ( materialSites, 1u ) << "the material reference must reach the service in ONE place, so the "
                                       "found and created routes cannot drift apart";
+    // The texture reference failed the relation in the OPPOSITE direction — FromPath registered and
+    // FromGuid did not register at all — and a handle is the only spelling a component uses for a
+    // texture, so the branch that skipped it was the common one.
+    EXPECT_EQ( textureSites, 1u ) << "the texture reference must reach the service in ONE place, so the "
+                                     "path and handle spellings cannot drift apart";
 
-    // And that one place is reached through the rule above, not by a hand-written find-else-create beside
-    // it. Two call sites: the mesh reference and the material reference.
+    // BOTH SPELLINGS REACH THAT ONE SITE. A scene names an asset two ways — a path (`FromPath`) and a
+    // stable handle (`FromGuid`) — and the relation is broken the moment one of them registers and the
+    // other does not, whatever the site count says. Each helper is therefore its definition plus at least
+    // the two calls: three occurrences of the name. On the tree before this task all three are ZERO,
+    // because the helpers did not exist and each spelling did its own thing inline.
+    EXPECT_GE( CountOccurrences( source, "EnsureMeshRegistered" ), 3u )
+         << "the mesh reference must register on BOTH the path and the handle spelling";
+    EXPECT_GE( CountOccurrences( source, "EnsureMaterialRegistered" ), 3u )
+         << "the material reference must register on BOTH the path and the handle spelling";
+    EXPECT_GE( CountOccurrences( source, "EnsureTextureRegistered" ), 3u )
+         << "the texture reference must register on BOTH the path and the handle spelling";
+
+    // And the find-else-create that precedes it is the rule from AssetReferenceResolve.hpp, not a
+    // hand-written one beside it. Two call sites: the mesh reference and the material reference. (A
+    // texture reference has no create-on-miss of its own here — TextureSlot.cpp owns that half — so it
+    // does not appear in this count.)
     EXPECT_GE( CountOccurrences( source, "ResolveSceneReference(" ), 2u );
 }
 
