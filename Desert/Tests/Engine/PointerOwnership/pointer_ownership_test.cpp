@@ -163,11 +163,16 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   both read so the two cannot spell the subject's facet differently — and it is the same easy answer
     //   the two documents beside it give: a string literal in static storage, owned by nobody and outliving
     //   everything.
-    EXPECT_EQ( CountOf( Form::Raw ), 326 );
-    EXPECT_EQ( CountOf( Form::Shared ), 316 );
+    //
+    //   787 -> 789, same task and the same two movements. The Sequencer became a document over TWO subject
+    //   types — the rig's SkinnedMeshComponent and a UI element's UIAnimComponent, which are two different
+    //   kinds of thing and cannot share a key — so it carries two of those class constants instead of one,
+    //   and its scene went shared -> weak with the other documents'.
+    EXPECT_EQ( CountOf( Form::Raw ), 328 );
+    EXPECT_EQ( CountOf( Form::Shared ), 315 );
     EXPECT_EQ( CountOf( Form::Unique ), 110 );
-    EXPECT_EQ( CountOf( Form::Weak ), 35 );
-    EXPECT_EQ( (int)Members().size(), 787 )
+    EXPECT_EQ( CountOf( Form::Weak ), 36 );
+    EXPECT_EQ( (int)Members().size(), 789 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }
@@ -378,7 +383,7 @@ TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
     // `shared_ptr` here is a false impression of shared ownership, and the register's job is to make
     // the true owner findable instead of mass-replacing them for uniformity -- churn that would hide
     // the seven real findings in a diff of two hundred files.
-    EXPECT_EQ( CountOf( Form::Shared ), 316 );
+    EXPECT_EQ( CountOf( Form::Shared ), 315 );
     EXPECT_GT( CountOf( Form::Shared ), CountOf( Form::Unique ) + CountOf( Form::Weak ) );
 }
 
@@ -538,6 +543,29 @@ TEST( PointerOwnership, EditorLayerDeclaresItsHostsBeforeItsPanels )
              << " is now declared AFTER m_Panels, so it is destroyed BEFORE the panels that point at it. "
                 "Every panel holding a raw pointer to it is then reading freed memory during its own "
                 "destructor. Move it back above m_Panels, or give the panels a weak handle.";
+    }
+
+    // AND THE SAME ORDER FOR DOCUMENTS, WHICH THIS TEST DID NOT COVER. Half a dozen rows in the register
+    // are about panels that are no longer panels: U7 moved the anim graph and the particle editor into
+    // m_OpenDocuments and U7-2 moved the sequencer and the UI editor, and a DOCUMENT holding
+    // `AnimationLibrary*` is guarded by its host preceding m_OpenDocuments — not by the host preceding
+    // m_Panels, which is a different member and could satisfy the loop above while this failed.
+    //
+    // The rows said "before m_Panels" for a whole release after their subject stopped being a panel. They
+    // happened to be true, because m_OpenDocuments is itself above m_Panels; a true sentence about the
+    // wrong container is exactly the guarantee that stops holding the day somebody reorders one of the
+    // three, and nothing would have gone red.
+    const std::size_t documents = src.find( "OpenDocuments m_OpenDocuments" );
+    ASSERT_NE( documents, std::string::npos );
+    for ( const char* host : { "std::shared_ptr<Assets::AssetManager>", "m_AnimationLibrary" } )
+    {
+        const std::size_t at = src.find( host );
+        ASSERT_NE( at, std::string::npos ) << host << " is no longer a member of EditorLayer.";
+        EXPECT_LT( at, documents )
+             << host
+             << " is now declared AFTER m_OpenDocuments, so it is destroyed BEFORE the documents that point "
+                "at it. Every document holding a raw pointer to it is then reading freed memory during its "
+                "own destructor. Move it back above m_OpenDocuments, or give the documents a weak handle.";
     }
 }
 

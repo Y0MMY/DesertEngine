@@ -10,6 +10,7 @@
 #include <Editor/Panels/Clouds/CloudsPanel.hpp>
 #include <Editor/Panels/Particles/ParticleEditorPanel.hpp>
 #include <Editor/Panels/UI/UIEditorPanel.hpp>
+#include <Editor/Panels/Sequencer/SequencerPanel.hpp>
 
 #include <Common/Core/AssetHandle.hpp>
 #include <Engine/Core/Scene.hpp>
@@ -982,6 +983,31 @@ namespace Desert::Editor
             auto& c = en.GetComponent<C>();
             UIAnchors::DrawControls( c.Data );
             PropertyEditorBuilder::Draw( &c.Data, "UILayoutData", ctx.AssetMgr(), ctx.UIHelper );
+
+            // ── THE ELEMENT'S PROPERTY TIMELINE ────────────────────────────────────────────────────────
+            //
+            // CREATE-THEN-OPEN when there is no clip yet, the way the terrain and cloud material rows
+            // create a `.demat` and open it in one press. The Sequencer's UI half is a document over the
+            // UIAnimComponent, so an element without one has no subject to open — the old "Add UI
+            // Animation" button lived INSIDE that window, which meant the window had to be able to exist
+            // over nothing. It cannot any more, so the button moved to where the thing is made.
+            if ( ctx.FieldFilter )
+                return; // while searching, only the matched fields are on screen
+
+            const bool hasClip = en.HasComponent<::Desert::ECS::UIAnimComponent>();
+            ImGui::Spacing();
+            if ( ImGui::Button( hasClip ? ICON_MDI_CHART_TIMELINE_VARIANT "  Open in Sequencer"
+                                        : ICON_MDI_PLUS "  Add UI Animation",
+                                ImVec2( -FLT_MIN, 0.0f ) ) )
+            {
+                if ( !hasClip )
+                    en.AddComponent<::Desert::ECS::UIAnimComponent>();
+                ::Desert::Editor::Core::SubjectOpenRequests::Request(
+                     ::Desert::Editor::SequencerPanel::UISubjectFor( ::Desert::Editor::EntityId( en ) ) );
+            }
+            ::Desert::Editor::Utils::ImGuiUtilities::Tooltip(
+                 hasClip ? "Key this element's Offset / Size / Opacity / Color over time"
+                         : "Add a clip that keys Offset / Size / Opacity / Color over time, and open it" );
         };
         return e;
     }

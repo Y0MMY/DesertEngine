@@ -138,9 +138,20 @@ namespace Desert::Editor
         // clicking a character is not a request to author its animation.
         ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
         const float half = ( ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x ) * 0.5f;
+        // THE RIG'S OWN TIMELINE, ON THIS ENTITY. It used to be SequencerPanel::RequestOpen() — a static
+        // inbox with no payload, so this button could only say "reveal the one Sequencer window" and the
+        // window then had to guess which rig it was about from the selection. It sends a SUBJECT now, so
+        // two characters can be keyed side by side and a second press focuses the window that is already
+        // on this one. Disabled without a rig, because the subject is the SkinnedMeshComponent: a button
+        // that opened nothing and said nothing is the dead control this project's contract forbids.
+        const bool hasRig = entity.HasComponent<ECS::SkinnedMeshComponent>();
+        ImGui::BeginDisabled( !hasRig );
         if ( ImGui::Button( ICON_MDI_CHART_TIMELINE "  Sequencer", ImVec2( half, 0.0f ) ) )
-            SequencerPanel::RequestOpen();
-        Utils::ImGuiUtilities::Tooltip( "Author clips on a timeline (keyframes per bone)" );
+            Core::SubjectOpenRequests::Request( SequencerPanel::SkeletalSubjectFor( EntityId( entity ) ) );
+        ImGui::EndDisabled();
+        Utils::ImGuiUtilities::Tooltip( hasRig ? "Author clips on a timeline (keyframes per bone)"
+                                               : "Needs a Skinned Mesh: the timeline keys BONES, and the "
+                                                 "bones are that component's skeleton" );
         ImGui::SameLine();
         if ( ImGui::Button( ICON_MDI_LAYERS "  Anim Layers", ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
             Core::PanelRequests::Open( "Anim Layers" );

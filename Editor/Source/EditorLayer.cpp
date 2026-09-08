@@ -174,18 +174,16 @@ namespace Desert::Editor
             return ICON_MDI_HISTORY;
         if ( name == "Collections" )
             return ICON_MDI_SHAPE_OUTLINE;
-        if ( name == "Sequencer" )
-            return ICON_MDI_CHART_TIMELINE;
         if ( name == "Anim Layers" )
             return ICON_MDI_ANIMATION;
         if ( name == "Node Graph" )
             return ICON_MDI_GRAPH;
         if ( name == "Model from Photos" )
             return ICON_MDI_CUBE_SCAN;
-        // "Anim Graph", "Particle Editor" and "UI Editor" were here. They are DOCUMENTS now, and a
-        // document's icon comes from its registration rather than from a table keyed on a panel name — this
-        // table can only ever match a tool's constant name, and a document is named after the thing it
-        // edits. See SubjectEditorRegistry::Registration::Icon.
+        // "Anim Graph", "Particle Editor", "UI Editor" and "Sequencer" were here. They are DOCUMENTS now,
+        // and a document's icon comes from its registration rather than from a table keyed on a panel name
+        // — this table can only ever match a tool's constant name, and a document is named after the thing
+        // it edits. See SubjectEditorRegistry::Registration::Icon.
         if ( name == "Lua Console" )
             return ICON_MDI_CONSOLE;
         if ( name == "Build Settings" )
@@ -211,12 +209,13 @@ namespace Desert::Editor
         for ( auto& panel : m_Panels )
         {
             // An EXPLICIT request always wins and applies to every panel, contextual or not: a button in
-            // Details ("Sequencer", "Anim Layers") asked for this panel BY NAME. It pins it, exactly like
-            // ticking it in the View menu — the user asked, so nothing auto-closes it.
+            // Details ("Anim Layers") asked for this panel BY NAME. It pins it, exactly like ticking it in
+            // the View menu — the user asked, so nothing auto-closes it.
             //
-            // BY NAME IS ALL A TOOL CAN BE ASKED FOR, and that is why the Anim Graph and the Particle
-            // Editor no longer come through here: "show the one Anim Graph window" was the most their
-            // Details buttons could say. Those two ask for a SUBJECT now
+            // BY NAME IS ALL A TOOL CAN BE ASKED FOR, and that is why the Anim Graph, the Particle Editor,
+            // the UI Editor and the Sequencer no longer come through here: "show the one Sequencer window"
+            // was the most their Details buttons could say, and the window then had to guess which rig it
+            // was about from the selection. They ask for a SUBJECT now
             // (Core::SubjectOpenRequests::Request), which is a different wire because it carries what to
             // edit — see Editor/Core/SubjectOpenRequest.hpp.
             switch ( Core::PanelRequests::Consume( panel->GetName() ) )
@@ -633,16 +632,15 @@ namespace Desert::Editor
         // Visual stubs for upcoming tools (hidden by default; toggled via the View menu). No real
         // functionality yet — they exist so the layouts/interactions can be iterated on early.
         m_Panels.Add<Editor::NodeGraphPanel>( m_AssetManager );
-        // THE ANIM GRAPH, THE PARTICLE EDITOR AND THE UI EDITOR ARE NOT CONSTRUCTED HERE ANY MORE, for the
-        // reason the four cloud panels above are not: they edit ONE thing, so they are documents. The
-        // difference is what that one thing is — a component on an entity rather than a file — which is what
-        // U7 made expressible (Editor/Core/EditorSubject.hpp). Dropping them from this list removes them from
-        // the View menu, the command palette and `--open-panel` at once, because all three are generic over
-        // m_Panels; they are reached from the component that holds them, in Details.
+        // THE ANIM GRAPH, THE PARTICLE EDITOR, THE UI EDITOR AND THE SEQUENCER ARE NOT CONSTRUCTED HERE ANY
+        // MORE, for the reason the four cloud panels above are not: they edit ONE thing, so they are
+        // documents. The difference is what that one thing is — a component on an entity rather than a file
+        // — which is what U7 made expressible (Editor/Core/EditorSubject.hpp). Dropping them from this list
+        // removes them from the View menu, the command palette and `--open-panel` at once, because all three
+        // are generic over m_Panels; they are reached from the component that holds them, in Details.
         m_Panels.Add<Editor::PhotogrammetryPanel>( m_MainScene, m_AssetManager.get() );
         m_Panels.Add<Editor::AssetReferencesPanel>( m_MainScene, m_AssetManager );
         m_Panels.Add<Editor::LuaConsolePanel>( m_MainScene.get(), m_AssetManager.get() );
-        m_Panels.Add<Editor::SequencerPanel>( m_MainScene, m_AnimationLibrary.get(), m_AssetManager.get() );
         m_Panels.Add<Editor::AnimLayersPanel>( m_MainScene, m_AnimationLibrary.get() );
         m_Panels.Add<Editor::BuildSettingsPanel>();
         // THE CLOUDS WINDOW IS A TOOL, and it must be: it is a setting the user keeps (View ▸ Clouds), it
@@ -784,6 +782,45 @@ namespace Desert::Editor
                            },
                            [this]( const SubjectId& subject )
                            { return EntityHasComponent<ECS::UICanvasComponent>( subject.Owner ); } } );
+
+        // THE TWO TIMELINES. One class, two subject types, and the argument for why they are two and not
+        // one is written out at the top of SequencerPanel.hpp: the rig timeline keys BONE POSES and is
+        // therefore about the SkinnedMeshComponent, while the anim graph next door keys states and
+        // transitions and is about the AnimationComponent — two editors under one key is refused by this
+        // registry by name, which is what made the question get answered.
+        //
+        // THE PRESENCE TEST ASKS FOR BOTH COMPONENTS, not just the one the subject is named after: a rig
+        // with no AnimationComponent has no clip to pick and no animator to pose, so offering the entry
+        // would open a window with nothing in it. It is the same predicate SequencerPanel::IsSubjectAlive
+        // answers with, asked of the current scene rather than of the document's own — see
+        // SubjectEditorRegistry::Registration::Exists for why those are two questions.
+        m_SubjectEditors.Register(
+             Editor::SequencerPanel::SkeletalSubjectType(),
+             Registration{ Editor::SequencerPanel::kSkeletalComponentTypeName, ICON_MDI_CHART_TIMELINE,
+                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
+                           {
+                               return std::make_unique<Editor::SequencerPanel>(
+                                    subject, SubjectEntityName( subject, "Sequencer" ),
+                                    Editor::SequencerPanel::Timeline::Skeletal, m_MainScene,
+                                    m_AnimationLibrary.get(), m_AssetManager.get() );
+                           },
+                           [this]( const SubjectId& subject )
+                           {
+                               return EntityHasComponent<ECS::SkinnedMeshComponent>( subject.Owner ) &&
+                                      EntityHasComponent<ECS::AnimationComponent>( subject.Owner );
+                           } } );
+        m_SubjectEditors.Register(
+             Editor::SequencerPanel::UISubjectType(),
+             Registration{ Editor::SequencerPanel::kUIComponentTypeName, ICON_MDI_CHART_TIMELINE_VARIANT,
+                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
+                           {
+                               return std::make_unique<Editor::SequencerPanel>(
+                                    subject, SubjectEntityName( subject, "UI Timeline" ),
+                                    Editor::SequencerPanel::Timeline::UI, m_MainScene, m_AnimationLibrary.get(),
+                                    m_AssetManager.get() );
+                           },
+                           [this]( const SubjectId& subject )
+                           { return EntityHasComponent<ECS::UIAnimComponent>( subject.Owner ); } } );
 
         // ── AND HOW A PATH BECOMES ONE OF THEM ────────────────────────────────────────────────────────
         //
@@ -3053,13 +3090,12 @@ namespace Desert::Editor
                 // Contextual tools (IPanel::IsContextual) get a home too, so the one that opens itself
                 // lands where its work belongs instead of floating over the scene: timelines along the
                 // bottom next to Assets/Logs, authoring palettes on the right beside Details.
-                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Sequencer" ).c_str(), bottom );
                 ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Anim Layers" ).c_str(), bottom );
-                // No line for "Anim Graph", "Particle Editor" or "UI Editor": they are documents, and a
-                // document does not have a fixed home in the layout — it docks into the document well
-                // beside the others (DrawDocuments sets the dock id), which is the whole point of the well
-                // existing. A line here would also name a window that no longer exists under that title: a
-                // document's ImGui id is "###doc<subject>", so it could never have matched anyway.
+                // No line for "Anim Graph", "Particle Editor", "UI Editor" or "Sequencer": they are
+                // documents, and a document does not have a fixed home in the layout — it docks into the
+                // document well beside the others (DrawDocuments sets the dock id), which is the whole point
+                // of the well existing. A line here would also name a window that no longer exists under
+                // that title: a document's ImGui id is "###doc<subject>", so it could never have matched.
                 ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Modeling" ).c_str(), left );
 
                 // The well itself. It is what makes the document node FINDABLE: a dock node with nothing in
@@ -5575,11 +5611,11 @@ namespace Desert::Editor
         static constexpr const char* kContentGroup[]   = { "Assets", "Asset References", "Shader Library" };
         static constexpr const char* kOutputGroup[]    = { "Logs", "Lua Console", "History" };
         static constexpr const char* kViewportGroup[]  = { "Scene###scene" };
-        // "Anim Graph", "Particle Editor" and "UI Editor" are gone from this list because they are gone
-        // from the registry this menu loops over — a name left here would draw a group entry for a panel
-        // that does not exist. They are opened from the component that holds them, in Details.
+        // "Anim Graph", "Particle Editor", "UI Editor" and "Sequencer" are gone from these lists because
+        // they are gone from the registry this menu loops over — a name left here would draw a group entry
+        // for a panel that does not exist. They are opened from the component that holds them, in Details.
         static constexpr const char* kGraphGroup[]     = { "Node Graph" };
-        static constexpr const char* kSequencerGroup[] = { "Sequencer", "Anim Layers" };
+        static constexpr const char* kSequencerGroup[] = { "Anim Layers" };
         static constexpr const char* kToolGroup[]      = { "Modeling", "Model from Photos", "Build Settings" };
 
         std::unordered_set<std::string> placed;
