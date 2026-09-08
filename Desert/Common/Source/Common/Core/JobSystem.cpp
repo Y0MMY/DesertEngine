@@ -5,8 +5,8 @@
 #include <optick.h>
 
 #include <algorithm>
-#include <atomic>
 #include <exception>
+#include <memory>
 
 namespace Common
 {

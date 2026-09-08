@@ -21,8 +21,10 @@ namespace Desert::Assets
         constexpr uint32_t kFormatRgba8 = 0u;
 
         // How many lumps one body may be made of. The bake is `voxels x blobs` ellipsoid evaluations —
-        // 1 048 576 x 64 is 67 million, about a second optimised — so the ceiling is a bake time an artist
-        // will wait through rather than an expressive limit. The shipped example uses eight.
+        // 1 048 576 x 64 is 67 million — so the ceiling is a bake time an artist will wait through rather
+        // than an expressive limit, and Г10 bought the ceiling a lot of room by handing the z-slabs to the
+        // pool: the shipped eight-lump body went from 1 383 ms to 206 ms, Debug, best of three. The shipped
+        // example uses eight.
         constexpr uint32_t kMaxBlobs = 64u;
 
         // The weight's range, and it is a statement about DISTANCE rather than a taste. A weight dilates
@@ -664,10 +666,10 @@ namespace Desert::Assets
              {
                  for ( uint32_t z = static_cast<uint32_t>( zBegin ); z < static_cast<uint32_t>( zEnd ); ++z )
                  {
-                     // BETWEEN SLABS AND NOT INSIDE THEM. 128 calls over a bake of tens of seconds is a
-                     // progress bar that moves smoothly and costs nothing measurable; per voxel it would be
-                     // a million indirect calls through a std::function and would dominate the arithmetic
-                     // it is reporting on.
+                     // BETWEEN SLABS AND NOT INSIDE THEM. 128 calls over a bake of hundreds of milliseconds
+                     // is a progress bar that moves smoothly and costs nothing measurable; per voxel it
+                     // would be a million indirect calls through a std::function and would dominate the
+                     // arithmetic it is reporting on.
                      if ( onProgress )
                      {
                          std::lock_guard<std::mutex> lk( progressMutex );

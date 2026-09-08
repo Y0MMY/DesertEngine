@@ -183,11 +183,16 @@ namespace Common
          *   - the caller claims and runs ranges itself until the cursor is empty, so the loop always
          *     completes even if not one helper ever runs;
          *   - only then does it wait, and only on the ranges a helper has ALREADY CLAIMED — and a helper
-         *     that has claimed one is by definition running on a worker thread, executing bounded work
-         *     that never blocks on this pool.
+         *     that has claimed one is by definition running on a worker thread.
          * The wait's precondition is therefore "a thread that is running will finish", never "a job needs
          * a free worker". Worst case — every worker busy — the caller does all the work serially, which
-         * is precisely what the old implementation degraded to when it did not hang.
+         * is precisely what the old implementation degraded to when it did not hang. Nesting is covered by
+         * the same argument by induction: a body that calls this function again does not block on the pool
+         * either, so "a running range finishes" stays true at any depth.
+         *
+         * WHAT IS STILL YOUR RESPONSIBILITY: the body must not wait for work only a WORKER can do — an
+         * Async() future, a hand-rolled latch another job signals. That is the one way to reintroduce the
+         * cycle, and no primitive here can detect it.
          *
          * @param grain 0 is read as 1.
          */
