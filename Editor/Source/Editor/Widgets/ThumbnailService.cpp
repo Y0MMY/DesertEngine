@@ -298,6 +298,22 @@ namespace Desert::Editor
                                  : m_Renderer->RequestMesh( req.Handle, req.Png, req.Material );
         if ( !queued.IsSuccess() )
         {
+            // A REFUSAL IS PERMANENT ONLY IF IT IS ABOUT THE ASSET. The renderer says no for two kinds of
+            // reason: the asset cannot be photographed (no handle, no geometry) — which no amount of
+            // waiting fixes — and "a capture is already in flight", which is a fact about the RENDERER and
+            // is over in a few frames. The dispatch above cannot reach the second (it returns early on
+            // HasPending), so the check below can only be true today; it is written anyway, because
+            // remembering a transient failure for the rest of the process is precisely the shape M8 chose
+            // the per-process failure set to avoid, and a future caller of this function would have no way
+            // to know it was relying on an ordering three screens up.
+            if ( m_Renderer->HasPending() )
+            {
+                LOG_WARN( "[Thumbnails] '{}' could not be dispatched yet: {} — kept in the queue.", req.Identity,
+                          queued.GetError() );
+                m_Queue.insert( m_Queue.begin(), req );
+                return;
+            }
+
             LOG_WARN( "[Thumbnails] '{}' was refused by the renderer: {} — not retrying.", req.Identity,
                       queued.GetError() );
             m_Failed.insert( req.Identity );
