@@ -253,7 +253,15 @@ for f in *.make; do t="${f%.make}"
   if ! make -f "$f" config=debug -j8 >/dev/null 2>&1; then echo "BUILD-FAIL $t"; continue; fi
   if [ ! -x "build/Bin/Tests/Debug/$t" ]; then echo "NO-BINARY $t"; continue; fi
   ran=$((ran+1))
-  ./build/Bin/Tests/Debug/$t 2>/dev/null | grep -q FAILED && echo "FAIL $t"
+  # Match gtest's OWN bracketed marker, and check the exit code TOO. A bare `grep FAILED` was here
+  # until 2026-09-08 and it reported `PackagedMount` red while all 11 of its tests were green: the
+  # suite deliberately exercises a failed read, and Ф4's unwrap reporter prints "A FAILED result was
+  # unwrapped ...", which the bare grep matched. Any suite that exercises a refusal path can do this.
+  # The exit code is the other half, because a suite can crash AFTER printing "[  PASSED  ]" —
+  # six cloud suites once did exactly that.
+  out=$( ./build/Bin/Tests/Debug/$t 2>/dev/null ); rc=$?
+  case "$out" in *"[  FAILED  ]"*) echo "FAIL $t"; continue;; esac
+  [ "$rc" -ne 0 ] && echo "FAIL $t (exited $rc after reporting a pass)"
 done
 echo "$ran suites ran"
 ```
