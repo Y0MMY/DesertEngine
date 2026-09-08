@@ -11,6 +11,7 @@
 #include <DesertShared/EngineRegistry.hpp>
 #include <DesertShared/ProjectFormat.hpp>
 #include <Engine/Project/EngineRegistration.hpp>
+#include <Engine/Project/ProjectContext.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -169,6 +170,46 @@ TEST( EngineRegistration, WithNoEngineRootThereIsNothingToRegisterAndItSaysWhy )
 
     std::error_code ec;
     std::filesystem::remove_all( config, ec );
+}
+
+// ── K11: the .deproj is tracked by git, so a key this build drops travels to everybody ───────────
+
+TEST( ProjectContextDescriptor, SavingCarriesAcrossAKeyWrittenAfterTheProjectWasOpened )
+{
+    // The half a ForeignKeys member alone cannot do. ProjectContext parses the descriptor ONCE, in
+    // Open(), and holds it for the whole session — so an editor that started before a key existed
+    // carries leftovers that have never heard of it. The launcher's settings screen writes this
+    // same file from another process while the editor is up, which is exactly when that happens.
+    // Save() therefore re-reads the file's leftovers at the moment of writing (K9's shape, applied
+    // one file over).
+    const std::filesystem::path project = TempConfigDirectory( "deproj-adopt" );
+    const std::filesystem::path deproj  = project / "Game.deproj";
+    {
+        std::ofstream out( deproj );
+        out << R"({"FileVersion":1,"Name":"Game","AssetsRoot":"Assets","DefaultScene":"",)"
+               R"("Description":"","EngineVersion":""})";
+    }
+
+    // RecordInRecent::No — a test must not file itself in the developer's own recent list.
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open(
+         deproj.string(), Desert::Project::ProjectContext::RecordInRecent::No ) );
+
+    // ... and NOW another program adds a key this build has never heard of.
+    {
+        std::ofstream out( deproj );
+        out << R"({"FileVersion":1,"Name":"Game","AssetsRoot":"Assets","DefaultScene":"",)"
+               R"("Description":"","EngineVersion":"","PrimaryPlatform":"Switch"})";
+    }
+
+    ASSERT_TRUE( Desert::Project::ProjectContext::SetDefaultScene( "Assets/Scenes/Main.desce" ) );
+
+    const std::string written = ReadWhole( deproj );
+    EXPECT_NE( written.find( R"("DefaultScene":"Assets/Scenes/Main.desce")" ), std::string::npos ) << written;
+    EXPECT_NE( written.find( R"("PrimaryPlatform":"Switch")" ), std::string::npos )
+         << "a key another program wrote after this project was opened was deleted by saving: " << written;
+
+    std::error_code ec;
+    std::filesystem::remove_all( project, ec );
 }
 
 int main( int argc, char** argv )

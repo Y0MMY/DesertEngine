@@ -1271,6 +1271,13 @@ namespace
 
         // Read-modify-write through the shared serializer, so a field this screen does not show is
         // carried across instead of being erased by a writer that only knows about three of them.
+        //
+        // That sentence was a claim this code could not keep until K11: the read-modify-write
+        // carried every field the STRUCT declares, and silently dropped every key it does not — the
+        // .deproj is tracked by git, so a launcher one commit behind the engine deleted the newer
+        // build's field from the file for the whole team. The descriptor now carries a ForeignKeys,
+        // and this re-read is what fills it, so the claim is true of the FILE and not just of the
+        // struct. Nothing here has to know about it; that is the point of putting it in the format.
         const auto raw = Hub::ReadTextFile( entry.Path );
         if ( !raw.IsSuccess() )
         {

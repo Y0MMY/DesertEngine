@@ -102,6 +102,30 @@ namespace Desert::Project
         // about something other than this write. A project the launcher created and nobody has
         // saved yet keeps the version the launcher put there.
         s_Current->EngineVersion = Common::Version::Full();
+
+        // THE KEYS THIS BUILD CANNOT NAME ARE TAKEN FROM THE FILE AT THE MOMENT OF WRITING, not
+        // remembered from the moment of opening (K11, and the same reasoning as K9 for editor.json).
+        // `s_Current` is parsed once by Open() and held for the whole session, so an editor that
+        // started before a key existed carries a ForeignKeys that has never heard of it — and would
+        // delete it here. The launcher's settings screen writes this same file from another process
+        // while the editor is up, which is exactly when that happens.
+        //
+        // KEYS ONLY, NEVER VALUES. Every field this struct declares is written from what this
+        // session has, so two writers still resolve a real disagreement last-writer-wins; only the
+        // leftovers are adopted. A file that cannot be re-read is not a reason to refuse the save —
+        // the write below replaces it wholesale anyway — but it IS a reason to say so, because the
+        // leftovers are then this session's, which may be older than the disk's.
+        if ( const auto raw = Common::Utils::FileSystem::ReadFileContent( s_FilePath ); raw )
+        {
+            if ( auto onDisk = Common::Project::ReadProjectFile( raw.GetValue() ); onDisk.IsSuccess() )
+                s_Current->UnknownKeys = std::move( onDisk.ExtractValue().UnknownKeys );
+            else
+                LOG_WARN( "[Project] {} could not be re-read before saving ({}), so any key written "
+                          "into it by another program since this project was opened is not carried "
+                          "across.",
+                          s_FilePath, onDisk.GetError() );
+        }
+
         // Atomic (write-then-rename), because the .deproj is the one file without which the project
         // does not open at all: the plain primitive truncates in place, so a write interrupted half
         // way used to leave zero bytes where the descriptor was.

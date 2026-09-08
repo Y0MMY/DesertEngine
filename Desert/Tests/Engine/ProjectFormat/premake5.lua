@@ -20,6 +20,9 @@ project(test_name)
         -- be reachable by no suite that is not willing to write into the developer's real
         -- ~/.desertengine, which is how a file-writing function ends up untested.
         "%{wks.location}/Desert/Desert/Source/Engine/Project/EngineRegistration.cpp",
+        -- The .deproj half of К11 asserts that ProjectContext::Save carries a foreign key across a
+        -- read-modify-write, so the suite has to compile the thing that writes the file.
+        "%{wks.location}/Desert/Desert/Source/Engine/Project/ProjectContext.cpp",
     }
 
     includedirs {
