@@ -93,33 +93,42 @@ namespace Desert::Graphic::API::Vulkan
              .Properties = Core::Formats::ImageProperties::Sample,
         };
 
-        // Sized for the cube's actual texels: six square faces. (VulkanImageCube::UploadData is
-        // currently a no-op, so these pixels never reach the GPU — the fallback works because nothing
-        // that binds it is ever allowed to be read. Kept honest for the day the upload exists.)
-        const size_t cubeTexels = 6ull * spec.FaceSize * spec.FaceSize;
+        // NO `spec.Data`, AND THAT IS THE CORRECTION. It used to carry six white faces, which never
+        // reached the device — VulkanImageCube::UploadData is a no-op — so the comment that stood here
+        // said the pixels do not matter "because nothing that binds it is ever allowed to be read". That
+        // was never true (an unbound `samplerCube` is sampled by the shader like any other) and Г14 made
+        // it load-bearing: this image is now what a cube binding is pointed AT when the scene states it
+        // has no environment, so its texels are the value of that statement. It is cleared below instead.
         switch ( format )
         {
             case Core::Formats::ImageFormat::RGBA8F:
             case Core::Formats::ImageFormat::BGRA8F:
-            {
-                spec.Data = std::vector<unsigned char>( cubeTexels * 4, 0xFF );
-                break;
-            }
             case Core::Formats::ImageFormat::RGBA32F:
-            {
-                std::vector<float> data( cubeTexels * 4, 1.0f );
-                spec.Data = data;
                 break;
-            }
             default:
                 return;
         }
 
         auto texture = std::make_shared<VulkanImageCube>( spec );
-        if ( texture->RT_Invalidate().IsSuccess() )
-        {
-            m_FallbackTexturesCube[format] = texture;
-        }
+        if ( !texture->RT_Invalidate().IsSuccess() )
+            return;
+
+        // BLACK, and the 2D fallback beside it is WHITE for a reason that is not inconsistency. A 2D
+        // fallback stands in for a map that MULTIPLIES (albedo, roughness, a mask), whose identity is 1.
+        // A cube stands in for an environment that is ADDED as light, whose identity is 0. White here
+        // would mean "a uniform sky at full radiance in every direction" — every static surface in a
+        // scene with no sky lit by an environment nobody authored.
+        //
+        // A FAILED CLEAR STILL PUBLISHES THE IMAGE, loudly. Every consumer reaches this table through
+        // `.at( format )`, so withholding the entry turns a colour problem into an out_of_range throw far
+        // from here; the honest outcome is a defined-shaped descriptor whose CONTENT is announced as
+        // unknown, which is a thing a reader can act on.
+        if ( const auto cleared = texture->RT_ClearToColor( 0.0f, 0.0f, 0.0f, 1.0f ); !cleared.IsSuccess() )
+            LOG_ERROR( "[VulkanFallbackTextures] the cube fallback for ImageFormat {} could not be cleared, "
+                       "so a cube binding that nothing has bound samples UNDEFINED texels: {}",
+                       static_cast<uint32_t>( format ), cleared.GetError() );
+
+        m_FallbackTexturesCube[format] = texture;
     }
 
     void VulkanFallbackTextures::CreateFallbackStorageImage2D( Core::Formats::ImageFormat format )
