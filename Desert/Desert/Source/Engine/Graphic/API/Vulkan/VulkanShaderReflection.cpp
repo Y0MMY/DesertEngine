@@ -106,10 +106,12 @@ namespace Desert::Graphic::API::Vulkan::ShaderReflection
         //
         // Nothing upstream can make that guarantee. The DSL's automatic binding allocator seeds itself
         // by scanning ONE TEXT for `binding = <digits>` (DShaderParser.cpp, TranslateLayoutSugar), and it
-        // is blind twice over: a binding written as a MACRO is not digits (Common/CloudAuthored.glslh
-        // declares its buffer at `binding = CLOUD_AUTHORED_BUFFER_BINDING`), and a binding declared in an
-        // INCLUDED file is not in the text at all, because ShaderIncluder hands every `.glslh` its own
-        // separate translation call. Extending that scan is a race against whatever syntax arrives next.
+        // is blind three ways: a binding written as a MACRO is not digits (Common/CloudAuthored.glslh
+        // declares its buffer at `binding = CLOUD_AUTHORED_BUFFER_BINDING`), a binding declared in an
+        // INCLUDED file is not in the text at all because ShaderIncluder hands every `.glslh` its own
+        // separate translation call, and a binding a SECOND STAGE declares is not in this text either.
+        // Widening that scan would close the first only, and would still be a race against whatever
+        // syntax arrives next.
         // glslang does not close it either: two resources decorated with the same Binding compile clean,
         // with no diagnostic, `-Werror` included (measured with glslc 2026-09-08).
         //

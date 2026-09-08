@@ -1550,7 +1550,7 @@ namespace
     std::vector<std::filesystem::path> ShippedShaderFiles()
     {
         std::vector<std::filesystem::path> files;
-        const std::filesystem::path       root = "Resources/Shaders";
+        const std::filesystem::path        root = "Resources/Shaders";
         if ( std::filesystem::exists( root ) )
             for ( const auto& entry : std::filesystem::recursive_directory_iterator( root ) )
                 if ( entry.is_regular_file() && entry.path().extension() == ".shader" )
@@ -1588,8 +1588,8 @@ TEST_F( ShaderRootFixture, NoShippedShaderClaimsOneDescriptorSlotTwice )
 
         // One ReflectionData PER PASS, because one pass is one pipeline layout. Sharing it across
         // passes would invent collisions between shaders that never meet on a device.
-        const auto checkPass = [&]( const std::string&                                          passName,
-                                    const std::unordered_map<ShaderStage, std::string>&         stages )
+        const auto checkPass =
+             [&]( const std::string& passName, const std::unordered_map<ShaderStage, std::string>& stages )
         {
             ShaderResource::ReflectionData data;
             for ( const auto& [stage, source] : stages )
@@ -1600,8 +1600,8 @@ TEST_F( ShaderRootFixture, NoShippedShaderClaimsOneDescriptorSlotTwice )
 
                 const auto diagnostics = ShaderReflection::ReflectStage( spirv, stage, data );
                 EXPECT_TRUE( diagnostics.empty() )
-                     << file.string() << " [pass '" << passName << "']: "
-                     << ( diagnostics.empty() ? std::string{} : diagnostics.front() );
+                     << file.string() << " [pass '" << passName
+                     << "']: " << ( diagnostics.empty() ? std::string{} : diagnostics.front() );
             }
             ++passesChecked;
         };

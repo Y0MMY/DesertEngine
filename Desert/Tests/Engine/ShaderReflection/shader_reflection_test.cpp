@@ -417,7 +417,7 @@ void main() { o_Color = u_Fog + texture(u_Depth, vec2(0.5)); }
 // its set, and a resource shared by two stages is one resource seen twice, not two.
 TEST( ShaderReflection, ADescriptorSetAndAStageBoundaryAreNotCollisions )
 {
-    const char* kTwoSets = R"(#version 450
+    const char* kTwoSets     = R"(#version 450
 layout(set = 0, binding = 0) uniform sampler2D u_Albedo;
 layout(set = 1, binding = 0) uniform sampler2D u_Normal;
 layout(location = 0) out vec4 o_Color;
