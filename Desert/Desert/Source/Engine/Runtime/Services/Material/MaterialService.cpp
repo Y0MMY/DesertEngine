@@ -67,7 +67,8 @@ namespace Desert::Runtime
         return BOOLSUCCESS;
     }
 
-    Common::BoolResultStr MaterialService::EnsureLoaded( const std::shared_ptr<Assets::MaterialAsset>& asset ) const
+    Common::BoolResultStr
+    MaterialService::EnsureLoaded( const std::shared_ptr<Assets::MaterialAsset>& asset ) const
     {
         if ( !asset )
             return Common::MakeError<bool>( "MaterialService: a null material shell cannot be loaded" );

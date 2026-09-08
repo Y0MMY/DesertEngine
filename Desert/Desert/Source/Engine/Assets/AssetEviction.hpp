@@ -229,7 +229,6 @@ namespace Desert::Assets
         /// frame loop. It is also what keeps the layering straight — the roots come from ECS components,
         /// which are ABOVE this layer, so the asset layer must be handed them rather than fetch them.
         static void RunIfDue( const std::function<AssetRootSet()>& collectRoots );
-
     };
 
 } // namespace Desert::Assets

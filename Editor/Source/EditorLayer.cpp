@@ -3060,8 +3060,8 @@ namespace Desert::Editor
         // DICTIONARY, and the dictionary is this editor's claim that anything a person can do an agent can
         // do. It goes through the schedule rather than calling Run directly, so a manual sweep lands at the
         // same safe point in the frame as an automatic one.
-        commands.push_back( { "Action", "Release unused assets",
-                              [] {
+        commands.push_back( { "Action", "Release unused assets", []
+                              {
                                   Assets::AssetEvictionSchedule::Request( "asked for from the command "
                                                                           "palette" );
                               } } );
