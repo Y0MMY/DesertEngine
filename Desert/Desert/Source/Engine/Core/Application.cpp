@@ -15,8 +15,9 @@ namespace Desert::Engine
     Application::Application( const ApplicationInfo& appInfo ) : m_ApplicationInfo( appInfo )
     {
         WindowSpecification windowSpec;
-        windowSpec.Title = appInfo.Title;
-        windowSpec.VSync = appInfo.VSync;
+        windowSpec.Title     = appInfo.Title;
+        windowSpec.VSync     = appInfo.VSync;
+        windowSpec.Decorated = appInfo.Decorated;
         if ( appInfo.Width.has_value() && appInfo.Height.has_value() )
         {
             windowSpec.Width      = *appInfo.Width;

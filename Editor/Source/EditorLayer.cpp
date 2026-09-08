@@ -509,6 +509,18 @@ namespace Desert::Editor
                 return Common::MakeFormattedError( "control channel: {}", listening.GetError() );
         }
 
+        // THE WINDOW FRAME, IF THIS EDITOR OWNS IT. Asked of the window rather than assumed from the
+        // ApplicationInfo that requested it: a fullscreen-over-the-taskbar window is frameless whatever was
+        // asked for, and the window is the one that knows what actually happened (Window::IsDecorated).
+        if ( const auto& window = m_Application->GetWindow(); window && !window->IsDecorated() )
+        {
+            m_WindowChrome.emplace(
+                 *window,
+                 // The same ordered close the control channel's `quit` takes: Run() leaves its loop, every
+                 // layer is detached, the device goes idle. Two ways to end a session would drift.
+                 [this]() { const_cast<Engine::Application*>( m_Application )->Close( 0 ); } );
+        }
+
         // 1. Create ImGui Context first
         ::ImGui::CreateContext();
 
@@ -2742,6 +2754,8 @@ namespace Desert::Editor
         // Manipulate(). The viewport's object gizmo relies on this.
         ImGuizmo::BeginFrame();
 
+        SyncWindowTitle();
+
         // ---- Startup loading overlay (UI loader) ----
         // Fullscreen dim + progress while the staged boot work (mesh cook / preload) runs in OnUpdate.
         if ( StartupLoading() )
@@ -3120,6 +3134,13 @@ namespace Desert::Editor
         Editor::ToastManager::Get().Draw();
 
         ::ImGui::End(); // End dockspace
+
+        // The edges the OS frame used to give us. LAST, and outside the dockspace host: these are eight
+        // 6px windows of their own, and submitting them here is what puts them above the panels that reach
+        // the screen edge. A no-op while the window is maximized, and absent entirely when the OS draws
+        // the frame.
+        if ( m_WindowChrome )
+            m_WindowChrome->DrawResizeBorders();
 
 #ifdef EBABLE_IMGUI
         m_ImGuiLayer->End();
@@ -4141,7 +4162,21 @@ namespace Desert::Editor
         DrawProjectSection();
         DrawSceneRenameSection();
         // Play/Pause/Stop now live in the toolbar strip (DrawToolbar), not the menu bar.
-        DrawEngineStats();
+        //
+        // THIS BAR IS THE WINDOW'S TITLE BAR NOW. It already carried the project, the level, the menus and
+        // the stats while the system frame sat above it drawing a second one; the editor asks for a window
+        // without a frame (Sandbox.hpp), so the three window commands and the bar's own gestures come here.
+        // Both are conditional on the window actually being frameless — with a system frame they would be a
+        // second set of buttons for the same three actions.
+        const float chromeWidth = m_WindowChrome ? UI::WindowChrome::WindowButtonsWidth() : 0.0f;
+        DrawEngineStats( chromeWidth );
+        if ( m_WindowChrome )
+        {
+            m_WindowChrome->DrawWindowButtons();
+            // LAST inside the bar, after every item: "over the bar and over nothing on it" is only a
+            // question with an answer once everything on it has been submitted.
+            m_WindowChrome->HandleTitleBarGestures();
+        }
 
         ImGui::EndMainMenuBar();
 
@@ -4194,9 +4229,12 @@ namespace Desert::Editor
 
         ImGui::Separator();
 
+        // IT HAD AN EMPTY BODY. Found while У9 was giving the close button one: File ▸ Exit has been a
+        // menu entry that does nothing since it was written, and with the system frame gone it would have
+        // been the only way out of the editor other than killing the process. Same ordered close as the
+        // title bar's x and the control channel's `quit`.
         if ( ImGui::MenuItem( "Exit" ) )
-        {
-        }
+            const_cast<Engine::Application*>( m_Application )->Close( 0 );
 
         ImGui::EndMenu();
     }
@@ -4331,6 +4369,27 @@ namespace Desert::Editor
         m_AvailableScenes    = CollectAvailableScenes();
         m_SelectedSceneIndex = -1;
         m_SceneFilter[0]     = '\0';
+    }
+
+    // THE ONLY PLACE THE OS STILL SHOWS THIS WINDOW'S NAME. With the system frame gone the title is no
+    // longer painted anywhere on screen, but the Dock, Mission Control, the taskbar and every window
+    // switcher still read it — and the window's own name was "Desert Engine — <project>" for the whole
+    // session, so those lists could not tell two editors on two levels apart.
+    //
+    // Compared against Window::GetTitle rather than against a copy of what was last pushed here: the window
+    // owns that string, and a second copy in this file would be the same one-fact-two-owners shape as a
+    // remembered "is it maximized". The comparison is what keeps this to one glfwSetWindowTitle per change
+    // rather than sixty a second.
+    void EditorLayer::SyncWindowTitle()
+    {
+        const auto& window = m_Application->GetWindow();
+        if ( !window || !m_MainScene )
+            return;
+
+        const std::string title = "Desert Engine — " + Editor::ProjectContext::Current().Name + " — " +
+                                  m_MainScene->GetSceneName();
+        if ( window->GetTitle() != title )
+            window->SetTitle( title );
     }
 
     void EditorLayer::DrawProjectSection()
@@ -5138,14 +5197,15 @@ namespace Desert::Editor
         ImGui::End();
     }
 
-    void EditorLayer::DrawEngineStats()
+    void EditorLayer::DrawEngineStats( float rightMargin )
     {
         namespace ImGui = ::ImGui;
 
         const auto text = m_Application->GetEngineStats().GetFormattedStats();
         auto       size = ImGui::CalcTextSize( text.c_str() );
 
-        ImGui::SameLine( ImGui::GetWindowContentRegionMax().x - size.x - ImGui::GetStyle().ItemSpacing.x * 2.0f );
+        ImGui::SameLine( ImGui::GetWindowContentRegionMax().x - rightMargin - size.x -
+                         ImGui::GetStyle().ItemSpacing.x * 2.0f );
 
         // TextUnformatted, not Text: ImGui::Text takes a printf FORMAT, so this passed runtime-built
         // engine stats as the format string. Today GetFormattedStats() can only produce

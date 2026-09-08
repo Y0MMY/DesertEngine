@@ -20,6 +20,26 @@ namespace Desert::Platform::MacOS
 
         virtual void ProcessEvents() override;
 
+        [[nodiscard]] virtual const std::string& GetTitle() const override
+        {
+            return m_Data.Specification.Title;
+        }
+        virtual void SetTitle( const std::string& title ) override;
+
+        virtual void SetWindowSize( uint32_t width, uint32_t height ) override;
+        virtual void SetWindowPos( int x, int y ) override;
+        virtual void GetWindowPos( int& x, int& y ) const override;
+
+        virtual void Maximize() override;
+        virtual void Restore() override;
+        virtual void Minimize() override;
+
+        [[nodiscard]] virtual bool IsWindowMaximized() const override;
+        [[nodiscard]] virtual bool IsDecorated() const override
+        {
+            return m_Data.Specification.Decorated;
+        }
+
         [[nodiscard]] virtual uint32_t GetWidth() const override;
         [[nodiscard]] virtual uint32_t GetHeight() const override;
         // Mirrors WindowsWindow: the swapchain picks its present mode at creation, so the new pacing only

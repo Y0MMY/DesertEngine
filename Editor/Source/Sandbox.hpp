@@ -126,6 +126,12 @@ std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char**
     ApplicationInfo appInfo;
     appInfo.Title = "Desert Engine — " + Desert::Editor::ProjectContext::Current().Name;
     appInfo.VSync = false;
+    // THE EDITOR DRAWS ITS OWN TITLE BAR. Its menu bar has carried the project name, the open level, the
+    // menus and the engine stats for a long time while the system bar sat above it — two title bars on one
+    // window, which is the state У9 photographed before touching anything. What the OS frame also carried
+    // (move, minimize/maximize/close, double-click to toggle) is drawn and handled by
+    // Editor::UI::WindowChrome; what it cannot give back is listed there.
+    appInfo.Decorated = false;
     // Width/Height left as std::nullopt -> start fullscreen at the monitor's native resolution.
 
     return std::make_unique<Desert::Sandbox>( appInfo );
