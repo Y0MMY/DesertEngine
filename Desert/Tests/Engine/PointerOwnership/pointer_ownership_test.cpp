@@ -20,6 +20,8 @@
 #include "pointer_ownership_register.hpp"
 #include "pointer_ownership_scan.hpp"
 
+#include <Engine/Graphic/Render2D/Render2DExecutorRetire.hpp>
+
 #include <entt/entt.hpp>
 #include <gtest/gtest.h>
 
@@ -114,6 +116,13 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   raises exactly the same two questions as one raw pointer, and three of those turned out to carry
     //   load-bearing arguments.
     //
+    //   A8-1 then moved it by -2 in these trees, and that one is NOT a blind spot: Render2D's three
+    //   executor caches used to be `unordered_map<const void*, unique_ptr<MaterialExecutor>>` and are now
+    //   maps of a small struct, so the ownership question moved off three container members and onto the
+    //   ONE `CachedExecutor::Executor` inside them, where there is exactly one answer to give. The `const
+    //   void*` key is no longer a member the scan can see; its argument lives on Render2D::m_Backdrop's
+    //   row and in Render2DExecutorRetire.hpp, which is the file that decides its lifetime.
+    //
     //   761 -> 787. The scanner knew `std::shared_ptr` and not the project's own ALIASES for it, so
     //   `MaterialInstancePtr m_X` and `DescriptorSetLayoutRef m_Y` were counted as NOTHING AT ALL --
     //   seventeen members in these three trees alone were invisible, among them the four
@@ -123,9 +132,9 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   tree (see DeclaredAliases), not typed.
     EXPECT_EQ( CountOf( Form::Raw ), 137 );
     EXPECT_EQ( CountOf( Form::Shared ), 220 );
-    EXPECT_EQ( CountOf( Form::Unique ), 40 );
+    EXPECT_EQ( CountOf( Form::Unique ), 38 );
     EXPECT_EQ( CountOf( Form::Weak ), 17 );
-    EXPECT_EQ( (int)Members().size(), 414 )
+    EXPECT_EQ( (int)Members().size(), 412 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }
@@ -325,7 +334,7 @@ TEST( PointerOwnership, NoRawPointerMemberIsDeletedByItsHolder )
 TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
 {
     // THE AUDIT'S LARGEST SINGLE RESULT IS A REFUSAL, and it is recorded here so the next person does
-    // not re-derive it. 220 of the 414 members in these trees are `shared_ptr`, and for the GPU
+    // not re-derive it. 220 of the 412 members in these trees are `shared_ptr`, and for the GPU
     // resources that is the CORRECT form rather than a habit: an Image2D is held at once by the
     // framebuffer that allocated it, by the descriptor sets that sample it and by the deletion queue
     // that outlives both, and no two of those have an ordered death. Converting them to `unique_ptr`
@@ -466,6 +475,52 @@ TEST( PointerOwnership, EnttComponentAddressesAreNotStable )
     ASSERT_TRUE( two.valid( tail ) ) << "the surviving entity must still be valid";
     EXPECT_NE( &two.get<Probe>( tail ).Slots, tailSlots )
          << "destroying ANOTHER entity no longer moves this one's component. Same question as above.";
+}
+
+// ------------------------------------------------------------------------------------------------
+// A8-1: the condition a cache eviction has to respect, as an assertion rather than a comment
+// ------------------------------------------------------------------------------------------------
+
+TEST( PointerOwnership, Render2DExecutorRetirementRespectsFramesInFlight )
+{
+    using Desert::Graphic::Render2D::MayRetireExecutor;
+
+    // The three Render2D executor caches are keyed by a texture ADDRESS and, until A8-1, nothing ever
+    // removed an entry: every viewport resize and every new texture left a MaterialExecutor and its
+    // descriptor set behind for the life of the process. The reason the obvious `cache.clear()` was
+    // REFUSED rather than written is the whole content of this test — destroying an executor destroys
+    // descriptor sets a submitted frame may still be reading, which corrupts a frame instead of crashing
+    // a process. So the window is the condition, and here it is where it can fail.
+    constexpr uint32_t kWindow = 9; // 3 frames in flight x 3 slots, a plausible DirtyLifetime()
+
+    // Nothing may be retired inside the window, and the EDGE belongs to the GPU: an entry last used
+    // exactly `window` frames ago is still reachable by the oldest frame in flight.
+    for ( uint64_t age = 0; age <= kWindow; ++age )
+        EXPECT_FALSE( MayRetireExecutor( 100, 100 + age, kWindow ) )
+             << "an executor last used " << age << " frames ago was retired with a window of " << kWindow
+             << ". A frame recorded against it may still be in flight, and destroying its descriptor set "
+                "corrupts that frame rather than failing loudly.";
+
+    EXPECT_TRUE( MayRetireExecutor( 100, 100 + kWindow + 1, kWindow ) )
+         << "nothing is ever retired, which is the leak this was written to close.";
+    EXPECT_TRUE( MayRetireExecutor( 0, 1000, kWindow ) );
+
+    // A counter that has not moved (the first frames of a process, or two reads inside one frame) must
+    // not retire anything -- and must not underflow while deciding, which is what an unsigned subtraction
+    // written the obvious way does.
+    EXPECT_FALSE( MayRetireExecutor( 100, 100, kWindow ) );
+    EXPECT_FALSE( MayRetireExecutor( 100, 50, kWindow ) );
+
+    // A window of zero would mean "retire on the next frame", which is inside the in-flight range for
+    // every real configuration. It is not reachable through PropertyDirty::DirtyLifetime() -- that
+    // function floors frames-in-flight at 3 -- and the sweep must not invent its own number.
+    const std::string src = ReadRepoFile( "Desert/Desert/Source/Engine/Graphic/Render2D/Render2D.cpp" );
+    EXPECT_NE( src.find( "PropertyDirty::DirtyLifetime()" ), std::string::npos )
+         << "Render2D::RetireUnusedExecutors no longer takes its window from the material properties' "
+            "own frame window. A literal here is a second answer to 'how long does a frame live', and the "
+            "two would drift.";
+    EXPECT_NE( src.find( "MayRetireExecutor(" ), std::string::npos )
+         << "the sweep no longer goes through the tested predicate.";
 }
 
 int main( int argc, char** argv )

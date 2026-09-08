@@ -476,16 +476,13 @@ namespace Desert::Tests::PointerCensus
           "Render2D", "m_WhiteImage", Guard::FrameScoped,
           "resolved from ImageService, whose only release path is Renderer::Shutdown -- terminal, and after the last Flush" },
         { "Desert/Desert/Source/Engine/Graphic/Render2D/Render2D.hpp",
-          "Render2D", "m_Backdrop", Guard::Debt,
-          "BackdropBlurRenderer::Resize replaces its shared_ptr<Image2D> and destroys the old object "
-          "while this pointer still equals it. The pointer ITSELF is re-pointed by the UI pass before "
-          "every Flush, so the draw is safe -- but it is also the KEY of m_GlassExecutors, and none of "
-          "Render2D's three executor caches is ever erased, not even by Init(). Each resize therefore "
-          "leaves a MaterialExecutor whose Texture2DProperty still holds the freed image, and a new "
-          "image landing on the same heap address would hit that stale entry. NOT FIXED HERE ON PURPOSE: "
-          "the entries own live descriptor sets, so dropping one is a deletion-queue operation and not a "
-          "cache.clear() -- clearing it from SetBackdrop, which runs inside the UI pass, would destroy a "
-          "descriptor set a frame in flight is still reading", "A8-1" },
+          "Render2D", "m_Backdrop", Guard::ReboundBeforeEveryUse,
+          "BackdropBlurRenderer::Resize does destroy the image this equals, but the UI pass calls "
+          "SetBackdrop from the live pyramid before every Flush and Flush is the only reader. It is also "
+          "the KEY of m_GlassExecutors, and A8-1 established that a stale key is a LEAK and not a dangle: "
+          "ExecutorFor re-points the entry's Texture2DProperty with SetImage before every use, so the "
+          "stale address is overwritten before anything reads it. The leak is closed by "
+          "RetireUnusedExecutors, whose window is asserted rather than described" },
         { "Desert/Desert/Source/Engine/Graphic/SceneRenderer.cpp",
           "ExternalPassSystem", "m_Renderer", Guard::ObservedContainsUs,
           "the SceneRenderer owns its render systems, so it cannot be destroyed while one of them is alive" },
