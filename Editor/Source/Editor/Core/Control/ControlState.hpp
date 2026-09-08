@@ -333,6 +333,13 @@ namespace Desert::Editor::Control
                 value.push_back( Num( property.Value[static_cast<std::size_t>( i )] ) );
             item["value"] = rfl::Generic( value );
 
+            // THE GROUP THE WINDOW DRAWS THIS ROW UNDER. Present even when empty, and that is deliberate:
+            // "" is the shader declaring no Category, which the window shows under its own heading, so the
+            // field carries a fact either way. Omitting it when empty would make "this param has no
+            // category" indistinguishable from "this editor is too old to report groups" — the §1.4 shape,
+            // one field down.
+            item["group"] = Str( property.Group );
+
             item["settable"] = rfl::Generic( property.Settable );
             if ( !property.Settable )
                 item["why"] = Str( property.NotSettableReason );

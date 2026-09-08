@@ -44,6 +44,18 @@ namespace Desert::Editor
         /// What a person reads beside the control. Equal to Name when the schema declares no display name.
         std::string Label;
 
+        /// WHICH GROUP OF THE WINDOW THIS ROW IS UNDER — the shader author's own `Category`, verbatim.
+        /// EMPTY means the schema declares none for this param, which the window shows under a heading that
+        /// says exactly that; empty is therefore a fact about the shader and not a value this census failed
+        /// to fill in.
+        ///
+        /// Reported because the census is what a client checks the window against, and after the parameter
+        /// table gained groups a row's position on screen is (group, then order within it). A census that
+        /// named only the row would describe a flat list the window no longer draws — the client would count
+        /// to the ninth entry, the person would count to the ninth row, and for any shader with groups those
+        /// are different rows.
+        std::string Group;
+
         /// The storage type, in the words the schema uses: "float", "float2", "float3", "float4", "int",
         /// "bool", "color", "texture", "textureCube", or the asset kind for a non-texture reference. Named
         /// on the wire so a client that sends three numbers to a float gets a refusal it can understand

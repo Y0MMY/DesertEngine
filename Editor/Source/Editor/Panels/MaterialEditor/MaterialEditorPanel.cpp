@@ -36,6 +36,8 @@
 #include <Common/Utilities/FileSystem.hpp>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdio>
 #include <filesystem>
 #include <string>
 #include <system_error>
@@ -951,6 +953,71 @@ namespace Desert::Editor
         return shaderChanged;
     }
 
+    // The parameter table's two columns, in one place because the table is now opened once per GROUP and a
+    // second copy of the column widths would let two groups drift into different layouts down one window.
+    static bool BeginParameterTable( const char* id )
+    {
+        if ( !ImGui::BeginTable( id, 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings ) )
+            return false;
+        ImGui::TableSetupColumn( "label", ImGuiTableColumnFlags_WidthStretch, 0.45f );
+        ImGui::TableSetupColumn( "control", ImGuiTableColumnFlags_WidthStretch, 0.55f );
+        return true;
+    }
+
+    // ONE GROUP'S HEADING. Returns whether the group's rows should be drawn.
+    //
+    // NUMBERED FROM THE PLAN, not from a table here: "00 · Cloud Types" is the group's position in the
+    // shader file's own declaration order, which is the order the sky is built in. Epic number their cloud
+    // material's groups the same way and for the same reason ("00 - Cloud Layout", "01 - Cloud Shape").
+    //
+    // DEFAULT OPEN, ALWAYS. A group closed on first sight hides parameters that were visible in this window
+    // yesterday, and "the settings are gone" is the complaint that produces — the panel would be hiding its
+    // own content to look tidy. ImGui remembers a header a person closed, per window, which is the editor's
+    // existing convention and not a sixth place settings are stored (K8/K9/K10).
+    static bool DrawParameterGroupHeader( const MaterialEdit::ParameterGroup& group )
+    {
+        if ( group.Kind == MaterialEdit::ParameterGroupKind::Inputs )
+        {
+            // THE MATERIAL'S DEPENDENCIES, GATHERED — what the owner asked to be able to see and choose
+            // without opening each file. Unnumbered on purpose: the numbers belong to the shader author's
+            // own stages, and this group is not one of them, it is every asset reference the schema
+            // declares, pulled to the front.
+            const std::string label = std::string( MaterialEdit::kInputsGroupName ) + " (" +
+                                      std::to_string( group.Params.size() ) + ")##param_group_inputs";
+            const bool open = ImGui::CollapsingHeader( label.c_str(), ImGuiTreeNodeFlags_DefaultOpen );
+            if ( ImGui::IsItemHovered() )
+            {
+                ImGui::SetTooltip( "The other documents this material is built from - cloud types and "
+                                   "layouts. Each row opens its own editor; the sky is what they make "
+                                   "together." );
+            }
+            return open;
+        }
+
+        if ( !group.Ordinal.has_value() )
+        {
+            // THE UNCATEGORISED GROUP, SAID OUT LOUD. These params declare no Category in the shader, and
+            // that is a fact about the shader rather than a gap in this panel. Six shipped shaders have
+            // them. Drawn under a heading that names the situation instead of being folded into the group
+            // above — which would put a parameter under a title that does not describe it — or left in an
+            // unnamed block, which reads as a rendering accident.
+            const bool open =
+                 ImGui::CollapsingHeader( "Uncategorised##param_group_none", ImGuiTreeNodeFlags_DefaultOpen );
+            if ( ImGui::IsItemHovered() )
+            {
+                ImGui::SetTooltip( "These parameters declare no Category in the shader's Properties block, "
+                                   "so the file says nothing about where they belong. Give them one and they "
+                                   "join the numbered groups above." );
+            }
+            return open;
+        }
+
+        char label[192];
+        std::snprintf( label, sizeof( label ), "%02zu \xC2\xB7 %s##param_group_%s", *group.Ordinal,
+                       group.Category.c_str(), group.Category.c_str() );
+        return ImGui::CollapsingHeader( label, ImGuiTreeNodeFlags_DefaultOpen );
+    }
+
     bool MaterialEditorPanel::DrawParameters( Assets::SurfaceMaterialAsset& asset,
                                               const Assets::MaterialData* parentData, bool isInstance )
     {
@@ -981,14 +1048,72 @@ namespace Desert::Editor
         // Two columns, label cell then control cell. Drawing the label as ImGui's own trailing label instead
         // put it on top of the value: a colour row came out reading "A255e255 255 255", which is what
         // looking at the panel found and reading the code did not.
-        if ( !ImGui::BeginTable( "##material_params", 2,
-                                 ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings ) )
-            return false;
-        ImGui::TableSetupColumn( "label", ImGuiTableColumnFlags_WidthStretch, 0.45f );
-        ImGui::TableSetupColumn( "control", ImGuiTableColumnFlags_WidthStretch, 0.55f );
 
-        for ( const auto& p : schema.Params )
+        // THE ORDER THE ROWS ARE DRAWN IN, AND IT IS NOT schema.Params. The plan groups the parameters by
+        // the `Category` their author wrote — a field that had been filled in for a long time and read by
+        // nothing, so the cloud material's thirty-four parameters arrived here as one undivided list.
+        //
+        // THE SAME PLAN FEEDS MaterialEdit::DescribeProperties, which is what `properties` on the control
+        // channel answers with. One order, consumed twice — not two orders that agree by inspection. That
+        // relation is the point: a client counting to the ninth entry and a person counting to the ninth row
+        // have to arrive at the same parameter, and they only do while both walk this.
+        const std::vector<MaterialEdit::ParameterGroup> groups = MaterialEdit::PlanParameterGroups( schema );
+
+        // A shader that categorised NOTHING has exactly one group, with no name, and is drawn as the single
+        // flat table this panel drew before groups existed — Terrain, Skybox, Unlit, TextSDF and the two
+        // MatProbes are all in that state. "No categories in this shader" and "one group that happens to be
+        // called nothing" must not produce the same picture, so the flat case keeps its old picture exactly.
+        const bool grouped = MaterialEdit::HasNamedGroups( groups );
+
+        std::vector<std::size_t> drawOrder;   // indices into schema.Params
+        std::vector<std::size_t> groupOfSlot; // parallel: which group each drawn row belongs to
+        drawOrder.reserve( schema.Params.size() );
+        groupOfSlot.reserve( schema.Params.size() );
+        for ( std::size_t groupIndex = 0; groupIndex < groups.size(); ++groupIndex )
         {
+            for ( const std::size_t paramIndex : groups[groupIndex].Params )
+            {
+                drawOrder.push_back( paramIndex );
+                groupOfSlot.push_back( groupIndex );
+            }
+        }
+
+        bool        tableOpen  = false;
+        bool        groupShown = true;
+        std::size_t drawnGroup = groups.size(); // no group headed yet; the first row always opens one
+
+        for ( std::size_t slot = 0; slot < drawOrder.size(); ++slot )
+        {
+            // A GROUP BOUNDARY CLOSES THE TABLE AND OPENS A NEW ONE around the heading, rather than drawing
+            // the heading as a row inside it. A table row cannot span both columns without fighting the
+            // column widths, and a heading sitting in the label column reads as a parameter whose value cell
+            // somebody forgot to fill in.
+            if ( grouped && groupOfSlot[slot] != drawnGroup )
+            {
+                if ( tableOpen )
+                {
+                    ImGui::EndTable();
+                    tableOpen = false;
+                }
+                drawnGroup = groupOfSlot[slot];
+                groupShown = DrawParameterGroupHeader( groups[drawnGroup] );
+            }
+            if ( !groupShown )
+                continue;
+
+            if ( !tableOpen )
+            {
+                // ONE TABLE ID PER GROUP. Reusing a single id for every group would put several tables under
+                // one ImGui identity in one window, which is the collision that silently merges two widgets
+                // into one — the same hazard SubjectId::ToString refuses a digest for.
+                const std::string tableId = "##material_params_" + std::to_string( drawnGroup );
+                if ( !BeginParameterTable( tableId.c_str() ) )
+                    return changed;
+                tableOpen = true;
+            }
+
+            const auto& p = schema.Params[drawOrder[slot]];
+
             using W  = ::Desert::Core::Formats::ShaderParamWidget;
             using VT = ::Desert::Core::Formats::ShaderValueType;
 
@@ -1325,7 +1450,10 @@ namespace Desert::Editor
             ImGui::PopItemWidth();
         }
 
-        ImGui::EndTable();
+        // Conditional because the last group may have been collapsed, and because a schema whose every
+        // group is collapsed opens no table at all. An unconditional EndTable there is a mismatched pair.
+        if ( tableOpen )
+            ImGui::EndTable();
         return changed;
     }
 
