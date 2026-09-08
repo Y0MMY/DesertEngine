@@ -27,6 +27,13 @@ namespace Desert::Core
     // then a run of the tool over the repository - the run is not optional, because this loader will refuse
     // every scene that has not had it.
     //
+    // AND IT IS NOT ONLY SCENES. A `.deprefab` carries the same Assets::EntityData and states THIS number
+    // (Engine/Assets/Prefab/PrefabData.hpp), so raising it moves prefabs too. An entity-level step added to
+    // Tools/SceneMigrator raises both, because both enter the same chain, and the one run of the tool over
+    // the tree converts both, because it collects both extensions. That is the whole of what И11 had to
+    // build: before it, prefabs shared this number with a migrator that had no steps, so a bump left every
+    // existing prefab at the old generation with nothing able to read it.
+    //
     // AND IT IS WHAT MAKES RETIREMENT WORK. Since K11 a key this build does not declare is PRESERVED across
     // a save (Serialize/ForeignKeys.hpp) - so the only thing that can ever remove one is a deliberate
     // decision, and the only place that decision can be written down is a migration step, which names the

@@ -1,4 +1,4 @@
--- SceneMigrator — the ONLY thing in this repository that knows an old .desce format.
+-- SceneMigrator — the ONLY thing in this repository that knows an old .desce or .deprefab format.
 --
 -- The migrations used to live in the engine (Engine/Core/Serialize/SceneMigration.cpp) and run on every
 -- scene load; they are Source/SceneMigration.cpp here now, and the engine loader REFUSES an old file and
