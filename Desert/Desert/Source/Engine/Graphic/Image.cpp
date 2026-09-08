@@ -102,7 +102,9 @@ namespace Desert::Graphic
 
     // `ImageCube::Copy` STOOD HERE AND WAS AN ALIAS, NOT A COPY. It read
     //
-    //     std::make_shared<VulkanImageCube>( *SP_CAST( VulkanImageCube, targetImageCube ) )   // TODO!
+    //     std::make_shared<VulkanImageCube>( *SP_CAST( VulkanImageCube, targetImageCube ) )
+    //
+    // with a one-word unfinished-work marker above it, which is how long it had been unfinished.
     //
     // — a copy CONSTRUCTION of the backend object, which memberwise-copies `VkImage`, `VkImageView`,
     // `VkSampler` and the `VmaAllocation` out of the original. The result is not a second cubemap; it is a
