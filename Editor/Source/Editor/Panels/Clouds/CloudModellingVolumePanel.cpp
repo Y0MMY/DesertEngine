@@ -139,9 +139,9 @@ namespace Desert::Editor
     {
         // CANCEL, THEN WAIT. A bake writes into a std::future this object owns, so the panel must outlive
         // it — but a full volume is still hundreds of milliseconds in a debug build (Г10 gave the z-slabs
-        // to the pool: 1383 ms -> 206 ms for the shipped eight-lump body), and waiting even that on exit
-        // is an editor
-        // that appears to hang on exit. Asking the bake to stop first turns the wait into one slab.
+        // to the pool: 1383 ms -> 206 ms for the shipped eight-lump body), and waiting even that is an
+        // editor that stutters when a window closes. Asking the bake to stop first turns the wait into
+        // one slab.
         m_BakeCancelled.store( true );
         if ( m_Baking.valid() )
             m_Baking.wait();
