@@ -160,6 +160,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -515,7 +516,12 @@ namespace
         const char* Why;
     };
 
-    constexpr Misplaced kKnownMisplaced[] = {
+    // std::array, НЕ C-массив: массива нулевой длины в C++ не существует, и MSVC отвергает его
+    // (C2466), тогда как clang принимает как расширение GNU. Пустой реестр — то состояние, ради
+    // которого файл и писался, поэтому тип обязан уметь его выразить: иначе одна строка осталась бы
+    // здесь навсегда просто чтобы всё компилировалось. Ровно тот же случай был у PureVirtualCensus
+    // в тот же день, и там он вскрылся локально; здесь — только на Windows CI.
+    constexpr std::array<Misplaced, 0> kKnownMisplaced = {
          // THE REGISTER IS EMPTY, and an empty one is the only state this file is finished in. Every row
          // it has ever held was closed rather than reworded, which is deliberate: a register that keeps a
          // history is a register nobody reads.
