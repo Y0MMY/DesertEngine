@@ -230,6 +230,10 @@ namespace Desert::Assets
         // record the stranger was. `typeid` is there for the case the two asset type NAMES are equal —
         // exactly the static-versus-skinned mesh above, where "Mesh was requested as Mesh" would tell the
         // reader nothing.
+        //
+        // AND THE SEVERITY IS DERIVED, not fixed: the same equal-names case is ALSO the case where the
+        // miss is expected rather than wrong, so it is reported at trace. See the branch below — the
+        // discriminator is whether the registry's recorded type id agrees with the requested one.
         template <typename TypeAsset>
         static Asset<TypeAsset> AsRequestedType( const Asset<AssetBase>& stored, const char* who,
                                                  const std::string& subject )
@@ -248,11 +252,37 @@ namespace Desert::Assets
                 // SIDE EFFECTS evaluates it, and `*stored` is `shared_ptr::operator*` — a function call,
                 // so the operand is not the plain lvalue it reads as. Same dynamic type, intent stated.
                 const AssetBase& storedRef = *stored;
-                LOG_ERROR( "AssetManager::{}: '{}' holds a {} asset (type id {}, class '{}') but was "
-                           "requested as {}. Refusing to reinterpret it; returning null.",
-                           who, subject, AssetTypeName( stored->GetMetadata().AssetType ),
-                           static_cast<int>( stored->GetMetadata().AssetType ), typeid( storedRef ).name(),
-                           AssetTypeName( TypeAsset::GetTypeID() ) );
+
+                // TWO FAILURES WEAR ONE FACE HERE, AND ONLY ONE OF THEM IS A DEFECT.
+                //
+                // If the registry's recorded type id DISAGREES with the type asked for, the caller went
+                // looking for a Material and found a Mesh: somebody is holding the wrong handle, or a
+                // record is mislabelled. That is worth an ERROR and always was.
+                //
+                // If the two type ids AGREE and the cast still failed, nothing is wrong at all. Several
+                // asset CLASSES share one type id — StaticMeshAsset and SkinnedMeshAsset are both
+                // `Mesh` — so `FindAllByType<SkinnedMeshAsset>()` walks past every static mesh in the
+                // project by design, and each miss used to produce a line reading "holds a Mesh asset but
+                // was requested as Mesh". Two per scene load in this tree, at ERROR, saying what looks
+                // like a typo. Real ERROR lines are only worth reading if they are all real; a routine
+                // subtype probe is not one, so it goes to trace and NAMES BOTH CLASSES rather than the
+                // shared type name that made the pair indistinguishable.
+                const bool typeIdAgrees = stored->GetMetadata().AssetType == TypeAsset::GetTypeID();
+                if ( typeIdAgrees )
+                {
+                    LOG_TRACE( "AssetManager::{}: '{}' is a '{}', not the '{}' this lookup asked for — both "
+                               "are {} assets, so this is a subtype probe passing over it, not an error.",
+                               who, subject, typeid( storedRef ).name(), typeid( TypeAsset ).name(),
+                               AssetTypeName( TypeAsset::GetTypeID() ) );
+                }
+                else
+                {
+                    LOG_ERROR( "AssetManager::{}: '{}' holds a {} asset (type id {}, class '{}') but was "
+                               "requested as {} (class '{}'). Refusing to reinterpret it; returning null.",
+                               who, subject, AssetTypeName( stored->GetMetadata().AssetType ),
+                               static_cast<int>( stored->GetMetadata().AssetType ), typeid( storedRef ).name(),
+                               AssetTypeName( TypeAsset::GetTypeID() ), typeid( TypeAsset ).name() );
+                }
             }
 
             return typed;
