@@ -138,11 +138,18 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   It was found the only way a blind spot ever is: A8-3 converted eight raw members to co-owned
     //   handles and the total FELL by five instead of holding. The alias list is now derived from the
     //   tree (see DeclaredAliases), not typed.
-    EXPECT_EQ( CountOf( Form::Raw ), 322 );
+    //   783 -> 784, AND THIS ONE IS THE CENSUS EARNING ITS KEEP. G17 landed a hand-written keyword scan
+    //   in DShaderParser to replace fifteen unconditional std::regex passes, and its rule table brought a
+    //   `const char* Replacement` with it. That branch was cut BEFORE this census covered the whole tree,
+    //   so nobody on it was ever asked the two questions -- and the integration is exactly where an
+    //   un-owed pointer would otherwise have slipped in unremarked. The answer is the easy kind (a string
+    //   literal in a `static const` table, so the language closes both questions), which is the point: the
+    //   gate does not care whether the answer is hard, only that one exists.
+    EXPECT_EQ( CountOf( Form::Raw ), 323 );
     EXPECT_EQ( CountOf( Form::Shared ), 317 );
     EXPECT_EQ( CountOf( Form::Unique ), 110 );
     EXPECT_EQ( CountOf( Form::Weak ), 34 );
-    EXPECT_EQ( (int)Members().size(), 783 )
+    EXPECT_EQ( (int)Members().size(), 784 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }

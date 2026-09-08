@@ -225,6 +225,9 @@ namespace Desert::Tests::PointerCensus
           "ExternalPassContext", "Depth", Guard::FrameScoped,
           "per-frame data handed to an editor-registered pass when the render graph executes it; the "
           "target and its depth belong to the SceneRenderer running the graph" },
+        { "Desert/Desert/Source/Engine/Core/ShaderCompiler/DShader/DShaderParser.cpp",
+          "Rule", "Replacement", Guard::StaticStorage,
+          "a string literal in a function-local `static const Rule kRules[]`; the table and every literal in it have static storage duration, so nothing can outlive them" },
         { "Desert/Desert/Source/Engine/Graphic/MappedMemory.hpp",
           "MappedMemory", "kNeverAttempted", Guard::StaticStorage,
           "a string literal held by a constexpr static" },
