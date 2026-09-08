@@ -619,7 +619,9 @@ namespace Desert::Editor
         // and only the main editor loop pushes the user's flags into one.
         auto& settings       = m_PreviewScene->GetSettings();
         settings.EnableBloom = false;
-        settings.AA          = ::Desert::Core::AntiAliasingMode::FXAA;
+
+        // `settings.AA = FXAA` used to stand here and restated the default. The mode is machine quality
+        // now (К3) and this preview renderer is never pushed to, so it keeps the schema defaults.
 
         m_PreviewRenderer->SetOutlineSettings( glm::vec3( 0.0f ), 0.0f, 0.0f, false );
 

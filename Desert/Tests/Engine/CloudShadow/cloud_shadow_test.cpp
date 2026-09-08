@@ -461,21 +461,21 @@ namespace
 {
     // Every enumerator, listed once. A new tier that is not added here is a tier nothing checks, which is
     // why the count is asserted below rather than left to the reader.
-    constexpr Desert::Core::CloudQuality kAllTiers[] = {
-         Desert::Core::CloudQuality::Low,
-         Desert::Core::CloudQuality::Medium,
-         Desert::Core::CloudQuality::High,
+    constexpr Common::Settings::CloudQuality kAllTiers[] = {
+         Common::Settings::CloudQuality::Low,
+         Common::Settings::CloudQuality::Medium,
+         Common::Settings::CloudQuality::High,
     };
 
-    const char* TierName( Desert::Core::CloudQuality tier )
+    const char* TierName( Common::Settings::CloudQuality tier )
     {
         switch ( tier )
         {
-            case Desert::Core::CloudQuality::Low:
+            case Common::Settings::CloudQuality::Low:
                 return "Low";
-            case Desert::Core::CloudQuality::Medium:
+            case Common::Settings::CloudQuality::Medium:
                 return "Medium";
-            case Desert::Core::CloudQuality::High:
+            case Common::Settings::CloudQuality::High:
                 return "High";
         }
         return "?";
@@ -498,7 +498,7 @@ TEST( CloudShadowMapTiers, EveryTierKeepsTheTexelInsideTheChordTheMarchCanFind )
     // shader's own text is the one this test wants: it is the thing being held to a relation.
     const float chordKm = Desert::Tests::CloudShadowRef::CloudFinestResolvableChordKm( kDefaultMaxStepsAllTiers );
 
-    for ( const Desert::Core::CloudQuality tier : kAllTiers )
+    for ( const Common::Settings::CloudQuality tier : kAllTiers )
     {
         const CloudQualityScale scale      = CloudQualityFor( tier );
         const float             extentKm   = CloudShadowExtentKmForScale( scale.ShadowMapScale );
@@ -551,7 +551,7 @@ TEST( CloudShadowMapTiers, EveryTierFadesItsBorderOverAtLeastTenTexels )
 {
     using namespace Desert::Graphic;
 
-    for ( const Desert::Core::CloudQuality tier : kAllTiers )
+    for ( const Common::Settings::CloudQuality tier : kAllTiers )
     {
         const CloudQualityScale scale      = CloudQualityFor( tier );
         const float             extentKm   = CloudShadowExtentKmForScale( scale.ShadowMapScale );
@@ -579,7 +579,7 @@ TEST( CloudShadowMapTiers, EveryTierGuaranteesCoverageAroundTheCameraAndTheLadde
     float previousCoverageKm = 0.0f;
     float previousCostShare  = 0.0f;
 
-    for ( const Desert::Core::CloudQuality tier : kAllTiers ) // Low -> Medium -> High
+    for ( const Common::Settings::CloudQuality tier : kAllTiers ) // Low -> Medium -> High
     {
         const CloudQualityScale scale      = CloudQualityFor( tier );
         const float             extentKm   = CloudShadowExtentKmForScale( scale.ShadowMapScale );
@@ -612,7 +612,7 @@ TEST( CloudShadowMapTiers, TheReferenceTierIsExactlyWhatWasShippedBeforeTheTierE
 
     // The one assertion that says this task changed no picture at High: the reference tier reproduces the
     // three constants the map was shipped with, to the digit.
-    const CloudQualityScale high = CloudQualityFor( Desert::Core::CloudQuality::High );
+    const CloudQualityScale high = CloudQualityFor( Common::Settings::CloudQuality::High );
 
     EXPECT_FLOAT_EQ( high.ShadowMapScale, 1.0f );
     EXPECT_EQ( CloudShadowResolutionForScale( high.ShadowMapScale ), kCloudShadowMapResolution );
@@ -709,7 +709,7 @@ TEST( CloudShadowMapTiers, EveryTierKeepsBothSnapsUnderAMovingCamera )
 {
     using namespace Desert::Graphic;
 
-    for ( const Desert::Core::CloudQuality tier : kAllTiers )
+    for ( const Common::Settings::CloudQuality tier : kAllTiers )
     {
         const CloudQualityScale scale      = CloudQualityFor( tier );
         const float             extentKm   = CloudShadowExtentKmForScale( scale.ShadowMapScale );

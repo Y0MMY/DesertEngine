@@ -1395,8 +1395,8 @@ namespace Desert::Migration
         return report;
     }
 
-    RetiredKeysMigrationReport MigrateRetiredKeysV13ToV14( std::optional<rfl::Generic>&     settings,
-                                                           std::vector<Assets::EntityData>& entities )
+    RetiredKeysMigrationReport MigrateRetiredKeys( std::optional<rfl::Generic>&     settings,
+                                                   std::vector<Assets::EntityData>& entities )
     {
         RetiredKeysMigrationReport report;
 
@@ -1893,10 +1893,18 @@ namespace Desert::Migration
         // LAST, and it has to be: every step above may WRITE keys, and this one is the statement of which
         // keys must not be in the finished file. Running it earlier would let a later step reintroduce a
         // retired name and leave the tool reporting a removal that did not survive its own run.
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionRetiredKeys )
+        //
+        // AND GATED ON THE HEAD, not on a step number of its own. It used to read
+        // `< kSceneVersionRetiredKeys` (14), which was right for the day it landed and wrong for the day
+        // a row was ADDED: K3's five rows would then never have fired on a corpus already stamped 14, and
+        // the tool would have reported every file up to date while five dead keys sat in each one. The
+        // pass reads only the table, never the values, so re-running it on a file it has already cleaned
+        // removes nothing and leaves the tree byte-identical — which is what makes this gate safe here
+        // and unsafe for every step above. See the note over MigrateRetiredKeys in the header.
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersion )
         {
             report.RetiredKeysRaised = true;
-            report.RetiredKeys       = MigrateRetiredKeysV13ToV14( scene.Settings, scene.Entities );
+            report.RetiredKeys       = MigrateRetiredKeys( scene.Settings, scene.Entities );
         }
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,

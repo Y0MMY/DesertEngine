@@ -6,6 +6,8 @@
 #include <Engine/Core/Serialize/SceneFormat.hpp>
 #include <Engine/Project/ProjectContext.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
+
+#include <Common/Settings/MachineSettings.hpp>
 #include <Engine/Graphic/UICacheTexture.hpp>
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Assets/AssetManager.hpp>
@@ -257,6 +259,13 @@ namespace Desert::Player
         // own transfer) — the UI walk during present then just samples the freshly-updated frame texture.
         if ( auto* videoService = ::Desert::Runtime::ResourceRegistry::GetVideoService() )
             videoService->UpdateAll();
+
+        // WHAT THIS PLAYER'S MACHINE CAN AFFORD, pushed before BeginScene reads it. Until К3 these five
+        // values were fields of the LEVEL file, so a player could not turn the picture down at all — the
+        // only place the answer existed was a `.desce` shipped inside the game's content archive. They
+        // are in the machine store now, loaded at startup from this player's own directory
+        // (Runtime/Source/Main.cpp), and this is the line that makes the dial reach the renderer.
+        m_SceneRenderer->SetQuality( Common::Settings::MachineSettings::Get() );
 
         if ( const auto begin = m_Scene->BeginScene(); !begin )
             return Common::MakeError( begin.GetError() );

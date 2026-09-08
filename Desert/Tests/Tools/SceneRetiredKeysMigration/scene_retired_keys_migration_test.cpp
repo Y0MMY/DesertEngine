@@ -1,4 +1,4 @@
-// The v13 -> v14 step: the keys this project RETIRED leave the files, and the Settings block becomes
+// THE RETIREMENT PASS: the keys this project RETIRED leave the files, and the Settings block becomes
 // exactly what the engine's saver would write.
 //
 // WHY THE STEP EXISTS AT ALL, since nothing reads a retired key. Until K11 the answer was "the next save
@@ -15,7 +15,10 @@
 //
 //   1. Every row of kRetiredKeys is removed from the block it names, with its value and reason reported,
 //      and nothing else in the block is touched or reordered.
-//   2. The step is idempotent and gated on its own version integer through MigrateScene.
+//   2. The pass is idempotent and gated on THE HEAD through MigrateScene — not on a step number of its
+//      own, which is the one place this tool departs from "each migration has its own constant". K3 is why:
+//      it added five rows to a table the corpus was already past, and a step-number gate would have left
+//      every one of them in every file while the tool reported the corpus up to date.
 //   3. Canonicalisation produces the SAVER's bytes — the same fields, in the same order, through the same
 //      reflection table — and keeps an AssetHandle's on-disk form verbatim.
 //   4. THE HEAD ASSERTION, which lives in exactly one suite at a time and has moved here.
@@ -82,7 +85,7 @@ TEST( SceneRetiredKeysMigration, EveryRetiredKeyIsRemovedFromTheBlockItNamesAndR
     std::optional<rfl::Generic>     settings = Settings( R"({"Exposure":1.0,"EnableSSGI":true,"Gamma":2.2})" );
     std::vector<Assets::EntityData> entities;
 
-    const auto report = Migration::MigrateRetiredKeysV13ToV14( settings, entities );
+    const auto report = Migration::MigrateRetiredKeys( settings, entities );
 
     EXPECT_EQ( report.KeysRemoved, 1 );
     ASSERT_EQ( report.RemovedNames.size(), 1u );
@@ -104,7 +107,7 @@ TEST( SceneRetiredKeysMigration, ABlockStatingNoRetiredKeyIsLeftByteIdentical )
     std::vector<Assets::EntityData> entities;
     const std::string               before = rfl::json::write( settings.value() );
 
-    const auto report = Migration::MigrateRetiredKeysV13ToV14( settings, entities );
+    const auto report = Migration::MigrateRetiredKeys( settings, entities );
 
     EXPECT_EQ( report.KeysRemoved, 0 );
     EXPECT_EQ( rfl::json::write( settings.value() ), before );
@@ -114,15 +117,15 @@ TEST( SceneRetiredKeysMigration, AMissingSettingsBlockIsNotAFailure )
 {
     std::optional<rfl::Generic>     settings; // a scene that states no settings at all
     std::vector<Assets::EntityData> entities;
-    const auto                      report = Migration::MigrateRetiredKeysV13ToV14( settings, entities );
+    const auto                      report = Migration::MigrateRetiredKeys( settings, entities );
     EXPECT_EQ( report.KeysRemoved, 0 );
     EXPECT_FALSE( settings.has_value() );
 }
 
-TEST( SceneRetiredKeysMigration, TheStepIsGatedOnItsOwnVersionAndIsIdempotent )
+TEST( SceneRetiredKeysMigration, ThePassIsGatedOnTheHeadAndIsIdempotent )
 {
     Core::SceneSerialized scene;
-    scene.SceneVersion = Migration::kSceneVersionDebugView; // v13: the step must run
+    scene.SceneVersion = Migration::kSceneVersionDebugView; // v13: the pass must run
     scene.UnitVersion  = Core::kUnitVersion;
     scene.Settings     = Settings( R"({"EnableSSGI":true})" );
 
@@ -132,12 +135,63 @@ TEST( SceneRetiredKeysMigration, TheStepIsGatedOnItsOwnVersionAndIsIdempotent )
     EXPECT_FALSE( Has( scene.Settings, "EnableSSGI" ) );
     EXPECT_EQ( scene.SceneVersion.value_or( 0 ), Core::kSceneVersion );
 
-    // Hand-edited back in; the gate must not care, because the file now claims v14.
+    // Hand-edited back in; the gate must not care, because the file now claims the head.
     scene.Settings    = Settings( R"({"EnableSSGI":true})" );
     const auto second = Migration::MigrateScene( scene );
     EXPECT_FALSE( second.RetiredKeysRaised );
     EXPECT_FALSE( second.Changed() );
     EXPECT_TRUE( Has( scene.Settings, "EnableSSGI" ) );
+}
+
+// THE ASSERTION K3 NEEDED AND THE OLD GATE WOULD HAVE FAILED. A corpus already stamped at the previous
+// head must still be swept by rows added after it — otherwise a retirement written down here is a
+// retirement that never happens, and the tool says the files are up to date while every one of them still
+// carries the key. This is the whole reason the pass is gated on Core::kSceneVersion rather than on a step
+// number: set the gate back to `< kSceneVersionRetiredKeys` and this test goes red.
+TEST( SceneRetiredKeysMigration, ARowAddedAfterTheLastHeadStillFiresOnAFileStampedAtThatHead )
+{
+    Core::SceneSerialized scene;
+    scene.SceneVersion = Migration::kSceneVersionRetiredKeys; // v14 — where the whole corpus stood
+    scene.UnitVersion  = Core::kUnitVersion;
+    scene.Settings     = Settings( R"({"Exposure":1.0,"CloudQualityTier":"Low","AA":"SMAA"})" );
+
+    const auto report = Migration::MigrateScene( scene );
+
+    EXPECT_TRUE( report.RetiredKeysRaised );
+    EXPECT_EQ( report.RetiredKeys.KeysRemoved, 2 );
+    EXPECT_FALSE( Has( scene.Settings, "CloudQualityTier" ) );
+    EXPECT_FALSE( Has( scene.Settings, "AA" ) );
+    EXPECT_TRUE( Has( scene.Settings, "Exposure" ) );
+}
+
+// K3's five, as a set rather than one by one: the point of the move is that ALL of what a machine can
+// afford left the level file, and a table missing one of them is a scene format that still states it.
+TEST( SceneRetiredKeysMigration, TheFiveMachineQualityKeysAreRetiredAndReportedWithTheirValues )
+{
+    std::optional<rfl::Generic> settings =
+         Settings( R"({"AA":"SMAA","MeshLOD":false,"TextureFilterMode":"Nearest","Anisotropy":16,)"
+                   R"("CloudQualityTier":"Low","Exposure":1.0})" );
+    std::vector<Assets::EntityData> entities;
+
+    const auto report = Migration::MigrateRetiredKeys( settings, entities );
+
+    EXPECT_EQ( report.KeysRemoved, 5 );
+    EXPECT_EQ( KeysOf( settings ), ( std::vector<std::string>{ "Exposure" } ) );
+
+    // Each one NAMED with the value it held. Nothing is carried into the machine store — 51 scenes and
+    // one machine.json cannot be reconciled, so the log is how the person who authored `Anisotropy: 16`
+    // finds out to set it once, for the machine, instead of noticing a blurrier picture in six months.
+    for ( const char* key : { "AA", "MeshLOD", "TextureFilterMode", "Anisotropy", "CloudQualityTier" } )
+    {
+        const bool named =
+             std::any_of( report.RemovedNames.begin(), report.RemovedNames.end(), [key]( const std::string& line )
+                          { return line.find( std::string( "Settings." ) + key + "=" ) != std::string::npos; } );
+        EXPECT_TRUE( named ) << key << " was removed without being named with its value";
+    }
+    const bool saysWhere =
+         std::any_of( report.RemovedNames.begin(), report.RemovedNames.end(), []( const std::string& line )
+                      { return line.find( "MachineSettings" ) != std::string::npos; } );
+    EXPECT_TRUE( saysWhere ) << "the report does not say where these values went";
 }
 
 // ── canonicalisation ─────────────────────────────────────────────────────────────────────────────
@@ -212,9 +266,9 @@ TEST( SceneRetiredKeysMigration, ASceneWithNoSettingsBlockGetsTheCanonicalOne )
 // the repository stops opening at once while each file looks correct in isolation.
 TEST( SceneRetiredKeysMigration, ThisIsTheHeadStepAndItSitsAboveItsPredecessor )
 {
-    EXPECT_EQ( 14, Migration::kSceneVersionRetiredKeys );
-    EXPECT_GT( Migration::kSceneVersionRetiredKeys, Migration::kSceneVersionDebugView );
-    EXPECT_EQ( Migration::kSceneVersionRetiredKeys, Core::kSceneVersion )
+    EXPECT_EQ( 15, Migration::kSceneVersionMachineQuality );
+    EXPECT_GT( Migration::kSceneVersionMachineQuality, Migration::kSceneVersionRetiredKeys );
+    EXPECT_EQ( Migration::kSceneVersionMachineQuality, Core::kSceneVersion )
          << "a newer step exists; move this assertion to that suite the way this one moved here";
 }
 

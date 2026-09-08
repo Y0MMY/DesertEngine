@@ -21,6 +21,8 @@
 #include <Engine/EntryPoint.hpp>
 #include <Engine/Project/ProjectContext.hpp>
 
+#include <Common/Settings/MachineSettings.hpp>
+
 #include <Common/Utilities/VFS.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Core/Logger.hpp>
@@ -162,6 +164,17 @@ std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char**
               Desert::Project::ProjectContext::Current().Name,
               content.BasePak.empty() ? std::string( "none — loose files" ) : content.BasePak.string(),
               content.Patches.size() );
+
+    // WHAT THIS MACHINE CAN AFFORD, from this player's own directory — the same schema the editor reads
+    // from `~/.desertengine/machine.json`, in the place a packaged game's per-user state belongs (К3).
+    // Before the application exists, because SceneRenderer::Init bakes the MSAA sample count into every
+    // pipeline it creates and a later load would apply one launch behind.
+    //
+    // Per PRODUCT, not per install: two games on one machine are two different budgets. An absent file is
+    // the ordinary first-run state and leaves the schema defaults standing, which is exactly the picture
+    // this game rendered before it had a dial at all.
+    Common::Settings::MachineSettings::Load(
+         Common::Settings::GameUserDirectory( Desert::Project::ProjectContext::Current().Name ) / "machine.json" );
 
     ApplicationInfo appInfo;
     appInfo.Title = Desert::Project::ProjectContext::Current().Name;

@@ -56,6 +56,7 @@
 #include <Engine/Core/Input.hpp>
 #include <Common/Core/KeyCodes.hpp>
 #include <Common/Core/Version.hpp>
+#include <Common/Settings/MachineSettings.hpp>
 #include <stb_image/stb_image_write.h>
 #include "Editor/Core/ImGuiUtilities.hpp"
 #include <ImGui/imgui_internal.h>
@@ -347,6 +348,19 @@ namespace Desert::Editor
         // hero clouds above: a layout names nothing and is named only by a material.
         m_StartupStages.push_back(
              { "Preloading painted layouts...", [this] { m_AssetPreloader->PreloadCloudLayouts(); } } );
+
+        // WHAT THIS MACHINE CAN AFFORD — a different file from editor.json and deliberately so (К3).
+        // editor.json is one person's copy of the EDITOR and the packaged game never opens it, while every
+        // value in machine.json is read by SceneRenderer, which the packaged game runs; the schema is one
+        // and the PLACE is the parameter, so a shipped build reads the same fields out of the player's own
+        // directory (Runtime/Source/Main.cpp).
+        //
+        // FIRST, before any SceneRenderer is CONSTRUCTED, and for two independent reasons. MSAA is baked
+        // into the pipelines at SceneRenderer::Init, so a later load would apply one start behind; and a
+        // renderer initialises its own copy of these values from this store, so one built before the load
+        // would hold the schema defaults and push two of them into global sampler state.
+        Common::Settings::MachineSettings::Load( std::filesystem::path( ProjectContext::ConfigDirectory() ) /
+                                                 "machine.json" );
 
         m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager );
         m_AnimationLibrary = std::make_unique<Animation::AnimationLibrary>( m_AssetManager.get() );
@@ -2162,6 +2176,12 @@ namespace Desert::Editor
             // Before К10 the mode wrote the store directly and every unrelated EditorPreferences::Save()
             // could make the suppression permanent — see Editor/Core/ViewportModes.hpp.
             sr->SetDebugView( ViewportPanel::EffectiveDebugView( prefs.DebugView, scene ) );
+            // AND WHAT THIS MACHINE CAN AFFORD, on the same terms and for the same reason: post AA, mesh
+            // LOD, the sampler's filter and anisotropy, the cloud tier. It was scene data until К3, so a
+            // weak machine could not turn the picture down without editing a file that goes to everybody.
+            // The offscreen preview renderers are not fed here either — the inspector preview pushes its
+            // own copy with a cheaper cloud tier, and the other two keep the schema defaults.
+            sr->SetQuality( Common::Settings::MachineSettings::Get() );
         }
 
         {

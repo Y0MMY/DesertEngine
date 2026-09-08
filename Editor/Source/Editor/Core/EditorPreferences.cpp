@@ -1,6 +1,5 @@
 #include "EditorPreferences.hpp"
 
-#include <Engine/Graphic/RenderConfig.hpp>
 #include <Engine/Project/ProjectContext.hpp>
 
 #include <Common/Utilities/FileSystem.hpp>
@@ -37,25 +36,13 @@ namespace Desert::Editor
         return EditorPreferences::ConfigDirectory() + "/editor.json";
     }
 
-    // The renderer's copy of the one preference a Vulkan-side system has to see for itself.
-    // Engine/Graphic must not know the editor exists, so the value is PUSHED down a layer rather than
-    // pulled up one. MSAA is consumed by SceneRenderer::Init — Load() runs in the EditorLayer
-    // constructor, before any render system initializes, so a startup-baked setting lands in time, and
-    // Save() repeats it because a second viewport creates a SceneRenderer mid-session and that new
-    // renderer must bake the CURRENT selection rather than the one this process started with.
-    //
-    // THIS IS NOT THE SIDE EFFECT THAT USED TO SHARE THIS FUNCTION. Its predecessor was called
-    // ApplyToGizmoState and pushed the four gizmo snap values into Core::GizmoState, which was a second
-    // STORE for them that four other places also wrote — so running it from Save() overwrote whatever
-    // the user had just chosen with whatever was last loaded, on every unrelated save. There is no such
-    // hazard here and the difference is structural, not a matter of degree: RenderConfig::MSAASamples
-    // has exactly ONE writer, this line, and is derived from exactly one source, the field beside it.
-    // Re-running it can only restate what the owner already says. A push is safe precisely when the
-    // side being pushed to is not also an authority on the value.
-    static void PushToRenderConfig( const EditorPreferences& p )
-    {
-        Graphic::RenderConfig::MSAASamples = p.MSAASamples;
-    }
+    // THE ONE PUSH THIS FILE USED TO MAKE IS GONE. `PushToRenderConfig` copied MSAASamples into
+    // Graphic::RenderConfig for SceneRenderer::Init to read, and its own comment argued — correctly —
+    // that the push was safe because the copy had exactly one writer. What it could not argue is that
+    // this was the right FILE: the packaged Runtime never opens editor.json, so the push was also the
+    // only writer the value had anywhere, and a shipped game ran at one sample whatever its player
+    // chose. К3 moved the field into Common::Settings::MachineSettings, which the renderer reads
+    // directly, and with it the last reason for this file to reach into another layer at all.
 
     // WHAT THIS PROCESS BELIEVES editor.json HOLDS, in the canonical text Save() writes. Empty means it
     // believes there is no file (first run), or that it cannot claim to know — a failed read, a corrupt
@@ -154,15 +141,26 @@ namespace Desert::Editor
     // including the ones somebody meant to destroy — so the deletion has to be stated somewhere, and this
     // is that somewhere. The invariant it protects is contract §4's: a retirement finishes.
     //
-    // Both entries are К1's. `PhotogrammetryCaptureCommand` documented a `{photos}` substitution that was
-    // never implemented and `PhotogrammetryMode` an Object/Face preset switch that does not exist; they
-    // were serialized into every editor.json and read by nothing.
+    // The first two are К1's. `PhotogrammetryCaptureCommand` documented a `{photos}` substitution that
+    // was never implemented and `PhotogrammetryMode` an Object/Face preset switch that does not exist;
+    // they were serialized into every editor.json and read by nothing.
+    //
+    // `MSAASamples` is К3's, and it is the first row here that names a LIVE setting rather than a dead
+    // one. The value did not stop existing — it moved to Common::Settings::MachineSettings, because this
+    // file is an Editor-target concept the packaged Runtime never opens and a per-machine quality knob
+    // stored here is a knob the player does not get. What is retired is the KEY: this build no longer
+    // declares it, so without this row UnknownKeys would preserve it in every existing editor.json for
+    // ever, and a reader opening that file a year from now would find a quality setting that has had no
+    // consumer since 2026-09-08. The new store is NOT seeded from it — two files written by different
+    // processes at different moments, one silently deciding the other, is the hazard this whole task is
+    // about; the machine store's default is 1, which is what every editor.json in existence states.
     //
     // EXPIRY: a row leaves this list when no config in circulation can still carry the key. It costs one
     // string compare per unknown key per read, and a read has neither in the ordinary case.
     static bool IsRetiredKey( const std::string& key )
     {
-        static const std::vector<std::string> retired = { "PhotogrammetryCaptureCommand", "PhotogrammetryMode" };
+        static const std::vector<std::string> retired = { "PhotogrammetryCaptureCommand", "PhotogrammetryMode",
+                                                          "MSAASamples" };
         return std::find( retired.begin(), retired.end(), key ) != retired.end();
     }
 
@@ -190,7 +188,7 @@ namespace Desert::Editor
                 continue;
             }
             if ( raised != nullptr )
-                raised->push_back( "retired key '" + key + "' dropped (deleted by К1; it was read by nothing)" );
+                raised->push_back( "retired key '" + key + "' dropped (this build does not declare it)" );
         }
         p.UnknownKeys = std::move( kept );
     }
@@ -256,13 +254,12 @@ namespace Desert::Editor
     // offer, and the diff is a better one than any fixed string.
     static bool PersistCurrent( std::string event )
     {
-        // A SAVE MUST NOT CHANGE A SINGLE FIELD THE USER DID NOT TOUCH. This was once the first statement
-        // of Save() as ApplyToGizmoState(), which reverted the four gizmo snap values to whatever this
-        // struct last held — so toggling the Perf HUD, picking an MSAA level or starring a field in Details
-        // silently undid a snap step chosen from the toolbar. The line below is the whole of what a save is
-        // allowed to do besides writing the file, and PushToRenderConfig's header says why it cannot have
-        // the same effect. Desert/Tests/Editor/PreferenceOwnership asserts the relation.
-        PushToRenderConfig( EditorPreferences::Get() );
+        // A SAVE MUST NOT CHANGE A SINGLE FIELD THE USER DID NOT TOUCH, AND NOW IT TOUCHES NOTHING AT
+        // ALL OUTSIDE THIS FILE. This was once ApplyToGizmoState(), which reverted the four gizmo snap
+        // values to whatever this struct last held — so toggling the Perf HUD or starring a field in
+        // Details silently undid a snap step chosen from the toolbar. К6 cut that down to one derived
+        // push (RenderConfig::MSAASamples); К3 took the field itself out of this file, so there is no
+        // push left. Desert/Tests/Editor/PreferenceOwnership asserts the relation.
 
         // Whatever another build has put in the file since this one read it. See the header above: this is
         // what stops a long-running editor deleting a key that appeared after it started.
@@ -348,10 +345,7 @@ namespace Desert::Editor
         // First run: no prefs file yet — keep defaults, and skip the read's "could not read file"
         // error line, which would be noise for a state that is expected.
         if ( !std::filesystem::exists( PrefsFile() ) )
-        {
-            PushToRenderConfig( Get() );
             return;
-        }
 
         if ( const auto raw = Common::Utils::FileSystem::ReadFileContent( PrefsFile() ); !raw )
         {
@@ -410,8 +404,6 @@ namespace Desert::Editor
                       "build and are preserved on save, not dropped.",
                       PrefsFile(), Get().UnknownKeys.size(), names );
         }
-
-        PushToRenderConfig( Get() );
     }
 
     bool EditorPreferences::IsFavouriteField( const std::string& key )

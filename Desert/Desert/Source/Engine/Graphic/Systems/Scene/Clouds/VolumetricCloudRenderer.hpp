@@ -112,14 +112,15 @@ namespace Desert::Graphic::System
          *                   the timestep is.
          * @param heroClouds this frame's sculpted bodies — slot A of the seam. Empty is the ordinary case
          *                   and means the march's authored loop does not run at all.
-         * @param quality    the scene's cloud quality tier, refreshed from Core::SceneSettings each
+         * @param quality    this machine's cloud quality tier, taken from Common::Settings::MachineSettings each
          *                   BeginScene like every other cost-versus-quality choice. It arrives HERE rather
          *                   than being read from a global because this renderer is one of several live at
          *                   once (Docs/RENDERER_FRAME_STATE.md) and a tier is per-view state like any
          *                   other.
          */
         void SetCloudSettings( bool present, const ECS::VolumetricCloudData& data, const glm::vec3& windOffset,
-                               Core::CloudQuality quality, const std::vector<HeroCloudInstance>& heroClouds );
+                               Common::Settings::CloudQuality        quality,
+                               const std::vector<HeroCloudInstance>& heroClouds );
 
         /**
          * @brief Stages S0 and S1. Must be called outside any render pass, after the scene depth is final.
@@ -626,7 +627,7 @@ namespace Desert::Graphic::System
         // every use because EnsureShadowMap has to notice when it CHANGES — the map's size is a property
         // of the tier, so switching tiers mid-session reallocates it, which is the one thing the old
         // "allocated once and never again" comment on that function stopped being true about.
-        Core::CloudQuality m_Quality             = Core::CloudQuality::High;
+        Common::Settings::CloudQuality m_Quality             = Common::Settings::CloudQuality::High;
         float              m_ShadowMapScaleInUse = 0.0f;
 
         // The HALF-resolution grid, which is what the sub-pixel jitter and the reconstruction are both

@@ -21,6 +21,9 @@ project(test_name)
         test_files,
         "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionRegistry.cpp",
+        -- K3: the settings block is written through this file, so the assertion that a machine-quality
+        -- change moves none of its bytes has to go through it too rather than through a stand-in.
+        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionSerializer.cpp",
     }
 
     includedirs {
@@ -57,6 +60,13 @@ project(test_name)
     -- Common: the generated table default-constructs an AssetHandle, which is a Common::UUID.
     -- Optick: Common's JobSystem registers its worker threads with the profiler.
     links { "Common", "Optick" }
+
+    -- K3's machine store is in Common and reads/writes its file through Common::Utils::FileSystem, whose
+    -- macOS implementation is Objective-C — so the ObjC runtime + AppKit have to link as well. The same
+    -- two lines every other suite that touches FileSystem carries.
+    filter "system:macosx"
+        links { "Cocoa.framework", "Foundation.framework" }
+    filter {}
 
     filter "system:not windows"
         links { "ReflectCpp" }

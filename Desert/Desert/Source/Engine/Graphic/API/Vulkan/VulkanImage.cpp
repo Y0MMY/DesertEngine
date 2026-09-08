@@ -7,6 +7,7 @@
 #include <Engine/Graphic/PixelPack.hpp> // the one packer this and the swapchain readback share
 #include <Engine/Graphic/RenderConfig.hpp>
 
+#include <Common/Settings/MachineSettings.hpp>
 #include <Common/Utilities/String.hpp>
 
 #include <algorithm>
@@ -36,9 +37,9 @@ namespace Desert::Graphic::API::Vulkan
 
         static void CreateSampler( VkDevice device, VkSampler& outSampler, SamplerFilterPolicy policy )
         {
-            // Global filter selected in Scene Settings (pushed into RenderConfig by SceneRenderer):
-            // Nearest | Bilinear (linear, nearest mip) | Trilinear (linear, linear mip) | Anisotropic.
-            using FM               = Graphic::TextureFilterMode;
+            // The machine's global filter (Common::Settings::MachineSettings, pushed into RenderConfig by
+            // SceneRenderer): Nearest | Bilinear (linear, nearest mip) | Trilinear | Anisotropic.
+            using FM               = Common::Settings::TextureFilter;
             const bool forceLinear = policy == SamplerFilterPolicy::AlwaysLinear;
             const int  mode        = Graphic::RenderConfig::TextureFilter.load();
             const bool nearest     = !forceLinear && mode == static_cast<int>( FM::Nearest );

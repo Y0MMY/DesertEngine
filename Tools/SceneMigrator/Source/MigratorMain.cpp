@@ -392,8 +392,11 @@ namespace Desert::Migration
             }
             if ( report.RetiredKeysRaised )
             {
-                out << " scene v" << Desert::Migration::kSceneVersionDebugView << "->v"
-                    << Desert::Migration::kSceneVersionRetiredKeys << " (";
+                // NOT a step's own pair of numbers, unlike every line above: the retirement pass is
+                // gated on the head and sweeps a file from WHEREVER it was to wherever the head is now
+                // (see MigrateRetiredKeys). Printing a fixed 13->14 here would have reported the wrong
+                // transition for every file K3 converted, which stood at 14.
+                out << " retired keys -> v" << Desert::Migration::kSceneVersion << " (";
                 if ( report.RetiredKeys.KeysRemoved > 0 )
                 {
                     // Named with their values AND the reason, because from v14 on this is the ONLY way a

@@ -107,10 +107,15 @@ namespace Desert::Graphic
         // Framebuffer. MSAA applies HERE only: every scene system renders into this target at N
         // samples and the render pass resolves to single-sample for the post stack. Read once —
         // pipelines bake their sample count, so a change applies on the next start.
+        //
+        // READ FROM THE MACHINE STORE DIRECTLY, not from m_Quality and not from a copy in RenderConfig.
+        // Not m_Quality because SetQuality is a per-frame push and Init runs before the first one; not a
+        // RenderConfig copy because that copy had exactly one writer, Editor::EditorPreferences, so a
+        // packaged game ran with MSAA nailed to 1 whatever its player had chosen.
         FramebufferSpecification fbSpec;
         fbSpec.DebugName = "Composite framebuffer";
-        fbSpec.Samples   = static_cast<uint32_t>(
-             std::clamp( RenderConfig::MSAASamples.load(), 1, RenderConfig::MaxMSAASamples.load() ) );
+        fbSpec.Samples   = static_cast<uint32_t>( std::clamp( Common::Settings::MachineSettings::Get().MSAASamples,
+                                                              1, RenderConfig::MaxMSAASamples.load() ) );
         // Validate against the device's actual sample MASK, not a hardcoded 1/2/4/8 list. Clamping to the
         // maximum is not enough: support is a bitmask, so a device can offer 1/4/8 and not 2 — the old
         // check accepted 2 there and the framebuffer failed to create. Fall back to the next lower
@@ -306,13 +311,14 @@ namespace Desert::Graphic
             DESERT_VERIFY( false );
         tonemapSystem->SetAutoExposureImage( autoExposureSystem->GetAdaptedLuminanceImage() );
 
-        // FXAA consumes the tonemapped image (LDR). It only runs when SceneSettings.AA == FXAA.
+        // FXAA consumes the tonemapped image (LDR). It only runs when the machine's post AA is FXAA
+        // (Common::Settings::MachineSettings::AA — it left SceneSettings with К3).
         RegisterSystem<System::FXAARenderer>( "FXAASystem", this, tonemapSystem->GetSystemFramebuffer(),
                                               m_RenderGraphBuilder );
         if ( !SP_CAST( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Initialize() )
             DESERT_VERIFY( false );
 
-        // SMAA consumes the same tonemapped image. Runs only when SceneSettings.AA == SMAA.
+        // SMAA consumes the same tonemapped image. Runs only when the machine's post AA is SMAA.
         RegisterSystem<System::SMAARenderer>( "SMAASystem", this, tonemapSystem->GetSystemFramebuffer(),
                                               m_RenderGraphBuilder );
         if ( !SP_CAST( System::SMAARenderer, m_RenderSystems["SMAASystem"] )->Initialize() )
@@ -442,7 +448,14 @@ namespace Desert::Graphic
         // The DEBUG VIEW (m_DebugView) is pushed the same way and read here rather than from the scene, for
         // the same reason and on the same terms — SetDebugView, from EditorPreferences, every frame.
 
-        m_AAMode = sceneSettings.AA;
+        // THE FIVE QUALITY VALUES COME FROM HERE, NOT FROM THE SCENE (К3). They describe what this
+        // MACHINE can afford, so they are pushed in per view (SetQuality) exactly as the debug view and
+        // the outline are, and a scene file cannot state them at all. Named as one local because they are
+        // one answer arriving from one place — and because a census that asks "does anything read this
+        // setting" has to be able to SEE the read (Desert/Tests/Engine/ConfigOwnership).
+        const Common::Settings::MachineSettings& quality = m_Quality;
+
+        m_AAMode = quality.AA;
         // Wireframe is a FORWARD-only debug view (the deferred G-buffer pipeline has no wireframe
         // variant — that's why turning it on in the default Deferred path did nothing). Force forward
         // while it's active so the wireframe pipeline is actually used and the grid composites over it.
@@ -450,8 +463,8 @@ namespace Desert::Graphic
         m_EnableSSAO = sceneSettings.EnableSSAO;
         // The cloud layer's cost ceiling, refreshed here with every other cost-versus-quality choice
         // rather than read from a global at the point of use: several SceneRenderers are live at once
-        // (Docs/RENDERER_FRAME_STATE.md) and each one renders the scene it was given.
-        m_CloudQuality   = sceneSettings.CloudQualityTier;
+        // (Docs/RENDERER_FRAME_STATE.md) and a preview pane may be given a cheaper tier than the viewport.
+        m_CloudQuality   = quality.CloudQualityTier;
         m_GIMode         = sceneSettings.GlobalIllumination;
         m_GIIntensity    = sceneSettings.GIIntensity;
         m_EnableSSR      = sceneSettings.EnableSSR;
@@ -500,8 +513,7 @@ namespace Desert::Graphic
 
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SetWireframe( m_DebugView.WireframeMode );
-        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
-             ->SetLODEnabled( sceneSettings.MeshLOD );
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->SetLODEnabled( quality.MeshLOD );
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SetShadows( sceneSettings.EnableShadows, sceneSettings.ShadowBias,
                            static_cast<int>( m_DebugView.ShadowDebug ), sceneSettings.CascadeSplitLambda );
@@ -511,8 +523,8 @@ namespace Desert::Graphic
 
         // Global texture filter: push into RenderConfig (read by sampler creation). On an actual change,
         // recreate all image samplers so the new filter applies live (no reload).
-        const int  desiredFilter = static_cast<int>( sceneSettings.TextureFilterMode );
-        const int  desiredAniso  = sceneSettings.Anisotropy;
+        const int  desiredFilter = static_cast<int>( quality.TextureFilterMode );
+        const int  desiredAniso  = quality.Anisotropy;
         const bool filterChanged = RenderConfig::TextureFilter.exchange( desiredFilter ) != desiredFilter;
         const bool anisoChanged  = RenderConfig::AnisotropyLevel.exchange( desiredAniso ) != desiredAniso;
         if ( filterChanged || anisoChanged )
@@ -1021,12 +1033,12 @@ namespace Desert::Graphic
             UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Execute();
         }
 
-        if ( m_AAMode == Core::AntiAliasingMode::FXAA )
+        if ( m_AAMode == Common::Settings::AntiAliasingMode::FXAA )
         {
             DESERT_PROFILE_PASS( "PostFX: FXAA" );
             UNIQUE_GET_AS( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Execute();
         }
-        else if ( m_AAMode == Core::AntiAliasingMode::SMAA )
+        else if ( m_AAMode == Common::Settings::AntiAliasingMode::SMAA )
         {
             DESERT_PROFILE_PASS( "PostFX: SMAA" );
             UNIQUE_GET_AS( System::SMAARenderer, m_RenderSystems["SMAASystem"] )->Execute();
@@ -1403,9 +1415,9 @@ namespace Desert::Graphic
     const std::shared_ptr<Desert::Graphic::Image2D> SceneRenderer::GetFinalImage()
     {
         // FXAA/SMAA write their own framebuffer downstream of tonemap; otherwise tonemap output IS final.
-        const char* finalSystem = ( m_AAMode == Core::AntiAliasingMode::FXAA )   ? "FXAASystem"
-                                  : ( m_AAMode == Core::AntiAliasingMode::SMAA ) ? "SMAASystem"
-                                                                                 : "TonemapSystem";
+        const char* finalSystem = ( m_AAMode == Common::Settings::AntiAliasingMode::FXAA )   ? "FXAASystem"
+                                  : ( m_AAMode == Common::Settings::AntiAliasingMode::SMAA ) ? "SMAASystem"
+                                                                                             : "TonemapSystem";
 
         return std::static_pointer_cast<System::RenderSystem>( m_RenderSystems[finalSystem] )
              ->GetSystemFramebuffer()

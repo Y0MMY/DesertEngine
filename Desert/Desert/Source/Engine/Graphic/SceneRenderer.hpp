@@ -22,6 +22,7 @@
 #include <Common/Core/Events/WindowEvents.hpp>
 #include <Common/Core/EventRegistry.hpp>
 #include <Common/Core/Units.hpp>
+#include <Common/Settings/MachineSettings.hpp>
 
 #include "Systems/Scene/Mesh/MeshRenderer.hpp"
 #include "Systems/Scene/Skybox/SkyboxRenderer.hpp"
@@ -201,6 +202,29 @@ namespace Desert::Graphic
         void SetDebugView( const DebugViewState& state )
         {
             m_DebugView = state;
+        }
+
+        // WHAT THIS MACHINE CAN AFFORD — post AA, mesh LOD, the sampler's filter and anisotropy, the
+        // cloud tier. Pushed in for the same reason the two above are: it is not a property of the scene
+        // (К3 took it out of the level file, where a weak machine could not turn it down without editing
+        // a file that goes to everybody), and it is not a property of the renderer either.
+        //
+        // WHY EVERY VIEW IS TOLD SEPARATELY INSTEAD OF READING THE GLOBAL HERE. An offscreen preview
+        // renders a 512-pixel pane and has no use for the viewport's cloud budget, so it pushes the
+        // machine's answer with its own tier substituted — applied to a COPY on the way in, never to the
+        // stored one. That is К10's rule for viewport modes, and the reason it exists: a view's transient
+        // idea of what it needs must never be written back into the user's permanent answer.
+        //
+        // A renderer nobody pushes to holds the machine's own answer as of its construction (see the
+        // member), not the schema defaults — because two of these five reach a GLOBAL the sampler path
+        // reads, and a stale copy there is everyone's problem, not just this view's. MSAA is NOT here:
+        // pipelines bake their sample count, so Init reads MachineSettings directly and a later push
+        // could not change it.
+        //
+        // Call it BEFORE BeginScene: the values reach the systems from there.
+        void SetQuality( const Common::Settings::MachineSettings& quality )
+        {
+            m_Quality = quality;
         }
         // Read back by the editor's own external passes (grid, colliders), which draw INTO this view and
         // therefore must ask this view what it is showing — not a global, or every offscreen preview would
@@ -476,9 +500,9 @@ namespace Desert::Graphic
         // Player-character grass interactor (xyz world pos, w radius), refreshed each BeginScene.
         glm::vec4 m_GrassInteractor{ 0.0f };
 
-        // Selected post-process anti-aliasing technique, refreshed from SceneSettings each BeginScene.
-        Core::AntiAliasingMode m_AAMode       = Core::AntiAliasingMode::FXAA;
-        bool                   m_BloomEnabled = false;
+        // Selected post-process anti-aliasing technique, taken from m_Quality each BeginScene.
+        Common::Settings::AntiAliasingMode m_AAMode       = Common::Settings::AntiAliasingMode::FXAA;
+        bool                               m_BloomEnabled = false;
 
         // Lens flare, refreshed from SceneSettings each BeginScene. The tint is held apart from the rest
         // because the pass never sees it — the tonemap applies it, the way the shafts' tint works.
@@ -512,10 +536,22 @@ namespace Desert::Graphic
         std::shared_ptr<Framebuffer> m_GIBuffer;                   // RSM-GI resolve target (blur-read by lighting)
         std::shared_ptr<Framebuffer> m_RSMBuffer;                  // reflective shadow map (G-buffer from the sun)
         Core::RenderPath m_RenderPath = Core::RenderPath::Forward; // refreshed from SceneSettings each BeginScene
-        // The volumetric cloud layer's cost ceiling, refreshed from SceneSettings each BeginScene and
-        // handed to the cloud renderer with the layer itself. HIGH is the calibrated reference, so a
-        // renderer that is never given a scene renders correctly rather than cheaply.
-        Core::CloudQuality m_CloudQuality = Core::CloudQuality::High;
+        // The volumetric cloud layer's cost ceiling, taken from m_Quality each BeginScene and handed to
+        // the cloud renderer with the layer itself. HIGH is the calibrated reference, so a renderer
+        // nobody pushes to renders correctly rather than cheaply.
+        Common::Settings::CloudQuality m_CloudQuality = Common::Settings::CloudQuality::High;
+        // WHAT THIS MACHINE CAN AFFORD. NOT read from the scene — pushed in by whoever owns the view
+        // (SetQuality). See Common/Settings/MachineSettings.hpp for why it stopped being scene data.
+        //
+        // INITIALISED FROM THE MACHINE'S OWN ANSWER, and this is where it differs from m_DebugView beside
+        // it, whose "nobody pushed to me" default is deliberately all-off. Two of these five escape into
+        // GLOBAL state — RenderConfig::TextureFilter and AnisotropyLevel, which the Vulkan sampler path
+        // reads off whichever thread is cooking a texture — so a renderer holding the schema defaults
+        // would overwrite the user's choice for every other renderer the moment it drew a frame. The
+        // offscreen thumbnail and photogrammetry previews are exactly such renderers: nobody pushes to
+        // them, and before this initialiser they would have quietly reset the sampler to Trilinear/8x.
+        // "Not pushed to" therefore has to mean "this machine's answer" here rather than "the defaults".
+        Common::Settings::MachineSettings m_Quality = Common::Settings::MachineSettings::Get();
         // What this VIEW is drawing on top of the world. NOT refreshed from the scene — pushed in by
         // whoever owns the view (SetDebugView), and "show nothing" until someone does. See
         // Graphic/DebugViewState.hpp for why it stopped being scene data.
