@@ -153,3 +153,29 @@ namespace Desert::Graphic
 // (wanted for other reasons too — teardown order, hot reload, and the "which slot is this?" question the
 // renderer-slot work keeps asking). Once that exists, rebuilding becomes a walk over a list instead of an
 // archaeology exercise, and this refusal should be revisited.
+//
+// THAT CONDITION HAS NOW BEEN TESTED, AND THE REFUSAL STANDS — 2026-09-08, owner's decision, taken on the
+// number rather than on an estimate.
+//
+// The asset-eviction work (A7) built exactly the kind of accounting this comment was waiting for, and its
+// own obligation was to say, in a number, how much of the GPU it can actually see. The answer:
+//
+//     live GPU objects, tree-wide ........... 683
+//     unreachable for the asset registry .... 330   (48 %)
+//
+// So the registry the condition above asked for arrived and covers barely half the problem. The other 330
+// are precisely the objects listed further up — preview render targets, thumbnails, descriptor sets,
+// pipelines, frame buffers — the ones with no asset behind them to be registered against. Recovery would
+// still have to build a second ownership registry for that half, from scratch, with the same failure mode
+// as before: a census that misses one owner yields a stale handle that renders garbage instead of failing.
+//
+// The measurement is the deliverable here. A7 made this task cheaper, not free, and "cheaper" turned out
+// not to be enough — which is a result, not a stall. Clean closure plus the emergency save stays the
+// shipped behaviour.
+//
+// WHAT WOULD CHANGE THE ANSWER NOW is narrower and therefore more useful than what it replaced: not "an
+// ownership registry" in general, but a registry that owns the 330 — the objects created by panels,
+// thumbnails and the renderer's own per-frame state. If any other task ever needs to enumerate those (a
+// live memory budget per panel, or preview teardown that is not a leak, would both need it), then the cost
+// of this one collapses and it should be re-costed on the spot. Until then, do not re-derive this: the
+// number above is the argument.
