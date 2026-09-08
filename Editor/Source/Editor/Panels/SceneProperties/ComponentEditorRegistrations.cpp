@@ -12,6 +12,7 @@
 
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/ECS/System/SystemRules.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/Geometry/Mesh.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
@@ -442,14 +443,16 @@ namespace Desert::Editor
             auto& t = en.GetComponent<::Desert::ECS::TransformComponent>();
 
             // Translation is the TRAVEL direction; the sun sits the other way.
+            // Through the rules on both counts. The threshold was a fourth spelling of
+            // kSunDirectionEpsilon, and `-travel / length` was a fourth copy of the negation that
+            // SystemRules.hpp calls "the engine's ONE negation" — in the widget a user reaches for to
+            // aim a sun, so a disagreement here shows a direction for a light the renderer has already
+            // thrown away.
             glm::vec3 travel = t.Translation;
-            float     length = glm::length( travel );
-            if ( length < 1e-4f )
-            {
-                travel = glm::vec3( -0.4f, -1.0f, -0.5f );
-                length = glm::length( travel );
-            }
-            const glm::vec3 toSun = -travel / length;
+            if ( !::Desert::ECS::Rules::IsSunDirectionValid( travel ) )
+                travel = glm::vec3( -0.4f, -1.0f, -0.5f ); // the dial's placeholder aim, not a light
+            const float     length = glm::length( travel );
+            const glm::vec3 toSun  = ::Desert::ECS::Rules::AtmosphereSunDirection( travel );
 
             float elevation = glm::degrees( std::asin( glm::clamp( toSun.y, -1.0f, 1.0f ) ) );
             float azimuth   = glm::degrees( std::atan2( toSun.x, toSun.z ) );

@@ -12,6 +12,12 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
+#include <regex>
+#include <string>
+#include <vector>
+
 #include <algorithm>
 #include <array>
 #include <vector>
@@ -20,6 +26,7 @@ using Desert::ECS::LocomotionComponent;
 using Desert::ECS::Rules::AtmosphereSunDirection;
 using Desert::ECS::Rules::DecomposeTransform;
 using Desert::ECS::Rules::FallbackAtmosphereSunDirection;
+using Desert::ECS::Rules::DirectionalLightTravel;
 using Desert::ECS::Rules::IsSunDirectionValid;
 using Desert::ECS::Rules::LocomotionClipFor;
 using Desert::ECS::Rules::MeshShadowCaster;
@@ -305,6 +312,173 @@ TEST( AtmosphereSunRules, DirectionValidityUsesOneEpsilon )
     // The documented no-light fallback points ABOVE the horizon, so an empty scene is lit, not black.
     EXPECT_NEAR( glm::length( FallbackAtmosphereSunDirection() ), 1.0f, 1e-5f );
     EXPECT_GT( FallbackAtmosphereSunDirection().y, 0.0f );
+}
+
+// Г18 — AND THE TEST ABOVE IS WHY THIS ONE HAD TO BE WRITTEN.
+//
+// It is called "uses ONE epsilon" and it asks exactly one consumer. The comment on
+// kSunDirectionEpsilon likewise says "two different epsilons for this existed in the engine; this is
+// the one". Both were describing an intention: `Engine/Core/Scene.cpp`, which collects the directional
+// lights the RENDERER shades with, went on open-coding `glm::length(rawDir) > 0.001f` — ten times this
+// epsilon — while the sky asked IsSunDirectionValid. A name and a comment each asserted a guarantee the
+// tree did not honour, and neither could fail.
+//
+// The band between the two thresholds is where they disagreed, and it is a real state a scene can be
+// in: a Translation of 5e-4 is a sun to the atmosphere and no light at all to the deferred composite,
+// at the same instant, in the same frame.
+TEST( AtmosphereSunRules, TheLightingGateAndTheSkyGateAreTheSameGate )
+{
+    // Every value in the old disagreement band. Each is VALID: the renderer used to drop all of them
+    // while the sky lit the dome from them.
+    for ( const float length : { 1.1e-4f, 5e-4f, 9.9e-4f } )
+    {
+        const glm::vec3 travel( 0.0f, -length, 0.0f );
+        EXPECT_TRUE( IsSunDirectionValid( travel ) ) << length;
+        EXPECT_TRUE( DirectionalLightTravel( travel ).has_value() )
+             << length << " is a sun to the sky; it must be a light to the renderer too";
+    }
+
+    // And the two answer NO together, so the agreement is not one-sided.
+    for ( const float length : { 0.0f, 1e-6f, 1e-5f } )
+    {
+        const glm::vec3 travel( 0.0f, -length, 0.0f );
+        EXPECT_FALSE( IsSunDirectionValid( travel ) ) << length;
+        EXPECT_FALSE( DirectionalLightTravel( travel ).has_value() ) << length;
+    }
+}
+
+// THE CENSUS, because the two tests above are true BY CONSTRUCTION and therefore cannot catch the thing
+// that actually happened: somebody writing another copy of the threshold somewhere else.
+//
+// Three sites open-coded it. `Engine/Core/Scene.cpp` — the collector that decides which directional
+// lights the RENDERER shades with — compared against 0.001f, ten times kSunDirectionEpsilon, so a light
+// whose Translation measured between the two was a sun to the atmosphere and no light at all to the
+// deferred composite. The Details panel's sun dial and the Sky Atmosphere widget each carried their own
+// 1e-4f, and the dial also spelled the negation as `-travel / length` inside a subsystem whose rule
+// calls itself "the engine's ONE negation" and claims every one of them goes through it. Not one of
+// those could fail, and the test above this one was ALREADY called "uses ONE epsilon".
+//
+// So the invariant is checked against the SOURCE. In any file that deals with directional lights, a
+// length taken of a light's TRANSLATION — directly, or through a local assigned from one, which is
+// exactly how Scene.cpp spelled it (`const glm::vec3& rawDir = transform.Translation;`) — must reach
+// the shared gate by name within two lines either way. Tracking the local is what makes this catch the
+// violation that actually shipped rather than only the ones that were easy to see.
+TEST( AtmosphereSunRules, NoFileOpenCodesTheSunDirectionThreshold )
+{
+    const std::string root = []
+    {
+        std::string prefix = "./";
+        for ( int up = 0; up < 6; ++up )
+        {
+            std::ifstream probe( prefix + "Desert/Desert/Source/Engine/ECS/System/SystemRules.hpp" );
+            if ( probe )
+                return prefix;
+            prefix += "../";
+        }
+        return std::string{};
+    }();
+    ASSERT_FALSE( root.empty() ) << "repository root not found from the test's working directory";
+
+    // `name = <something>.Translation` — the local that a length is then taken of.
+    const std::regex bindsTranslation( R"((\w+)\s*=\s*[A-Za-z_:.>()-]*\.Translation)" );
+    const std::regex measuresTranslation( R"(glm::length\s*\(\s*[A-Za-z_:.>()-]*\.Translation)" );
+    const std::regex reachesTheGate( "kSunDirectionEpsilon|IsSunDirectionValid|DirectionalLightTravel" );
+
+    std::vector<std::string> offenders;
+    for ( const std::string& tree : { "Desert/Desert/Source", "Editor/Source", "Runtime" } )
+    {
+        const std::filesystem::path base = root + tree;
+        if ( !std::filesystem::exists( base ) )
+            continue;
+        for ( const auto& entry : std::filesystem::recursive_directory_iterator( base ) )
+        {
+            if ( !entry.is_regular_file() )
+                continue;
+            const auto ext = entry.path().extension().string();
+            if ( ext != ".cpp" && ext != ".hpp" )
+                continue;
+            if ( entry.path().filename() == "SystemRules.hpp" )
+                continue; // the gate itself
+
+            std::vector<std::string> lines;
+            {
+                std::ifstream file( entry.path() );
+                for ( std::string line; std::getline( file, line ); )
+                    lines.push_back( line );
+            }
+
+            // Only files that deal with directional lights. A length taken of some other entity's
+            // Translation is nobody's sun, and flagging it would train the census away within a week.
+            bool aboutDirectionalLights = false;
+            for ( const auto& line : lines )
+                if ( line.find( "DirectionLightComponent" ) != std::string::npos ||
+                     line.find( "AtmosphereSunLight" ) != std::string::npos )
+                    aboutDirectionalLights = true;
+            if ( !aboutDirectionalLights )
+                continue;
+
+            // Locals bound to a Translation, and where. Kept for a short window: a name reused far
+            // later in a long file is a different variable for our purposes.
+            std::vector<std::pair<std::string, size_t>> bound;
+            for ( size_t i = 0; i < lines.size(); ++i )
+            {
+                std::smatch bind;
+                if ( std::regex_search( lines[i], bind, bindsTranslation ) )
+                    bound.push_back( { bind[1].str(), i } );
+
+                bool measuresALightDirection = std::regex_search( lines[i], measuresTranslation );
+                if ( !measuresALightDirection )
+                {
+                    for ( const auto& [name, at] : bound )
+                    {
+                        if ( i < at || i > at + 8 )
+                            continue;
+                        if ( std::regex_search( lines[i],
+                                                std::regex( "glm::length\\s*\\(\\s*" + name + "\\s*\\)" ) ) )
+                            measuresALightDirection = true;
+                    }
+                }
+                if ( !measuresALightDirection )
+                    continue;
+
+                const size_t from    = i > 2 ? i - 2 : 0;
+                bool         reached = false;
+                for ( size_t j = from; j < lines.size() && j <= i + 2; ++j )
+                    if ( std::regex_search( lines[j], reachesTheGate ) )
+                        reached = true;
+                if ( !reached )
+                    offenders.push_back( entry.path().generic_string() + ":" + std::to_string( i + 1 ) +
+                                         "  " + lines[i] );
+            }
+        }
+    }
+
+    std::string listed;
+    for ( const auto& o : offenders )
+        listed += "\n  " + o;
+    EXPECT_TRUE( offenders.empty() )
+         << "these measure a directional light's direction without reaching ECS::Rules — a sun must be "
+            "judged usable in exactly one place, or the sky and the renderer disagree about whether a "
+            "scene has one:"
+         << listed;
+}
+
+// A caller cannot normalize a vector the same call has just declared unusable — which is the whole
+// reason this returns an optional and not a bool beside a separate normalize.
+TEST( AtmosphereSunRules, TheTravelDirectionIsUnitLengthOrAbsent )
+{
+    const auto travel = DirectionalLightTravel( glm::vec3( 0.6f, -1.0f, 0.2f ) );
+    ASSERT_TRUE( travel.has_value() );
+    EXPECT_NEAR( glm::length( *travel ), 1.0f, 1e-6f );
+
+    // CB_Sun as CornellDemo.desce actually stores it: already unit length on disk, so the normalize is
+    // a no-op there and the two agree exactly.
+    const auto shipped = DirectionalLightTravel( glm::vec3( 0.5071f, -0.8452f, 0.1690f ) );
+    ASSERT_TRUE( shipped.has_value() );
+    EXPECT_NEAR( shipped->x, 0.5071f, 1e-4f );
+    EXPECT_NEAR( shipped->y, -0.8452f, 1e-4f );
+
+    EXPECT_FALSE( DirectionalLightTravel( glm::vec3( 0.0f ) ).has_value() );
 }
 
 // ---------------------------------------------------------------------------------------------------

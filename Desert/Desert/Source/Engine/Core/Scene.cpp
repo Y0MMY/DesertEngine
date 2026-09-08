@@ -6,6 +6,7 @@
 #include <Common/Core/Math/Ray.hpp>
 
 #include <Engine/ECS/Components.hpp>
+#include <Engine/ECS/System/SystemRules.hpp>
 #include <Engine/Geometry/Mesh.hpp>
 #include <Engine/Geometry/SkinnedMesh.hpp>
 #include <Engine/Geometry/PrimitiveMeshFactory.hpp>
@@ -389,15 +390,48 @@ namespace Desert::Core
             auto dirLightGroup =
                  m_Registry.group<ECS::DirectionLightComponent>( entt::get<ECS::TransformComponent> );
 
+            // WHICH LIGHTS WERE THROWN AWAY, AND WHY ANYONE SHOULD HEAR ABOUT IT.
+            //
+            // A DirectionLightComponent takes its direction from its TRANSLATION, not its rotation
+            // (nothing reads a sun's Rotation anywhere in this engine), so a sun authored the way a sun
+            // looks like it should be authored — drop one in, aim it with the rotation gizmo — has a
+            // Translation of (0,0,0), is not a direction, and cannot be collected. It then sits in the
+            // outliner with an intensity slider, casting nothing, and this loop used to say NOTHING
+            // about it. Five lines below, the "too many directional lights" case goes to the trouble of
+            // naming the offending entities; the case where a light contributes zero got silence.
+            std::string degenerate;
             dirLightGroup.each(
-                 [&]( entt::entity /*entity*/, const auto& light, const auto& transform )
+                 [&]( entt::entity entity, const auto& light, const auto& transform )
                  {
-                     const glm::vec3& rawDir = transform.Translation;
-                     if ( glm::length( rawDir ) > 0.001f )
+                     // ONE gate, shared with the sky (SystemRules.hpp): this site used to open-code
+                     // `length > 0.001f`, ten times kSunDirectionEpsilon, so a light in between was a
+                     // sun to the atmosphere and no light at all to the renderer.
+                     if ( const auto travel = ECS::Rules::DirectionalLightTravel( transform.Translation ) )
+                     {
                          sceneRendererInfo.DirLights.DirectionLights.push_back(
-                              { glm::vec4( glm::normalize( rawDir ), 0.0f ),
+                              { glm::vec4( *travel, 0.0f ),
                                 glm::vec4( light.Data.Color, light.Data.Intensity ) } );
+                         return;
+                     }
+                     if ( m_Registry.has<ECS::TagComponent>( entity ) )
+                         degenerate += ( degenerate.empty() ? "" : ", " ) +
+                                       m_Registry.get<ECS::TagComponent>( entity ).Tag;
                  } );
+
+            // Latched on the MESSAGE, not on a flag: this runs every frame, so an unlatched LOG_ERROR
+            // here would bury the log at 60 lines a second, and a plain once-only flag would go quiet
+            // about the SECOND light to go degenerate. Comparing the text reports each distinct state
+            // once and re-reports when the set changes — including back to empty, which is the line that
+            // tells a user their fix worked.
+            if ( degenerate != m_DegenerateDirLightsReported )
+            {
+                m_DegenerateDirLightsReported = degenerate;
+                if ( !degenerate.empty() )
+                    LOG_ERROR( "[Scene] directional light(s) {} have a Translation shorter than {} and "
+                               "emit NOTHING. A directional light takes its direction from its "
+                               "TRANSLATION (the direction the light travels), not from its Rotation.",
+                               degenerate, ECS::Rules::kSunDirectionEpsilon );
+            }
 
             // The engine supports EXACTLY ONE directional light (DirectionLightsUB is a single
             // struct — a second payload overflows every PBR material's UB and aborts). Truncate

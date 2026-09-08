@@ -6,6 +6,7 @@
 #include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
 #include <Editor/Panels/PropertyEditor/PropertyEditorBuilder.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/ECS/System/SystemRules.hpp>
 #include <Engine/Core/Scene.hpp>
 #include <Engine/Graphic/SkyPresets.hpp>
 
@@ -140,9 +141,12 @@ namespace Desert::Editor
                 for ( const auto lightEntity : view )
                 {
                     const glm::vec3 travel = view.template get<ECS::TransformComponent>( lightEntity ).Translation;
-                    if ( glm::length( travel ) > 1e-4f )
+                    // Through the rules, not a second copy of them: the epsilon was spelled 1e-4f here
+                    // and the negation was open-coded, while SystemRules.hpp calls itself "the engine's
+                    // ONE negation" and says every one of them goes through it. It did not.
+                    if ( ECS::Rules::IsSunDirectionValid( travel ) )
                     {
-                        const glm::vec3 toSun = -glm::normalize( travel );
+                        const glm::vec3 toSun = ECS::Rules::AtmosphereSunDirection( travel );
                         sunElevation          = glm::degrees( std::asin( glm::clamp( toSun.y, -1.0f, 1.0f ) ) );
                         haveSun               = true;
                         break;

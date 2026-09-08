@@ -129,6 +129,29 @@ namespace Desert::ECS::Rules
         return glm::length( lightTranslation ) > kSunDirectionEpsilon;
     }
 
+    // THE DIRECTION A DIRECTIONAL LIGHT TRAVELS, or nothing at all when its Translation is not a
+    // direction — the LIGHTING half of the same question `IsSunDirectionValid` answers for the sky.
+    //
+    // It exists because the two halves disagreed. The comment on kSunDirectionEpsilon above says "two
+    // different epsilons for this existed in the engine; this is the one", and that consolidation
+    // reached the sky and stopped: `Engine/Core/Scene.cpp` went on open-coding
+    // `glm::length(rawDir) > 0.001f` when it collected directional lights for the renderer — TEN TIMES
+    // this epsilon. A sun whose Translation measured, say, 5e-4 was therefore VALID TO THE SKY and
+    // INVALID TO THE RENDERER at the same instant: the atmosphere took a sun direction from it and lit
+    // the dome, while the deferred composite received no directional light at all. Both sides were
+    // individually defensible and neither could see the other. Now there is one gate and the question
+    // cannot be answered twice.
+    //
+    // Returning an optional rather than a bool is the point: the caller that wants the direction and the
+    // caller that wants the verdict get the SAME answer, and a caller cannot normalize a vector this
+    // function has just called unusable.
+    inline std::optional<glm::vec3> DirectionalLightTravel( const glm::vec3& lightTranslation )
+    {
+        if ( !IsSunDirectionValid( lightTranslation ) )
+            return std::nullopt;
+        return glm::normalize( lightTranslation );
+    }
+
     // THE ENGINE'S ONE NEGATION. TransformComponent::Translation on a directional light is the direction
     // the light TRAVELS (sun -> scene); the atmosphere and the IBL bake both want the
     // direction TOWARD the sun. Every one of them goes through here. Two negations is how a sky ends up
