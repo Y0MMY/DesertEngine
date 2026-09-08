@@ -5,6 +5,7 @@
 #include <Engine/ECS/Components.hpp>
 #include <Editor/Core/Commands/SceneCommands.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Engine/ECS/EntityLock.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/EditorResources.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
@@ -336,6 +337,25 @@ namespace Desert::Editor
             m_Scene->SetVisibleRecursive( const_cast<ECS::Entity&>( selectedEntity ), active );
         }
         ImGui::SameLine();
+
+        // The authoring padlock, in the header beside the visibility box for the same reason the outliner
+        // puts them side by side. An entity reached from the outliner while locked shows its state HERE
+        // too — otherwise Details would present a full set of editable transform fields for something the
+        // viewport refuses to touch, which is the two-halves-disagreeing shape this task exists to avoid.
+        {
+            const bool locked = ECS::IsLocked( *selectedEntity.GetRegistry(), selectedEntity.GetHandle() );
+            ImGui::PushStyleColor( ImGuiCol_Text, locked ? ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled )
+                                                         : ThemeManager::GetIconColor() );
+            ImGui::TextUnformatted( locked ? ICON_MDI_LOCK : ICON_MDI_LOCK_OPEN_OUTLINE );
+            ImGui::PopStyleColor();
+            if ( ImGui::IsItemClicked() )
+                ECS::SetLockedRecursive( *selectedEntity.GetRegistry(), selectedEntity.GetHandle(), !locked );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( locked ? "Locked: the viewport will not pick this and the gizmo will not "
+                                            "move it. Click to unlock."
+                                          : "Click to lock: refuse viewport picking and gizmo edits." );
+            ImGui::SameLine();
+        }
 
         ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetIconColor() );
         ImGui::TextUnformatted( GetEntityIcon( selectedEntity ) );

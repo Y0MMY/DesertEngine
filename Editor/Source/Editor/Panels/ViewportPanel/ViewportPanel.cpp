@@ -12,6 +12,7 @@
 #include <Editor/Core/Selection/FoliagePaint.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/ThemeManager.hpp>
+#include <Editor/Core/ToastManager.hpp>
 #include <Editor/Import/MeshDnD.hpp>
 #include <Editor/Import/MeshMaterial.hpp>
 #include <Editor/Import/AsyncMeshLoader.hpp>
@@ -29,6 +30,7 @@
 #include <Engine/Runtime/SelectionContext.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/ECS/EntityLock.hpp>
 #include <Engine/UI/UICanvasLayout.hpp>
 #include <Engine/UI/UILayout.hpp>
 #include <Editor/Panels/UI/UIElementCatalog.hpp>
@@ -302,21 +304,12 @@ namespace Desert::Editor
         // Breathing room: the row must not sit flush against the panel's left wall.
         ImGui::SetCursorPosX( ImGui::GetCursorPosX() + 6.0f );
 
-        // --- Mode dropdown ---
-        const char* kModes[] = { ICON_MDI_CURSOR_DEFAULT "  Select", ICON_MDI_GRASS "  Foliage",
-                                 ICON_MDI_CUBE_OUTLINE "  Modeling" };
-        int         mode     = static_cast<int>( Core::ViewportMode::Get() );
-        ImGui::SetNextItemWidth( 118.0f );
-        // WindowPadding is captured when the combo POPUP begins — push it here so the dropdown's
-        // items keep a margin from the popup border instead of touching it.
-        ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 8.0f, 6.0f ) );
-        if ( ImGui::Combo( "##ViewportMode", &mode, kModes, IM_ARRAYSIZE( kModes ) ) )
-            Core::ViewportMode::Set( static_cast<Core::EditorMode>( mode ) );
-        ImGui::PopStyleVar();
-
-        ImGui::SameLine();
-        ImGui::TextDisabled( "|" );
-        ImGui::SameLine();
+        // The editor mode (Select / Modeling / Foliage) is chosen on the MAIN toolbar's mode rail
+        // (EditorLayer::DrawToolbar) and nowhere else. A duplicate combo lived here and drove the same
+        // Core::ViewportMode, so the two could never disagree — but two controls for one value is still
+        // two places to look when the answer surprises you, and the rail is the one the mock keeps.
+        // Removed rather than hidden: a control kept "just in case" is the legacy path this tree does
+        // not carry.
 
         // --- Transform-tool toggles (GizmoState is the single source of truth; hotkeys mirror it) ---
         const auto opButton = [&]( const char* icon, Core::GizmoState::Operation op, const char* tip )
@@ -1614,6 +1607,17 @@ namespace Desert::Editor
 
                 if ( uiHit != entt::null && reg.has<ECS::UUIDComponent>( uiHit ) )
                 {
+                    // The lock applies HERE too, and not only to the 3D raycast below. This is a second
+                    // picking path through the same click, and a lock that stopped one of them would be
+                    // the "blocks two of the three things it claims to" failure the predicate exists to
+                    // prevent — with the padlock still drawn closed in the Outliner either way.
+                    if ( ECS::IsLocked( reg, uiHit ) )
+                    {
+                        ToastManager::Push( Tools::Describe( Tools::PickOutcome::RefusedLocked ), ToastLevel::Info,
+                                            2.5f );
+                        return false;
+                    }
+
                     const auto uuid = reg.get<ECS::UUIDComponent>( uiHit ).UUID;
                     if ( ::ImGui::GetIO().KeyCtrl )
                         Core::SelectionManager::Toggle( uuid );
@@ -1633,9 +1637,17 @@ namespace Desert::Editor
             }
             else
             {
-                m_Picking.Pick( *m_Scene, m_ViewportData.MousePosition, m_ViewportData.Size,
-                                m_Gizmo.IsHovered() || m_LightGizmoRenderer->IsLightIconHovered(),
-                                ::ImGui::GetIO().KeyCtrl );
+                const auto outcome = m_Picking.Pick(
+                     *m_Scene, m_ViewportData.MousePosition, m_ViewportData.Size,
+                     m_Gizmo.IsHovered() || m_LightGizmoRenderer->IsLightIconHovered(), ::ImGui::GetIO().KeyCtrl );
+
+                // A refused click has to SAY so. Clicking a locked entity and watching the selection not
+                // change is indistinguishable from a broken raycast, and the fix (unlock it) lives in
+                // another panel — so the refusal is put on screen rather than dropped. The other outcomes
+                // are ordinary and stay quiet; only the one the user can act on speaks, through the
+                // editor's existing toast queue instead of a second notification path of its own.
+                if ( outcome == Tools::PickOutcome::RefusedLocked )
+                    ToastManager::Push( Tools::Describe( outcome ), ToastLevel::Info, 2.5f );
             }
         }
 

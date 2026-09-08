@@ -1,4 +1,5 @@
 #include "GizmoController.hpp"
+#include "GizmoTransformMath.hpp"
 
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/Selection/SkeletonEditMode.hpp>
@@ -14,6 +15,7 @@
 #include <Engine/Animation/Skeleton.hpp>
 #include <Engine/Animation/Animator.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/ECS/EntityLock.hpp>
 
 #include <ImGuizmo.h>
 #include <glm/gtx/matrix_decompose.hpp>
@@ -87,6 +89,14 @@ namespace Desert::Editor::Tools
         auto& transformComponent = selectedEntity.GetComponent<ECS::TransformComponent>();
         auto& reg                = scene.GetRegistry();
 
+        // A LOCKED primary draws no gizmo at all, which is the whole second half of the lock: the picker
+        // refuses to select a locked entity, but the OUTLINER deliberately still can — that is how you
+        // reach the padlock to undo it — and a selection made there must not come with draggable handles.
+        // Returning before SetRect/Manipulate also leaves m_Hovered false, so picking does not stand down
+        // for a gizmo that is not on screen.
+        if ( ECS::IsLocked( reg, selectedEntity.GetHandle() ) )
+            return;
+
         // The gizmo must work in WORLD space. For a CHILD entity (e.g. a camera parented to the character),
         // the world transform = parentWorld * local, and an edit must be converted back to LOCAL before
         // writing. parentWorld = identity for a root entity (so this is a no-op there).
@@ -153,9 +163,14 @@ namespace Desert::Editor::Tools
         snapValues[0] = snapValues[1] = snapValues[2] = snapUnit;
         const float* snap = Core::GizmoState::SnapActive( ::ImGui::GetIO().KeyCtrl ) ? snapValues : nullptr;
 
+        // World or Local, from the toolbar's toggle. EffectiveSpace() and not GetSpace(): ImGuizmo ignores
+        // the mode for scaling, and the toolbar reads the same function, so the handles and the button
+        // cannot disagree about which space is in force. Core::GizmoState::Space mirrors ImGuizmo::MODE.
+        const auto space = static_cast<ImGuizmo::MODE>( Core::GizmoState::EffectiveSpace( operation ) );
+
         const bool manipulated =
-             ImGuizmo::Manipulate( &view[0][0], &proj[0][0], static_cast<ImGuizmo::OPERATION>( operation ),
-                                   ImGuizmo::WORLD, &modelMatrix[0][0], nullptr, snap );
+             ImGuizmo::Manipulate( &view[0][0], &proj[0][0], static_cast<ImGuizmo::OPERATION>( operation ), space,
+                                   &modelMatrix[0][0], nullptr, snap );
 
         // Picking must stand down whenever the cursor is OVER the gizmo — not only mid-drag. Setting this
         // only while manipulating meant a first click on a gizmo axis drawn over another mesh SELECTED
@@ -179,6 +194,10 @@ namespace Desert::Editor::Tools
                 ECS::Entity e = ref->get();
                 if ( !e.HasComponent<ECS::TransformComponent>() || coveredBySelection( e.GetHandle() ) )
                     continue;
+                // A locked follower is not moved below, so it must not be snapshotted either — an undo
+                // entry for an entity that never changed is an undo step that appears to do nothing.
+                if ( ECS::IsLocked( reg, e.GetHandle() ) )
+                    continue;
                 const auto& tc = e.GetComponent<ECS::TransformComponent>();
                 m_DragSnapshots.push_back( { id, tc.Translation, tc.Rotation, tc.Scale } );
             }
@@ -187,17 +206,13 @@ namespace Desert::Editor::Tools
         if ( manipulated )
         {
             // Convert the manipulated WORLD matrix back to the entity's LOCAL space (inverse parent) before
-            // decomposing — so dragging a child entity edits its local offset correctly.
-            const glm::mat4 localMatrix = glm::inverse( parentWorld ) * modelMatrix;
+            // decomposing — so dragging a child entity edits its local offset correctly. The composition
+            // itself lives in GizmoTransformMath.hpp so the GizmoTransformSpace suite can reach it.
+            const auto local = WorldToLocalTRS( parentWorld, modelMatrix );
 
-            glm::vec3 scale, translation, skew;
-            glm::quat rotation;
-            glm::vec4 perspective;
-            glm::decompose( localMatrix, scale, rotation, translation, skew, perspective );
-
-            transformComponent.Translation = translation;
-            transformComponent.Rotation    = glm::eulerAngles( rotation );
-            transformComponent.Scale       = scale;
+            transformComponent.Translation = local.Translation;
+            transformComponent.Rotation    = local.Rotation;
+            transformComponent.Scale       = local.Scale;
 
             // Group manipulation: apply the same WORLD-space delta to every other selected top-level root,
             // so the whole selection moves/rotates/scales as one rigid group around the primary's gizmo.
@@ -215,18 +230,19 @@ namespace Desert::Editor::Tools
                     ECS::Entity e = ref->get();
                     if ( !e.HasComponent<ECS::TransformComponent>() || coveredBySelection( e.GetHandle() ) )
                         continue;
+                    // The group delta stops at a locked member. Dragging five things of which one is
+                    // locked moves four — the lock is a property of the entity, not of how it happened
+                    // to be selected, so a multi-selection cannot be a way around it.
+                    if ( ECS::IsLocked( reg, e.GetHandle() ) )
+                        continue;
 
-                    auto&           tc       = e.GetComponent<ECS::TransformComponent>();
-                    const glm::mat4 pw       = parentWorldOf( e.GetHandle() );
-                    const glm::mat4 newLocal = glm::inverse( pw ) * ( delta * ( pw * tc.GetTransform() ) );
+                    auto&           tc = e.GetComponent<ECS::TransformComponent>();
+                    const glm::mat4 pw = parentWorldOf( e.GetHandle() );
 
-                    glm::vec3 s, t, sk;
-                    glm::quat r;
-                    glm::vec4 persp;
-                    glm::decompose( newLocal, s, r, t, sk, persp );
-                    tc.Translation = t;
-                    tc.Rotation    = glm::eulerAngles( r );
-                    tc.Scale       = s;
+                    const auto follower = WorldToLocalTRS( pw, delta * ( pw * tc.GetTransform() ) );
+                    tc.Translation      = follower.Translation;
+                    tc.Rotation         = follower.Rotation;
+                    tc.Scale            = follower.Scale;
                 }
             }
         }
@@ -315,8 +331,15 @@ namespace Desert::Editor::Tools
         // Scale on a bone's rest pose is rarely wanted; default None/Scale to Translate.
         const auto op = ( Core::GizmoState::Get() == Operation::Rotate ) ? ImGuizmo::ROTATE : ImGuizmo::TRANSLATE;
 
+        // The bone gizmo honours the SAME toolbar toggle as the object gizmo — one control, both gizmos,
+        // or the button would mean different things depending on a mode the user is not looking at.
+        // Asked with the operation this call actually passes (never Scale here), not with the toolbar's,
+        // so the space in force matches the handles being drawn.
+        const auto boneSpace = static_cast<ImGuizmo::MODE>( Core::GizmoState::EffectiveSpace(
+             op == ImGuizmo::ROTATE ? Operation::Rotate : Operation::Translate ) );
+
         const bool boneManipulated =
-             ImGuizmo::Manipulate( &view[0][0], &proj[0][0], op, ImGuizmo::WORLD, &gizmoWorld[0][0] );
+             ImGuizmo::Manipulate( &view[0][0], &proj[0][0], op, boneSpace, &gizmoWorld[0][0] );
 
         // Same rule as the object gizmo: picking stands down on HOVER, not only mid-drag.
         if ( ImGuizmo::IsOver() || ImGuizmo::IsUsing() )

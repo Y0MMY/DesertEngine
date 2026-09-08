@@ -11,6 +11,7 @@
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/ECS/EntityLock.hpp>
 #include <Engine/Geometry/PrimitiveType.hpp>
 #include <Common/Core/Units.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
@@ -3283,6 +3284,29 @@ namespace Desert::Editor
                                           return PaletteCommandDone();
                                       } } );
 
+                // LOCKING ONE IS TOO, and by the paragraph directly above it has to be here. The padlock
+                // in the Outliner's gutter and the row's context menu are both a MOUSE, and the lock's
+                // whole subject is what the viewport will and will not let you touch — so a channel that
+                // cannot set it cannot check it either. Same recursive setter both of those call.
+                {
+                    // Captures the UUID and re-resolves at RUN time, exactly as Delete above does, rather
+                    // than holding a Scene* and an entt handle from build time. The list is rebuilt per
+                    // use, so a stale pointer is not reachable today — but "not reachable today" is a
+                    // lifetime argument the next reader has to reconstruct, and a UUID lookup that simply
+                    // finds nothing needs no argument at all. Asked through the shared predicate, so this
+                    // label cannot disagree with the padlock the Outliner draws for the same entity.
+                    const bool locked = ECS::IsLocked( m_MainScene->GetRegistry(), entity.GetHandle() );
+                    commands.push_back( { "Entity", ( locked ? "Unlock " : "Lock " ) + name, [this, uuid, locked]
+                                          {
+                                              if ( !m_MainScene )
+                                                  return PaletteCommandDone();
+                                              if ( auto ref = m_MainScene->FindEntityByID( uuid ) )
+                                                  ECS::SetLockedRecursive( m_MainScene->GetRegistry(),
+                                                                           ref->get().GetHandle(), !locked );
+                                              return PaletteCommandDone();
+                                          } } );
+                }
+
                 // ── AND WHAT CAN BE OPENED *FROM* THIS ENTITY ─────────────────────────────────────────
                 //
                 // The other half of U7, and the half that makes a component document reachable at all
@@ -3379,6 +3403,59 @@ namespace Desert::Editor
                                   Core::GizmoState::SetPersistentSnap( !Core::GizmoState::PersistentSnap() );
                                   return PaletteCommandDone();
                               } } );
+
+        // ── THE TRANSFORM TOOLS AND THE SPACE THEY WORK IN ───────────────────────────────────────────
+        //
+        // FOUND BY NEEDING IT, exactly as the Delete-entity entry above was. Every one of these is a
+        // toolbar button and a W/E/R keystroke, and both of those are a HUMAN — so the space toggle could
+        // be photographed in one of its two states and the "a locked entity draws no gizmo" claim could
+        // not be photographed at all, because nothing without a mouse could put a gizmo on screen first.
+        //
+        // The same Core::GizmoState setters the buttons call, so these are a second SPELLING of the
+        // request and never a second copy of the state.
+        {
+            using Gz = Core::GizmoState;
+
+            constexpr struct
+            {
+                const char*   Label;
+                Gz::Operation Op;
+            } kTools[] = {
+                 { "Select (no gizmo)", Gz::Operation::None },
+                 { "Move", Gz::Operation::Translate },
+                 { "Rotate", Gz::Operation::Rotate },
+                 { "Scale", Gz::Operation::Scale },
+            };
+            for ( const auto& tool : kTools )
+            {
+                const auto op = tool.Op;
+                commands.push_back( { "Transform", tool.Label, [op]
+                                      {
+                                          Gz::Set( op );
+                                          return PaletteCommandDone();
+                                      } } );
+            }
+
+            // Both spaces are offered by name rather than as one "toggle", because a client that cannot
+            // see the button needs to be able to ASK for a state instead of flipping an unknown one.
+            constexpr struct
+            {
+                const char* Label;
+                Gz::Space   Space;
+            } kSpaces[] = {
+                 { "Space: World", Gz::Space::World },
+                 { "Space: Local", Gz::Space::Local },
+            };
+            for ( const auto& choice : kSpaces )
+            {
+                const auto space = choice.Space;
+                commands.push_back( { "Transform", choice.Label, [space]
+                                      {
+                                          Gz::SetSpace( space );
+                                          return PaletteCommandDone();
+                                      } } );
+            }
+        }
 
         // The View -> Show item, under a name. It is the cheapest action in the editor that saves the
         // preferences file while having nothing whatever to do with the gizmo, which is exactly what makes
@@ -4929,15 +5006,48 @@ namespace Desert::Editor
         ToolbarSeparator();
 
         // ---- Transform tools --------------------------------------------------------------------
+        //
+        // THE KEYS NAMED HERE ARE THE KEYS THAT WORK. These three tooltips read "(W)", "(E)" and "(R)"
+        // — UE's bindings — while the only handler in the editor binds T, R and C
+        // (ViewportPanel::OnKeyPressedEvent). So the rail advertised three shortcuts that did nothing,
+        // and the viewport strip's own tooltips (Move (T) / Rotate (R) / Scale (C)) said the true thing
+        // eight inches away. A UI string is a promise about the tree, and this one was not kept.
+        //
+        // Corrected toward the CODE rather than toward UE, deliberately: adopting W/E/R is a shortcut
+        // decision with a Foliage/Modeling conflict to weigh and belongs to whoever owns the keymap, not
+        // to a tooltip edit. Naming the working key costs nothing and is true today either way.
         const Gz::Operation op = Gz::Get();
-        if ( ToolbarButton( ICON_MDI_CURSOR_MOVE, "", op == Gz::Operation::Translate, "Translate (W)" ) )
+        if ( ToolbarButton( ICON_MDI_CURSOR_MOVE, "", op == Gz::Operation::Translate, "Translate (T)" ) )
             Gz::Set( Gz::Operation::Translate );
         ImGui::SameLine();
-        if ( ToolbarButton( ICON_MDI_ROTATE_ORBIT, "", op == Gz::Operation::Rotate, "Rotate (E)" ) )
+        if ( ToolbarButton( ICON_MDI_ROTATE_ORBIT, "", op == Gz::Operation::Rotate, "Rotate (R)" ) )
             Gz::Set( Gz::Operation::Rotate );
         ImGui::SameLine();
-        if ( ToolbarButton( ICON_MDI_ARROW_EXPAND_ALL, "", op == Gz::Operation::Scale, "Scale (R)" ) )
+        if ( ToolbarButton( ICON_MDI_ARROW_EXPAND_ALL, "", op == Gz::Operation::Scale, "Scale (C)" ) )
             Gz::Set( Gz::Operation::Scale );
+        ImGui::SameLine();
+
+        // ---- Transform space -------------------------------------------------------------------
+        // One button that both REPORTS the space and flips it, the same bargain the snap controls make
+        // below. It asks EffectiveSpace(), not GetSpace(), because ImGuizmo throws the mode away while
+        // scaling (ImGuizmo.cpp:2653) — so during a Scale the honest thing to show is Local, disabled,
+        // rather than a "World" the handles will not honour. The button that lies is worse than the
+        // button that is greyed out, and this is the only place the two could have drifted apart.
+        {
+            const bool      forced  = Gz::SpaceIsForced( op );
+            const Gz::Space space   = Gz::EffectiveSpace( op );
+            const bool      isLocal = space == Gz::Space::Local;
+
+            const char* tip = forced ? "Scaling is always along the object's own axes — a world-axis "
+                                       "scale of a rotated object is a shear, which a transform cannot hold"
+                              : isLocal
+                                   ? "Transform space: Local — drag along the object's own axes (click for World)"
+                                   : "Transform space: World — drag along the world axes (click for Local)";
+
+            if ( ToolbarButton( isLocal ? ICON_MDI_AXIS_ARROW : ICON_MDI_EARTH, isLocal ? "Local" : "World",
+                                isLocal, tip, /*enabled=*/!forced ) )
+                Gz::SetSpace( isLocal ? Gz::Space::World : Gz::Space::Local );
+        }
         ToolbarSeparator();
 
         // ---- The two snap values ----------------------------------------------------------------
