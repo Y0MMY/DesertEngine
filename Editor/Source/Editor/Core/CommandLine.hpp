@@ -343,6 +343,24 @@ namespace Desert::Editor
      * A6-1 point 5: a capture flag must not be the switch for things that are not capture. Named once,
      * taken as VALUES so a suite can drive it, and deliberately NOT a fourth thing to remember on the
      * command line — a session is unattended because of how it was started, not because it said so.
+     *
+     * ── THE ONE COST THIS ACCEPTS, AND WHY IT IS NOT A BUG TO BE FIXED BACK ──────────────────────────
+     *
+     * A person driving their OWN project through the MCP client now gets no refreshed project tile and
+     * no entry in their recent-projects list, because their session is a channel session. That was
+     * raised as a trade-off and DECIDED (owner, A6-2 brief): leave it.
+     *
+     * The argument is not that the cost is zero. It is that a channel session is a TOOL driving the
+     * editor, and a tool does not write into a developer's personal registries — the same rule that
+     * keeps anything from writing `~/.desertengine/editor.json` on somebody's behalf. And the two
+     * failures are not symmetric: a tile that did not refresh is a LOUD, obvious loss the person can
+     * see and correct; registries silted up with hour-old agent worktrees is a QUIET one, and the
+     * launcher already carries an "unopenable entry" state because that is what happened.
+     *
+     * So if the human case ever hurts enough to matter, it is cured by an EXPLICIT flag of consent —
+     * "yes, file this session in my history" — and not by widening this predicate back to `shot.Active()`
+     * or by dropping the channel from it. Anybody about to do the latter is undoing a decision, not
+     * fixing an oversight.
      */
     [[nodiscard]] inline bool IsUnattendedSession( const ShotOptions& shot, bool controlChannelRequested )
     {
