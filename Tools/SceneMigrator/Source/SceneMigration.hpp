@@ -957,9 +957,8 @@ namespace Desert::Migration
     // byte-identical.
     //
     // SHELF LIFE: this raises v16 to v17 and nothing else. It is deleted once no v16 file remains.
-    ServiceAssetRootMigrationReport
-    MigrateServiceAssetRootV16ToV17( std::vector<Assets::EntityData>& entities,
-                                     const std::filesystem::path&     assetsRoot );
+    ServiceAssetRootMigrationReport MigrateServiceAssetRootV16ToV17( std::vector<Assets::EntityData>& entities,
+                                                                     const std::filesystem::path&     assetsRoot );
 
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
@@ -1002,7 +1001,7 @@ namespace Desert::Migration
         bool                      ScriptRootRaised = false;
         ScriptRootMigrationReport ScriptRoot;
         // the schema was below kSceneVersionServiceAssetRoot
-        bool                           ServiceAssetRootRaised = false;
+        bool                            ServiceAssetRootRaised = false;
         ServiceAssetRootMigrationReport ServiceAssetRoot;
         // the schema was below kSceneVersionRetiredKeys
         bool                       RetiredKeysRaised = false;

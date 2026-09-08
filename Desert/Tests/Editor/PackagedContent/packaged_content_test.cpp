@@ -329,6 +329,12 @@ TEST( PackagedContent, AServiceAssetReferenceResolvesToTheSameFileLooseAndPackag
     const fs::path pkg  = base / "pkg";
 
     // AssetsRoot deliberately NOT "Assets", so the packaged root genuinely differs from the dev one.
+    //
+    // The two files are SYNTHETIC BYTES, and the package cook says so out loud — "could not be baked
+    // into an SDF atlas", "has no filled shapes the icon importer understands". That is the cook working
+    // and it is not what this test is about: the relation under test is where a stored reference
+    // RESOLVES, and the raw file travels into the archive and back whether or not its SDF could be
+    // pre-baked. Real fixtures would add megabytes to the suite to change nothing it asserts.
     const std::string fontBody = "not-a-real-ttf-but-bytes-are-bytes";
     const std::string iconBody = "<svg><path d=\"M0 0 L1 1\"/></svg>";
     WriteFile( proj / "GameAssets" / "Fonts" / "Custom.ttf", fontBody );
@@ -376,8 +382,7 @@ TEST( PackagedContent, AServiceAssetReferenceResolvesToTheSameFileLooseAndPackag
         // The handle each service will mint for this file is FromCookedPath over the resolved path
         // (FontService::RegisterFont / IconService::RegisterIcon), and it must be the handle the STORED
         // key hashes to — otherwise a saved reference and a scanned file are two identities of one asset.
-        EXPECT_EQ( Common::AssetHandle::FromCookedPath( loose ), Common::AssetHandle::FromKey( key ) )
-             << c.What;
+        EXPECT_EQ( Common::AssetHandle::FromCookedPath( loose ), Common::AssetHandle::FromKey( key ) ) << c.What;
 
         stored.push_back( key );
         loosePaths.push_back( loose );

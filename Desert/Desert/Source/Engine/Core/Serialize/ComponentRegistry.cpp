@@ -68,8 +68,7 @@ namespace Desert::Core::Serialize
             // table behaves exactly as the old bare path did instead of silently becoming something
             // else. Nothing in this repository has one; a file hand-edited to hold one still works
             // where it worked before.
-            return key.empty() ? std::string()
-                               : Common::AssetHandle::PathForStableKey( key ).generic_string();
+            return key.empty() ? std::string() : Common::AssetHandle::PathForStableKey( key ).generic_string();
         }
 
         // Bridges a typed serialization struct to/from the generic JSON tree, reusing reflect-cpp's own
@@ -337,18 +336,15 @@ namespace Desert::Core::Serialize
             // survive packaging.
             if ( type == "FontAsset" )
             {
-                return ServiceKeyForPath(
-                     Runtime::ResourceRegistry::GetFontService()->PathForHandle( handle ) );
+                return ServiceKeyForPath( Runtime::ResourceRegistry::GetFontService()->PathForHandle( handle ) );
             }
             if ( type == "VideoAsset" )
             {
-                return ServiceKeyForPath(
-                     Runtime::ResourceRegistry::GetVideoService()->PathForHandle( handle ) );
+                return ServiceKeyForPath( Runtime::ResourceRegistry::GetVideoService()->PathForHandle( handle ) );
             }
             if ( type == "IconAsset" )
             {
-                return ServiceKeyForPath(
-                     Runtime::ResourceRegistry::GetIconService()->PathForHandle( handle ) );
+                return ServiceKeyForPath( Runtime::ResourceRegistry::GetIconService()->PathForHandle( handle ) );
             }
             // Meshes (static/skinned both resolve handle->path via the MeshAsset base).
             auto a = mgr.FindByHandle<Assets::MeshAsset>( Common::UUID( handle ) );
@@ -473,8 +469,7 @@ namespace Desert::Core::Serialize
             }
             if ( type == "VideoAsset" )
             {
-                return Runtime::ResourceRegistry::GetVideoService()->RegisterVideo(
-                     ServicePathForKey( path ) );
+                return Runtime::ResourceRegistry::GetVideoService()->RegisterVideo( ServicePathForKey( path ) );
             }
             if ( type == "IconAsset" )
             {
@@ -1097,8 +1092,8 @@ namespace Desert::Core::Serialize
                 // The font is an asset HANDLE in memory and persists as the ROOT-TAGGED KEY its handle is
                 // the FNV of — the same form the reflected UIText.Font slot above writes, through the
                 // same two functions, so the world-space and UI text routes cannot drift apart.
-                const std::string fontKey = ServiceKeyForPath(
-                     Runtime::ResourceRegistry::GetFontService()->PathForHandle(
+                const std::string fontKey =
+                     ServiceKeyForPath( Runtime::ResourceRegistry::GetFontService()->PathForHandle(
                           static_cast<uint64_t>( tc.Font ) ) );
                 Assets::TextComponentSer ser{ tc.Text,     fontKey, tc.Color, tc.Size, tc.EmissiveIntensity,
                                               tc.Billboard };

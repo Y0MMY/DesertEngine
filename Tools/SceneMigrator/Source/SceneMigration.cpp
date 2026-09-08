@@ -1053,34 +1053,42 @@ namespace Desert::Migration
             return parts;
         }
 
-        // How many leading components of `path` a TRAILING run of `root` accounts for, longest first, or
-        // 0 if none does.
+        // Where a candidate root ends inside `path`, and how much of the root that match was worth.
         //
-        // WHY A TRAILING RUN and not the whole root. The editor writes paths from its own working
-        // directory (`Editor/`) while this tool is run from the repository root, so the same root is
-        // spelled `Resources/Assets` in the file and `Editor/Resources/Assets` here: the full sequence is
-        // simply not in the string. Matching the root's trailing components is what makes the two
-        // spellings answer alike, and taking the LONGEST such run is the same "longest match wins" rule
-        // AssetHandle::StableKeyForPath applies to the absolutised roots at run time. That rule is
-        // load-bearing rather than tidy: in the sandbox layout `Resources/Assets/` is NESTED INSIDE
-        // `Resources/`, so a shorter match would tag every project asset as an engine resource.
+        // BOTH SIDES CAN CARRY AN EXTRA PREFIX, which is what makes this more than a prefix compare. The
+        // editor writes paths from its own working directory (`Editor/`) and this tool is run from the
+        // repository root, so one file is spelled `Resources/Icons/gear.svg` in the scene and
+        // `Editor/Resources/Icons/gear.svg` here: the root can be missing components at its front OR be
+        // preceded by components the path adds at its front. So the search is for the LAST occurrence,
+        // anywhere in the path, of the LONGEST TRAILING RUN of the root's own components.
         //
-        // The match must start at component 0 of `path`. A root occurring further in would mean the file
-        // named something below a directory that merely shares the root's name, and the run-time
-        // derivation - which compares absolute prefixes - would not agree with it.
-        std::size_t LeadingRootMatch( const std::vector<std::string>& path,
-                                      const std::vector<std::string>& root )
+        // `Run` is how many root components the match accounted for, and it is what decides between the
+        // two candidate roots — the lexical analogue of the run-time rule, where StableKeyForPath keeps
+        // the match against the LONGEST absolute root. That rule is load-bearing rather than tidy: in the
+        // sandbox layout `Resources/Assets/` is NESTED INSIDE `Resources/`, so a shorter match would tag
+        // every project asset as an engine resource — a reference that resolves in the development tree,
+        // where both roots hang off one directory, and names nothing in a package.
+        struct RootMatch
+        {
+            std::size_t Run = 0; // root components matched; 0 = this root does not contain the path
+            std::size_t End = 0; // one past the last path component the match consumed
+        };
+
+        RootMatch MatchRoot( const std::vector<std::string>& path, const std::vector<std::string>& root )
         {
             for ( std::size_t take = root.size(); take >= 1; --take )
             {
-                if ( take >= path.size() )
-                    continue; // the whole path would be the root: it names a directory, not a file
-                const bool same = std::equal( root.end() - static_cast<std::ptrdiff_t>( take ), root.end(),
-                                              path.begin() );
-                if ( same )
-                    return take;
+                const auto runBegin = root.end() - static_cast<std::ptrdiff_t>( take );
+                RootMatch  best;
+                for ( std::size_t start = 0; start + take < path.size(); ++start )
+                {
+                    if ( std::equal( runBegin, root.end(), path.begin() + static_cast<std::ptrdiff_t>( start ) ) )
+                        best = RootMatch{ take, start + take }; // last occurrence wins
+                }
+                if ( best.Run > 0 )
+                    return best;
             }
-            return 0;
+            return {};
         }
     } // namespace
 
@@ -1619,10 +1627,8 @@ namespace Desert::Migration
         return report;
     }
 
-
-    ServiceAssetRootMigrationReport
-    MigrateServiceAssetRootV16ToV17( std::vector<Assets::EntityData>& entities,
-                                     const std::filesystem::path&     assetsRoot )
+    ServiceAssetRootMigrationReport MigrateServiceAssetRootV16ToV17( std::vector<Assets::EntityData>& entities,
+                                                                     const std::filesystem::path&     assetsRoot )
     {
         // WHERE a reference to a service-registry asset can sit in a .desce. Four rows because the same
         // kind of value reaches the file by two routes - one manual serializer and three reflected
@@ -1671,86 +1677,103 @@ namespace Desert::Migration
                     continue;
                 }
 
-                if ( !fields.value().get( site.OldKey ).has_value() )
+                const auto named = fields.value().get( site.OldKey );
+                if ( !named.has_value() )
                     continue; // this component names no such reference - tree untouched
 
-                // Rebuilt rather than edited in place, like every step above: rfl::Object is an ordered
-                // vector of pairs with no erase and no rename, so a rename IS a rebuild.
-                rfl::Generic::Object kept;
-                bool                 touchedHere = false;
+                // THE OUTCOME IS DECIDED BEFORE ANYTHING IS WRITTEN, which is what makes the step
+                // idempotent on the three sites whose key name does NOT change. A rename always has to
+                // happen; a re-spelling only happens when a root can actually place the value. Everything
+                // else - a value some earlier pass already tagged, an empty slot, a value that is not a
+                // string, a file under neither root - leaves the tree byte-identical, so a second pass
+                // over the same tree writes nothing at all.
+                const bool renames = std::string_view( site.OldKey ) != site.NewKey;
+                const auto text    = named.value().to_string();
 
-                for ( const auto& [key, value] : fields.value() )
+                std::optional<std::string> respelled;           // set only when a root could place the value
+                bool                       unplaceable = false; // named in the report, value untouched
+
+                if ( !text.has_value() )
                 {
-                    if ( key != site.OldKey )
+                    unplaceable = true;
+                    LOG_WARN( "[SceneMigration] entity '{0}': {1}.{2} is {3}, not a string - it names "
+                              "nothing and is left exactly as it is",
+                              tag, site.Component, site.OldKey, Describe( named.value() ) );
+                    report.UnrootedNames.push_back( std::string( tag ) + " > " + site.Component + "." +
+                                                    site.OldKey + " = " + Describe( named.value() ) );
+                }
+                else if ( text.value().empty() )
+                {
+                    // An empty slot names nothing and must stay empty rather than become a bare tag: the
+                    // read side turns any non-empty string into a registration attempt, so "engine:"
+                    // would make every unfilled slot try to register the resource root itself.
+                }
+                else if ( Common::AssetHandle::IsProjectRelativeKey( text.value() ) )
+                {
+                    // Already a key - an earlier pass reached this tree.
+                }
+                else
+                {
+                    const std::vector<std::string> parts    = PathComponents( text.value() );
+                    const RootMatch                inAssets = MatchRoot( parts, assetsParts );
+                    const RootMatch                inEngine = MatchRoot( parts, engineParts );
+
+                    if ( inAssets.Run == 0 && inEngine.Run == 0 )
                     {
-                        kept[key] = value;
-                        continue;
-                    }
-
-                    touchedHere = true;
-
-                    const auto text = value.to_string();
-                    if ( !text.has_value() )
-                    {
-                        LOG_WARN( "[SceneMigration] entity '{0}': {1}.{2} is {3}, not a string - it is "
-                                  "carried over under {4} unchanged and still names nothing",
-                                  tag, site.Component, site.OldKey, Describe( value ), site.NewKey );
-                        report.UnrootedNames.push_back( std::string( tag ) + " > " + site.Component + "." +
-                                                        site.OldKey + " = " + Describe( value ) );
-                        kept[site.NewKey] = value;
-                        continue;
-                    }
-
-                    if ( text.value().empty() )
-                    {
-                        // An empty slot names nothing and must stay empty rather than become a bare tag:
-                        // the read side turns any non-empty string into a registration attempt, so
-                        // "assets:" would make every unfilled slot try to register the assets root.
-                        kept[site.NewKey] = value;
-                        report.Empty += 1;
-                        report.Refs += 1;
-                        continue;
-                    }
-
-                    const std::vector<std::string> parts = PathComponents( text.value() );
-                    const std::size_t              inAssets = LeadingRootMatch( parts, assetsParts );
-                    const std::size_t              inEngine = LeadingRootMatch( parts, engineParts );
-
-                    // Longest match wins, exactly as at run time; a tie cannot happen, because the two
-                    // roots would then be the same directory.
-                    const bool        assetsWins = inAssets >= inEngine;
-                    const std::size_t matched    = assetsWins ? inAssets : inEngine;
-                    if ( matched == 0 )
-                    {
-                        report.UnrootedNames.push_back( std::string( tag ) + " > " + site.Component + "." +
-                                                        site.OldKey + " = " + text.value() );
+                        // Under neither root, so there is nothing to tag it with. Carried unchanged -
+                        // PathForStableKey hands an untagged string back verbatim, so the slot keeps
+                        // exactly the behaviour it had - and NAMED, because "exactly the behaviour it
+                        // had" includes not resolving in a packaged game (DC 1.4).
+                        unplaceable = true;
                         LOG_WARN( "[SceneMigration] entity '{0}': '{1}' lies under neither the assets root "
                                   "nor the engine resource tree, so there is no content root to tag it "
                                   "with - it is carried over unchanged and will not resolve in a packaged "
                                   "game",
                                   tag, text.value() );
-                        kept[site.NewKey] = value;
-                        continue;
+                        report.UnrootedNames.push_back( std::string( tag ) + " > " + site.Component + "." +
+                                                        site.OldKey + " = " + text.value() );
                     }
-
-                    std::string relative;
-                    for ( std::size_t i = matched; i < parts.size(); ++i )
+                    else
                     {
-                        if ( !relative.empty() )
-                            relative += '/';
-                        relative += parts[i];
-                    }
+                        // The root that matched MORE OF ITSELF wins. On a tie the project's own root
+                        // wins: it is the more specific answer about a file lying under both, and the
+                        // two can only tie at equal specificity.
+                        const bool        assetsWins = inAssets.Run >= inEngine.Run;
+                        const std::size_t matched    = assetsWins ? inAssets.End : inEngine.End;
 
-                    kept[site.NewKey] =
-                         rfl::Generic( ( assetsWins ? assetsPrefix : enginePrefix ) + relative );
-                    report.Refs += 1;
+                        std::string relative;
+                        for ( std::size_t i = matched; i < parts.size(); ++i )
+                        {
+                            if ( !relative.empty() )
+                                relative += '/';
+                            relative += parts[i];
+                        }
+                        respelled = ( assetsWins ? assetsPrefix : enginePrefix ) + relative;
+                    }
                 }
 
-                if ( !touchedHere )
-                    continue;
+                (void)unplaceable; // reported above; it never changes the tree
+                if ( !renames && !respelled.has_value() )
+                    continue; // nothing to write - leave the payload byte-identical
+
+                // Rebuilt rather than edited in place, like every step above: rfl::Object is an ordered
+                // vector of pairs with no erase and no rename, so a rename IS a rebuild.
+                rfl::Generic::Object kept;
+                for ( const auto& [key, value] : fields.value() )
+                {
+                    if ( key != site.OldKey )
+                        kept[key] = value;
+                    else
+                        kept[site.NewKey] = respelled.has_value() ? rfl::Generic( *respelled ) : value;
+                }
+
+                if ( respelled.has_value() )
+                    report.Refs += 1;
+                else if ( text.has_value() && text.value().empty() )
+                    report.Empty += 1;
 
                 entity.Components[site.Component] = rfl::Generic( std::move( kept ) );
-                touchedAny = true;
+                touchedAny                        = true;
             }
 
             if ( touchedAny )

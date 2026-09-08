@@ -67,7 +67,7 @@ namespace
         payload["Size"]  = rfl::Generic( 1.0 );
 
         Assets::EntityData entity;
-        entity.Tag                = tag;
+        entity.Tag                   = tag;
         entity.Components[component] = rfl::Generic( payload );
         return entity;
     }
@@ -150,8 +150,7 @@ TEST( SceneServiceAssetRootMigration, AnEngineResourceGetsTheEngineTag )
     std::vector<Assets::EntityData> entities{
          EntityWith( "UIIcon", "Icon", std::string( "Resources/Icons/cart.svg" ) ) };
 
-    const auto report =
-         Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
+    const auto report = Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
 
     EXPECT_EQ( report.Entities, 1 );
     EXPECT_EQ( report.Refs, 1 );
@@ -169,8 +168,7 @@ TEST( SceneServiceAssetRootMigration, AProjectAssetBeatsTheEngineRootItIsNestedI
     std::vector<Assets::EntityData> entities{
          EntityWith( "UIText", "Font", std::string( "Resources/Assets/Fonts/Custom.ttf" ) ) };
 
-    const auto report =
-         Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
+    const auto report = Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
 
     EXPECT_EQ( report.Refs, 1 );
     EXPECT_EQ( StringAt( PayloadOf( entities[0], "UIText" ), "Font" ).value_or( "<none>" ),
@@ -219,10 +217,8 @@ TEST( SceneServiceAssetRootMigration, BothSpellingsOfOneRootGiveOneKey )
 
     Migration::MigrateServiceAssetRootV16ToV17( entities, "Editor/Resources/Assets" );
 
-    EXPECT_EQ( StringAt( PayloadOf( entities[0], "UIIcon" ), "Icon" ).value_or( "<a>" ),
-               "engine:Icons/gear.svg" );
-    EXPECT_EQ( StringAt( PayloadOf( entities[1], "UIIcon" ), "Icon" ).value_or( "<b>" ),
-               "engine:Icons/gear.svg" );
+    EXPECT_EQ( StringAt( PayloadOf( entities[0], "UIIcon" ), "Icon" ).value_or( "<a>" ), "engine:Icons/gear.svg" );
+    EXPECT_EQ( StringAt( PayloadOf( entities[1], "UIIcon" ), "Icon" ).value_or( "<b>" ), "engine:Icons/gear.svg" );
 }
 
 // ── All four sites, including the one that arrives by the other route ─────────────────────────────
@@ -236,8 +232,7 @@ TEST( SceneServiceAssetRootMigration, TheWorldSpaceLabelsFontPathIsRenamedWithIt
     std::vector<Assets::EntityData> entities{
          EntityWith( "Text", "FontPath", std::string( "Resources/Fonts/Roboto-Regular.ttf" ) ) };
 
-    const auto report =
-         Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
+    const auto report = Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
 
     EXPECT_EQ( report.Refs, 1 );
 
@@ -257,30 +252,27 @@ TEST( SceneServiceAssetRootMigration, EverySiteMovesInOnePass )
          EntityWith( "UIPanel", "Video", std::string( "Resources/Assets/Videos/d.mpg" ), "Screen" ),
     };
 
-    const auto report =
-         Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
+    const auto report = Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
 
     EXPECT_EQ( report.Entities, 4 );
     EXPECT_EQ( report.Refs, 4 );
     EXPECT_EQ( StringAt( PayloadOf( entities[0], "Text" ), "Font" ).value_or( "" ), "engine:Fonts/A.ttf" );
     EXPECT_EQ( StringAt( PayloadOf( entities[1], "UIText" ), "Font" ).value_or( "" ), "engine:Fonts/B.ttf" );
     EXPECT_EQ( StringAt( PayloadOf( entities[2], "UIIcon" ), "Icon" ).value_or( "" ), "engine:Icons/c.svg" );
-    EXPECT_EQ( StringAt( PayloadOf( entities[3], "UIPanel" ), "Video" ).value_or( "" ),
-               "assets:Videos/d.mpg" );
+    EXPECT_EQ( StringAt( PayloadOf( entities[3], "UIPanel" ), "Video" ).value_or( "" ), "assets:Videos/d.mpg" );
 }
 
 // One entity can carry several of the four at once (a panel with a video and a text child is two
 // entities, but a hand-built file may put more than one payload on one). It is counted once.
 TEST( SceneServiceAssetRootMigration, AnEntityCarryingTwoSitesIsCountedOnce )
 {
-    Assets::EntityData entity = EntityWith( "UIIcon", "Icon", std::string( "Resources/Icons/a.svg" ), "Both" );
+    Assets::EntityData   entity = EntityWith( "UIIcon", "Icon", std::string( "Resources/Icons/a.svg" ), "Both" );
     rfl::Generic::Object panel;
     panel["Video"]               = rfl::Generic( std::string( "Resources/Assets/Videos/v.mpg" ) );
     entity.Components["UIPanel"] = rfl::Generic( panel );
 
     std::vector<Assets::EntityData> entities{ entity };
-    const auto                      report =
-         Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
+    const auto report = Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
 
     EXPECT_EQ( report.Entities, 1 );
     EXPECT_EQ( report.Refs, 2 );
@@ -290,17 +282,37 @@ TEST( SceneServiceAssetRootMigration, AnEntityCarryingTwoSitesIsCountedOnce )
 
 // An empty slot names nothing and must stay naming nothing. A bare "engine:" would make every unfilled
 // font slot try to register the resource root itself — the read side turns any non-empty string into a
-// registration attempt.
+// registration attempt. At a site whose key does not change there is nothing to do at all, so the tree
+// is left byte-identical; at the RENAMED site the key still moves and the empty value travels with it.
 TEST( SceneServiceAssetRootMigration, AnEmptySlotStaysEmptyRatherThanBecomingABareTag )
 {
-    std::vector<Assets::EntityData> entities{ EntityWith( "UIText", "Font", std::string( "" ) ) };
+    std::vector<Assets::EntityData> entities{ EntityWith( "UIText", "Font", std::string( "" ) ),
+                                              EntityWith( "Text", "FontPath", std::string( "" ), "World" ) };
 
-    const auto report =
-         Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
+    const auto report = Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
 
-    EXPECT_EQ( report.Refs, 1 );
+    EXPECT_EQ( report.Entities, 1 ) << "only the renamed site had anything to do";
+    EXPECT_EQ( report.Refs, 0 ) << "nothing was tagged - an empty slot is not a reference";
     EXPECT_EQ( report.Empty, 1 );
     EXPECT_EQ( StringAt( PayloadOf( entities[0], "UIText" ), "Font" ).value_or( "<none>" ), "" );
+    EXPECT_FALSE( HasKey( PayloadOf( entities[1], "Text" ), "FontPath" ) );
+    EXPECT_EQ( StringAt( PayloadOf( entities[1], "Text" ), "Font" ).value_or( "<none>" ), "" );
+}
+
+// A value that is ALREADY a key is what an earlier pass left, and it must not be re-spelled or even
+// rewritten: this is the whole of the step's idempotence on the three sites whose key name is unchanged.
+TEST( SceneServiceAssetRootMigration, AnAlreadyTaggedValueIsNotTouchedAtAll )
+{
+    std::vector<Assets::EntityData> entities{
+         EntityWith( "UIIcon", "Icon", std::string( "engine:Icons/gear.svg" ) ) };
+    const std::string before = rfl::json::write( entities );
+
+    const auto report = Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
+
+    EXPECT_EQ( report.Entities, 0 );
+    EXPECT_EQ( report.Refs, 0 );
+    EXPECT_TRUE( report.UnrootedNames.empty() );
+    EXPECT_EQ( rfl::json::write( entities ), before );
 }
 
 // Under neither root: carried across unchanged — PathForStableKey hands an untagged string back verbatim,
@@ -311,11 +323,10 @@ TEST( SceneServiceAssetRootMigration, AReferenceUnderNeitherRootIsCarriedAndName
     std::vector<Assets::EntityData> entities{
          EntityWith( "UIIcon", "Icon", std::string( "/Users/somebody/Downloads/free.svg" ), "Stray" ) };
 
-    const auto report =
-         Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
+    const auto report = Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
 
     EXPECT_EQ( report.Refs, 0 );
-    EXPECT_EQ( report.Entities, 1 ) << "the payload was still rebuilt, so the entity was touched";
+    EXPECT_EQ( report.Entities, 0 ) << "nothing could be re-spelled, so the tree is left byte-identical";
     ASSERT_EQ( report.UnrootedNames.size(), 1u );
     EXPECT_NE( report.UnrootedNames[0].find( "Stray" ), std::string::npos ) << report.UnrootedNames[0];
     EXPECT_EQ( StringAt( PayloadOf( entities[0], "UIIcon" ), "Icon" ).value_or( "<none>" ),
@@ -328,24 +339,24 @@ TEST( SceneServiceAssetRootMigration, AValueThatIsExactlyARootIsNotAReference )
     std::vector<Assets::EntityData> entities{
          EntityWith( "UIIcon", "Icon", std::string( "Resources" ), "JustTheRoot" ) };
 
-    const auto report =
-         Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
+    const auto report = Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
 
     EXPECT_EQ( report.Refs, 0 );
+    EXPECT_EQ( report.Entities, 0 );
     ASSERT_EQ( report.UnrootedNames.size(), 1u );
     EXPECT_EQ( StringAt( PayloadOf( entities[0], "UIIcon" ), "Icon" ).value_or( "<none>" ), "Resources" );
 }
 
 TEST( SceneServiceAssetRootMigration, AValueThatIsNotAStringIsCarriedAndNamed )
 {
-    std::vector<Assets::EntityData> entities{
-         EntityWith( "UIText", "Font", rfl::Generic( 7 ), "Broken" ) };
+    std::vector<Assets::EntityData> entities{ EntityWith( "UIText", "Font", rfl::Generic( 7 ), "Broken" ) };
 
-    const auto report =
-         Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
+    const auto report = Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
 
     EXPECT_EQ( report.Refs, 0 );
+    EXPECT_EQ( report.Entities, 0 ) << "there is no rename to perform, so the tree is left alone";
     ASSERT_EQ( report.UnrootedNames.size(), 1u );
+    EXPECT_NE( report.UnrootedNames[0].find( "Broken" ), std::string::npos ) << report.UnrootedNames[0];
     EXPECT_TRUE( HasKey( PayloadOf( entities[0], "UIText" ), "Font" ) );
 }
 
@@ -356,8 +367,7 @@ TEST( SceneServiceAssetRootMigration, APayloadThatIsNotAnObjectIsLeftAlone )
     entity.Components["UIIcon"] = rfl::Generic( std::string( "nonsense" ) );
     std::vector<Assets::EntityData> entities{ entity };
 
-    const auto report =
-         Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
+    const auto report = Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
 
     EXPECT_EQ( report.Entities, 0 );
     EXPECT_EQ( entities[0].Components.get( "UIIcon" ).value().to_string().value_or( "" ), "nonsense" );
@@ -367,15 +377,14 @@ TEST( SceneServiceAssetRootMigration, APayloadThatIsNotAnObjectIsLeftAlone )
 // second run byte-identical for the ninety per cent of the corpus that has no such reference.
 TEST( SceneServiceAssetRootMigration, APayloadWithNoSuchKeyIsUntouched )
 {
-    Assets::EntityData   entity;
+    Assets::EntityData entity;
     entity.Tag = "Plain";
     rfl::Generic::Object payload;
     payload["Color"]            = rfl::Generic( 1.0 );
     entity.Components["UIIcon"] = rfl::Generic( payload );
     std::vector<Assets::EntityData> entities{ entity };
 
-    const auto report =
-         Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
+    const auto report = Migration::MigrateServiceAssetRootV16ToV17( entities, SandboxAssetsRoot() );
 
     EXPECT_EQ( report.Entities, 0 );
     EXPECT_EQ( KeysOf( PayloadOf( entities[0], "UIIcon" ) ), std::vector<std::string>{ "Color" } );
@@ -420,9 +429,8 @@ TEST( SceneServiceAssetRootMigration, MigrateSceneRunsItForAV16FileAndStampsTheH
 // never ran on a corpus already stamped at it and the tool reported every file up to date.
 TEST( SceneServiceAssetRootMigration, AFileAlreadyAtTheHeadIsNotRunAgain )
 {
-    Core::SceneSerialized scene =
-         SceneAt( Core::kSceneVersion,
-                  { EntityWith( "UIIcon", "Icon", std::string( "Resources/Icons/gear.svg" ) ) } );
+    Core::SceneSerialized scene = SceneAt(
+         Core::kSceneVersion, { EntityWith( "UIIcon", "Icon", std::string( "Resources/Icons/gear.svg" ) ) } );
 
     const auto report = Migration::MigrateScene( scene, SandboxAssetsRoot() );
 
@@ -515,8 +523,8 @@ TEST( SceneServiceAssetRootMigrationCorpus, NoShippedSceneStatesAnUntaggedFontIc
 
                 ++refs;
                 EXPECT_TRUE( Common::AssetHandle::IsProjectRelativeKey( value ) )
-                     << entry.path().string() << " names " << site.Component << "." << site.Key << " as '"
-                     << value << "', which carries no content-root tag and so does not survive packaging";
+                     << entry.path().string() << " names " << site.Component << "." << site.Key << " as '" << value
+                     << "', which carries no content-root tag and so does not survive packaging";
             }
         }
     }
