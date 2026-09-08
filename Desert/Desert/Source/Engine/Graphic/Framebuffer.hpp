@@ -88,7 +88,18 @@ namespace Desert::Graphic
     class Framebuffer : public DynamicResources
     {
     public:
+        // The ledger row — see Engine/Graphic/ResourceLedger.hpp. A framebuffer's ATTACHMENTS are Images
+        // and carry rows of their own; this row is the `VkFramebuffer` + its render passes.
+        Framebuffer() : m_Accounting( ResourceOwnership::Take( ResourceKind::Framebuffer ) )
+        {
+        }
+
         virtual ~Framebuffer() = default;
+
+        void ClaimOwnership( const ResourceOwner owner, const Common::AssetHandle asset = Common::AssetHandle{} )
+        {
+            m_Accounting.Claim( owner, asset );
+        }
 
         virtual const FramebufferSpecification GetSpecification() const                 = 0;
         virtual void                           Use( BindUsage = BindUsage::Bind ) const = 0;
@@ -113,6 +124,9 @@ namespace Desert::Graphic
         virtual const std::shared_ptr<Image2D>& GetDepthAttachmentImage() const                     = 0;
 
         static std::shared_ptr<Framebuffer> Create( const FramebufferSpecification& spec );
+
+    private:
+        ResourceOwnership m_Accounting;
     };
 
     class FramebufferLibrary final

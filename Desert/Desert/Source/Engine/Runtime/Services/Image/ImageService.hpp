@@ -1,3 +1,8 @@
+// THIS FILE HAD NO INCLUDE GUARD. It works only because nothing has yet included it twice in one
+// translation unit; a second include is a class redefinition, i.e. a compile error that arrives the day
+// somebody adds an unrelated include somewhere else. Every other header in this directory has one.
+#pragma once
+
 #include <Common/Core/HandlePool.hpp>
 
 #include <Engine/Runtime/ImageHandle.hpp>
@@ -25,5 +30,10 @@ namespace Desert::Runtime
     private:
         Common::Core::HandlePool                     m_HandlePool;
         std::vector<std::shared_ptr<Graphic::Image>> m_Images;
+        // The generation each slot was last handed out under, parallel to m_Images. It is what lets
+        // Resolve refuse a stale handle instead of answering with the slot's new occupant — see Resolve.
+        // Parallel to the images rather than folded into a struct because m_Images is handed out whole by
+        // All(), which Renderer::RecreateImageSamplers walks.
+        std::vector<uint32_t> m_Generations;
     };
 } // namespace Desert::Runtime

@@ -143,6 +143,30 @@ namespace Desert::Runtime
         // CollectGarbage() runs at a safe point.
         void Invalidate( const Assets::AssetHandle& handle );
 
+        // IS ANY RUNTIME MATERIAL BUILT FOR @p handle? Asked, and not answered by calling Get() — Get
+        // BUILDS on a miss, so the obvious way to test this is the one way that guarantees the answer is
+        // yes. Eviction needs to know whether it is about to drop something without creating it first.
+        /// PARSE THE SHELL IF IT IS NOT PARSED. Every read below that touches an asset's `Data()` calls
+        /// this first, and the reason is a defect an A -> B -> A round trip found: eviction releases a
+        /// material's payload and keeps its shell so the next `Get` can rebuild — and this service's lazy
+        /// build read the shell WITHOUT asking whether it still held anything. It built from an emptied
+        /// `MaterialData`, so the Cornell scene's green wall came back WHITE after a round trip, with
+        /// nothing in the log. §1.4's empty successful answer, at the seam the whole eviction design rests
+        /// on. `MeshService::Get` has always done this; this service never had to, because until now
+        /// nothing released a material.
+        ///
+        /// `Load()` AND NOT `AssetBase::EnsureLoaded( manager )`, deliberately: this service is not handed
+        /// a registry (five call sites register a material and two of them are in files this task does not
+        /// own), and no `MaterialAsset` subclass overrides `ResolveDependencies`, so the two are the same
+        /// call. That equality is ASSERTED rather than assumed — Desert/Tests/Engine/AssetRoots goes red
+        /// the day a material type declares one, and whoever declares it must give this service a manager.
+        Common::BoolResultStr EnsureLoaded( const std::shared_ptr<Assets::MaterialAsset>& asset ) const;
+
+        [[nodiscard]] bool HasBuiltMaterial( const Assets::AssetHandle& handle ) const
+        {
+            return m_Materials.find( handle ) != m_Materials.end();
+        }
+
         // FORGET a material asset entirely — its runtime materials, its shell, and its entry in the
         // external -> internal map.
         //

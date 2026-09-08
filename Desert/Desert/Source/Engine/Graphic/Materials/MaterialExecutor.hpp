@@ -26,6 +26,13 @@ namespace Desert::Graphic
         {
             return m_UniformBufferPropertiesLookup;
         }
+        // The storage-buffer half of the lookup above. It had no accessor while the uniform-buffer one
+        // did, which is the asymmetry that made a whole class of device allocation invisible to anything
+        // walking a material's resources.
+        const auto& GetStorageBufferProperties() const
+        {
+            return m_StorageBufferPropertiesLookup;
+        }
         const auto& GetTexture2DProperties() const
         {
             return m_Texture2DPropertiesLookup;

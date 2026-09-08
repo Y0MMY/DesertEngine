@@ -62,6 +62,10 @@ namespace Desert::Graphic
         // file involved. The old on-disk BRDF_LUT.tga dependency was missing from the repo anyway, which
         // silently degraded IBL specular to the white-dummy fallback on every run.
         {
+            // The device's own, and the LUT is the clearest case there is: it is computed, not read, so
+            // there is no file to reload it from. See Engine/Graphic/ResourceLedger.hpp.
+            const ResourceAttributionScope owned( ResourceOwner::Device );
+
             Graphic::TextureSpecification spec;
             spec.GenerateMips = false;
 

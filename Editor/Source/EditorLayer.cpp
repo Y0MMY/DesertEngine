@@ -16,6 +16,7 @@
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Geometry/ProceduralCharacterFactory.hpp>
 #include <Engine/Animation/ProceduralCharacterAnimations.hpp>
+#include <Engine/Assets/AssetEviction.hpp>
 #include <Engine/Assets/Mesh/AnimationAsset.hpp>
 #include <Engine/Scripting/ScriptEngine.hpp>
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
@@ -3082,6 +3083,19 @@ namespace Desert::Editor
         }
 
         // Actions.
+        //
+        // RELEASING UNUSED ASSETS BY NAME. The sweep runs by itself on every scene change, which is the
+        // policy (Engine/Assets/AssetEviction.hpp) — this is the same request under a name, so that a
+        // person profiling a level can ask for it without changing scene, and so that the control channel
+        // can. A capability reachable only as a side effect of something else is missing from THE
+        // DICTIONARY, and the dictionary is this editor's claim that anything a person can do an agent can
+        // do. It goes through the schedule rather than calling Run directly, so a manual sweep lands at the
+        // same safe point in the frame as an automatic one.
+        commands.push_back( { "Action", "Release unused assets", []
+                              {
+                                  Assets::AssetEvictionSchedule::Request( "asked for from the command "
+                                                                          "palette" );
+                              } } );
         commands.push_back( { "Action", "Save Scene", [this] { (void)SaveOpenScene(); } } );
         commands.push_back( { "Action", "Undo", [] { CommandHistory::Get().Undo(); } } );
         commands.push_back( { "Action", "Redo", [] { CommandHistory::Get().Redo(); } } );

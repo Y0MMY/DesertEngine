@@ -35,6 +35,14 @@ namespace Desert::Assets
 
     Common::BoolResultStr SkeletonAsset::Unload()
     {
-        return BOOLSUCCESS
+        // WAS `return BOOLSUCCESS` — WITHOUT A SEMICOLON. It compiled only because `#define BOOLSUCCESS
+        // Common::MakeSuccess( true );` carries one inside the macro, and it is the clearest evidence in
+        // the set that these thirteen bodies were written with no caller and never read again: every other
+        // one of them writes the semicolon.
+        //
+        // It also leaked the one thing this class owns. `m_Skeleton` is a `unique_ptr<Animation::Skeleton>`
+        // holding the whole bone hierarchy, and nothing released it.
+        m_Skeleton.reset();
+        return BOOLSUCCESS;
     }
 } // namespace Desert::Assets

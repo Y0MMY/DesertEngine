@@ -2,6 +2,8 @@
 #include <Engine/Core/EngineContext.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/DeviceLost.hpp>
+#include <Engine/Assets/AssetEviction.hpp>
+#include <Engine/Core/SceneAssetRoots.hpp>
 
 #include <Common/Core/EventRegistry.hpp>
 #include <Common/Core/Profiler.hpp>
@@ -201,6 +203,18 @@ namespace Desert::Engine
                     LOG_ERROR( "[Application] PrepareNextFrame failed: {}", prepared.GetError() );
                 }
             }
+
+            // 2b. RELEASE WHAT NOTHING NEEDS ANY MORE, if a scene change asked for it.
+            //
+            // HERE AND NOT AT THE SCENE CHANGE ITSELF, for two reasons that are both about what is alive
+            // at the moment of the sweep: the scene being replaced is destroyed by the time this frame
+            // starts (a sweep during the swap would see its assets as reachable and free nothing), and no
+            // command buffer is open yet, so dropping a built material cannot invalidate one that is
+            // recording. The material graveyard's own collector runs a few lines later inside the layer
+            // update, which is what actually returns the descriptor pools.
+            //
+            // Free when nothing is due: RunIfDue tests one bool and does not build the root set.
+            Assets::AssetEvictionSchedule::RunIfDue( [] { return Core::CollectAssetRootsFromLiveScenes(); } );
 
             // 3. Start recording commands for this frame
             const auto frameBegun = Graphic::Renderer::GetInstance().BeginFrame();

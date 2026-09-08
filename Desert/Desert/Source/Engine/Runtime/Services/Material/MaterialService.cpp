@@ -35,7 +35,13 @@ namespace Desert::Runtime
         if ( cell )
             m_BuiltToAsset.erase( cell.get() );
         if ( material )
+        {
             m_BuiltToAsset[material.get()] = handle;
+            // The ledger row this material opened in its constructor now knows whose it is — see
+            // Engine/Graphic/ResourceLedger.hpp. A render system's own materials stay attributed to the
+            // renderer; these are the ones a `.demat` can rebuild, i.e. the ones eviction may consider.
+            material->ClaimOwnership( Graphic::ResourceOwner::AssetService, handle );
+        }
         cell                     = material;
         m_MaterialAssets[handle] = materialAsset; // keep the shell too
 
@@ -58,6 +64,28 @@ namespace Desert::Runtime
         m_MaterialAssets[handle] = materialAsset; // runtime Material built lazily on first Get
         // The mesh->material link resolves by EXTERNAL id, so the map must exist before any build.
         m_ExternalToInternal[materialAsset->GetMaterialUUID()] = handle;
+        return BOOLSUCCESS;
+    }
+
+    Common::BoolResultStr
+    MaterialService::EnsureLoaded( const std::shared_ptr<Assets::MaterialAsset>& asset ) const
+    {
+        if ( !asset )
+            return Common::MakeError<bool>( "MaterialService: a null material shell cannot be loaded" );
+        if ( asset->IsReadyForUse() )
+            return BOOLSUCCESS;
+
+        if ( const auto loaded = asset->Load(); !loaded )
+        {
+            // Loudly, and then the caller decides. A material that cannot be re-read is a surface that
+            // will draw with the shader's own defaults, and the ONLY place that knows which file it was is
+            // here — see the header for the round trip that found this.
+            LOG_ERROR( "[MaterialService] '{}' was released and could not be read back: {}. Anything drawn "
+                       "with it falls back to the shader's default parameters.",
+                       asset->GetMetadata().Filepath.string(), loaded.GetError() );
+            return loaded;
+        }
+
         return BOOLSUCCESS;
     }
 
@@ -101,6 +129,11 @@ namespace Desert::Runtime
         {
             if ( auto ait = m_MaterialAssets.find( current ); ait != m_MaterialAssets.end() )
             {
+                // The chain is read out of the asset's DATA, so the asset has to have some. A released
+                // shell answers IsInstance() with false and the walk stops at the instance instead of
+                // resolving to its parent -- the surface then draws with the instance's own (empty)
+                // material rather than the base it overrides.
+                (void)EnsureLoaded( ait->second );
                 if ( auto* surf = dynamic_cast<Assets::SurfaceMaterialAsset*>( ait->second.get() );
                      surf && surf->Data().IsInstance() )
                 {
@@ -123,11 +156,17 @@ namespace Desert::Runtime
         // construction rather than by anyone remembering to copy it across.
         if ( auto ait = m_MaterialAssets.find( current ); ait != m_MaterialAssets.end() )
         {
+            // THE LINE THE ROUND TRIP WAS MISSING. Building from a released shell produces a material with
+            // the shader's default parameters and no textures -- a white surface where a green one was,
+            // with nothing in the log. See MaterialService::EnsureLoaded.
+            (void)EnsureLoaded( ait->second );
+
             auto material = Graphic::MaterialFactory::CreateMaterial( ait->second.get(), path, pass );
             if ( !material )
                 return nullptr; // MaterialFactory named the material and the cell it refused
-            auto* raw                  = material.get();
-            m_BuiltToAsset[raw]        = current;
+            auto* raw           = material.get();
+            m_BuiltToAsset[raw] = current;
+            raw->ClaimOwnership( Graphic::ResourceOwner::AssetService, current );
             m_Materials[current][slot] = std::move( material );
             return raw;
         }
@@ -180,6 +219,8 @@ namespace Desert::Runtime
             auto ait = m_MaterialAssets.find( current );
             if ( ait == m_MaterialAssets.end() )
                 break;
+            // A released shell has no Data to walk: see MaterialService::EnsureLoaded.
+            (void)EnsureLoaded( ait->second );
             auto* surf = dynamic_cast<Assets::SurfaceMaterialAsset*>( ait->second.get() );
             if ( !surf || !surf->Data().IsInstance() )
                 break;
@@ -213,6 +254,8 @@ namespace Desert::Runtime
             auto ait = m_MaterialAssets.find( current );
             if ( ait == m_MaterialAssets.end() )
                 break;
+            // A released shell has no Data to walk: see MaterialService::EnsureLoaded.
+            (void)EnsureLoaded( ait->second );
             auto* surf = dynamic_cast<Assets::SurfaceMaterialAsset*>( ait->second.get() );
             if ( !surf || !surf->Data().IsInstance() )
                 break;
@@ -226,6 +269,10 @@ namespace Desert::Runtime
         auto baseIt = m_MaterialAssets.find( current );
         if ( baseIt == m_MaterialAssets.end() )
             return false;
+        // The base is read for its parameters AND its textures, and a released shell has neither. This is
+        // the terrain's path to its material, so without it a terrain drawn after a scene round trip loses
+        // its authored surface silently.
+        (void)EnsureLoaded( baseIt->second );
         auto* base = dynamic_cast<Assets::SurfaceMaterialAsset*>( baseIt->second.get() );
         if ( !base )
             return false;

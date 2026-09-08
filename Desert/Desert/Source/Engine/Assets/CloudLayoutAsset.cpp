@@ -70,7 +70,14 @@ namespace Desert::Assets
         m_Layout.Mask.shrink_to_fit();
         m_Layout.Resolution  = 0u;
         m_Layout.ContentHash = 0u;
-        m_Ready              = false;
+        // The one thing this body — the most thorough of the thirteen and the model for the rest — still
+        // left describing a buffer it had freed. A zero ContentHash beside a non-zero mean is an
+        // inconsistent state for exactly the reason the two lines above exist.
+        m_Layout.PatternMean[0] = 0.0F;
+        m_Layout.PatternMean[1] = 0.0F;
+        m_Layout.PatternMean[2] = 0.0F;
+        m_Layout.PatternMean[3] = 0.0F;
+        m_Ready                 = false;
         return BOOLSUCCESS;
     }
 

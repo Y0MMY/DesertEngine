@@ -90,7 +90,18 @@ namespace Desert::Assets
     {
         m_Volume.Voxels.clear();
         m_Volume.Voxels.shrink_to_fit();
-        m_Ready = false;
+
+        // The 8 MiB was already released correctly; what stayed behind was everything the FILE said about
+        // it — the origin, the generator version, and a Params block still carrying the loaded file's
+        // seed and periods on an asset that reports itself not ready. Reset wholesale, so a member added
+        // to CloudNoiseVolumeData tomorrow cannot silently become the next survivor.
+        //
+        // The result is the RECIPE'S DEFAULTS, not zeroes, and that is right rather than a compromise:
+        // Params is what a volume would be GENERATED from, not a description of the buffer that was
+        // freed, so a released asset ends up in the same state a never-loaded one is in. The two facts a
+        // caller may act on are `Voxels.empty()` and `IsReadyForUse()`, and both now say released.
+        m_Volume = CloudNoiseVolumeData{};
+        m_Ready  = false;
         return BOOLSUCCESS;
     }
 

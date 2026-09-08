@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
+#include <Engine/Graphic/ResourceLedger.hpp>
 #include <Engine/Graphic/Materials/Properties/UniformBufferProperty.hpp>
 #include <Engine/Graphic/Materials/Properties/FieldProperty.hpp>
 #include <Engine/Graphic/Materials/Properties/TProperty.hpp>
@@ -110,6 +111,11 @@ namespace Desert::Graphic
          */
         bool BindSchemaDefaultTexture( const std::string& sampler );
 
+        /// Say who holds this material AND the uniform/storage buffers its shader declares — see
+        /// Engine/Graphic/ResourceLedger.hpp. `MaterialService` claims the ones built from a `.demat`; a
+        /// render system's own materials stay `SceneRenderer`.
+        void ClaimOwnership( ResourceOwner owner, Common::AssetHandle asset = Common::AssetHandle{} );
+
     protected:
         // Uploads all dirty TProperty members to the matching FieldProperty/Texture slot.
         // Exposed as protected so non-instance Bind() overrides (JFA, etc.) can flush manually.
@@ -149,5 +155,8 @@ namespace Desert::Graphic
         std::vector<std::string>          m_PropertyNames;
         std::unique_ptr<MaterialExecutor> m_MaterialExecutor;
         std::vector<IProperty*>           m_RegisteredProperties;
+
+    private:
+        ResourceOwnership m_Accounting;
     };
 } // namespace Desert::Graphic

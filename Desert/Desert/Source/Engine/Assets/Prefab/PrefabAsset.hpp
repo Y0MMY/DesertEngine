@@ -36,6 +36,13 @@ namespace Desert::Assets
         {
             return m_IsLoaded;
         }
+
+        // A prefab captured from a live entity has not been written yet — see CreateFromEntity below and
+        // Unload's refusal.
+        bool IsReloadableFromFile() const override
+        {
+            return !m_CapturedInMemory;
+        }
         const std::vector<EntityData>& GetEntities() const
         {
             return m_EntityData;
@@ -48,5 +55,8 @@ namespace Desert::Assets
     private:
         std::vector<EntityData> m_EntityData;
         bool                    m_IsLoaded = false;
+        // Set by CreateFromEntity and cleared by Load: this payload came from a live entity and no file
+        // holds it yet, so releasing it destroys the only copy.
+        bool m_CapturedInMemory = false;
     };
 } // namespace Desert::Assets

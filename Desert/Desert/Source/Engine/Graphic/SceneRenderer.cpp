@@ -1,5 +1,6 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Graphic/RenderPhaseRegistry.hpp>
+#include <Engine/Graphic/ResourceLedger.hpp>
 #include <Engine/Graphic/RenderConfig.hpp>
 #include <Engine/Graphic/PostProcessing/LensFlareRules.hpp>
 #include <Engine/Graphic/PostProcessing/LightShaftRules.hpp>
@@ -69,6 +70,13 @@ namespace Desert::Graphic
                       m_SlotLease.RecordingSlot(), ms( started, done ), m_RenderSystemOrder.size(),
                       m_PipelineCache.Size() );
         }
+
+        // THE LEDGER, ONCE PER SCENE LOAD, IN THE LOG. Scene load is the moment the population changes and
+        // the only moment anybody has ever wanted this number: "the editor keeps growing" is a claim about
+        // successive loads, and until now the only instrument for it was the process's RSS, which mixes
+        // device memory, the asset layer's CPU copies and the allocator's own slack. A line per load makes
+        // the growth attributable to an owner instead of merely visible. See Graphic/ResourceLedger.hpp.
+        LOG_INFO( "[Resources] {}", ResourceLedger::Report() );
     }
 
     bool SceneRenderer::EnsureRendererResources()
@@ -77,6 +85,17 @@ namespace Desert::Graphic
             return false;
 
         m_RendererResourcesBuilt = true;
+
+        // EVERYTHING BUILT BELOW BELONGS TO THIS RENDERER, and one scope says so for all of it. This
+        // function and the twenty render systems it constructs create roughly a hundred and twenty device
+        // objects — framebuffers, LUT images, pipelines and the materials the passes own — across twenty
+        // files, and none of them is rebuildable from a file. Claiming them individually would mean
+        // editing twenty files to answer one question, and the twenty-first system would be attributed by
+        // nobody. See Engine/Graphic/ResourceLedger.hpp.
+        //
+        // A texture or mesh lazily built INSIDE this window is still the asset's: the services claim
+        // theirs explicitly after the build, and an explicit claim overrides the ambient one.
+        const ResourceAttributionScope owned( ResourceOwner::SceneRenderer );
 
         // Ensure the phase registry exists before any system registers custom phases or passes.
         RenderPhaseRegistry::CreateInstance();

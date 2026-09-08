@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/RendererTypes.hpp>
 #include <Engine/Graphic/DynamicResources.hpp>
+#include <Engine/Graphic/ResourceLedger.hpp>
 
 // For NO_DISCARD on SetData below. Not implicit: this header is reached from Geometry/Mesh.hpp by
 // translation units that never include Core.hpp on their own — the same reason VertexBuffer.hpp
@@ -13,12 +14,29 @@ namespace Desert::Graphic
     class IndexBuffer : public DynamicResources
     {
     public:
+        // The ledger row — see Engine/Graphic/ResourceLedger.hpp and the note on VertexBuffer.
+        IndexBuffer() : m_Accounting( ResourceOwnership::Take( ResourceKind::IndexBuffer ) )
+        {
+        }
+
         virtual ~IndexBuffer() = default;
 
         /// Overwrite @p size bytes at @p offset. Refuses, having written nothing, when the buffer is not
         /// dynamic, when its memory is not mapped, or when the range does not fit. See
         /// VertexBuffer::SetData for why this answers instead of returning `void`.
         NO_DISCARD virtual Common::BoolResultStr SetData( void* data, uint32_t size, uint32_t offset = 0 ) = 0;
+
+        void ClaimOwnership( const ResourceOwner owner, const Common::AssetHandle asset = Common::AssetHandle{} )
+        {
+            m_Accounting.Claim( owner, asset );
+        }
+
+        /// What this buffer costs on the device. Recorded by whoever knows — the base cannot ask
+        /// GetSize() from its own constructor, the backend has not allocated yet at that point.
+        void RecordDeviceBytes( const std::size_t bytes )
+        {
+            m_Accounting.RecordBytes( bytes );
+        }
 
         virtual void Use( BindUsage use = BindUsage::Bind ) const    = 0;
         virtual void RT_Use( BindUsage use = BindUsage::Bind ) const = 0;
@@ -31,5 +49,8 @@ namespace Desert::Graphic
         static std::shared_ptr<IndexBuffer> Create( const void* data, uint32_t size,
                                                     BufferUsage usage = BufferUsage::Static );
         static std::shared_ptr<IndexBuffer> Create( uint32_t size, BufferUsage usage = BufferUsage::Dynamic );
+
+    private:
+        ResourceOwnership m_Accounting;
     };
 } // namespace Desert::Graphic

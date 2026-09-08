@@ -33,11 +33,25 @@ namespace Desert::Assets
         {
             m_Clip              = clip;
             m_SkeletonSignature = clip.SkeletonSignature;
+            m_HasClip           = true;
+            // NO FILE EVER PRODUCED THIS ONE, so nothing can produce it again. See
+            // AssetBase::IsReloadableFromFile.
+            m_FromMemory = true;
         }
 
+        // WAS A HARDCODED `return true`. That made the type both unloadable and un-re-loadable:
+        // `EnsureLoaded` short-circuits on it, so a shell created with `loadAfterCreate = false` — the
+        // documented path for procedural clips, two lines above — reported itself ready while holding an
+        // empty clip and an UNINITIALISED `m_SkeletonSignature`, which `GetSkeletonSignature()` then
+        // handed to the animation system.
         bool IsReadyForUse() const override
         {
-            return true;
+            return m_HasClip;
+        }
+
+        bool IsReloadableFromFile() const override
+        {
+            return !m_FromMemory;
         }
 
         static AssetTypeID GetTypeID()
@@ -47,7 +61,11 @@ namespace Desert::Assets
 
     private:
         Animation::AnimationClip m_Clip;
-        uint64_t                 m_SkeletonSignature;
+        // WAS UNINITIALISED. `GetSkeletonSignature()` on a shell that had not been loaded returned whatever
+        // was on the heap, and the animation system matches rigs on that number.
+        uint64_t m_SkeletonSignature = 0;
+        bool     m_HasClip           = false;
+        bool     m_FromMemory        = false;
     };
 
 } // namespace Desert::Assets
