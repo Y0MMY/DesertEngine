@@ -33,8 +33,7 @@ namespace Desert::Runtime
         {
             auto passShader                      = Graphic::Shader::Create( shaderAsset, {}, passName );
             m_PassShaders[passShader->GetName()] = passShader;
-            passShader->ClaimOwnership( Graphic::ResourceOwner::AssetService,
-                                        shaderAsset->GetMetadata().Handle );
+            passShader->ClaimOwnership( Graphic::ResourceOwner::AssetService, shaderAsset->GetMetadata().Handle );
         }
 
         return BOOLSUCCESS;

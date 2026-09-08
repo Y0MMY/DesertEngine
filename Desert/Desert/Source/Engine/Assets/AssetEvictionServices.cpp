@@ -133,5 +133,4 @@ namespace Desert::Assets
         }
     }
 
-
 } // namespace Desert::Assets

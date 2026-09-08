@@ -229,7 +229,7 @@ namespace Desert::Graphic
         /// allocator answers). Silently ignored on an unaccounted token.
         void RecordBytes( std::size_t bytes );
 
-        [[nodiscard]] ResourceOwner GetOwner() const;
+        [[nodiscard]] ResourceOwner       GetOwner() const;
         [[nodiscard]] Common::AssetHandle GetAsset() const;
 
     private:

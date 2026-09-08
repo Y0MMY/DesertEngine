@@ -149,8 +149,7 @@ TEST( AssetRootsCensus, EveryComponentFieldThatNamesAnAssetIsVisitedByTheRootWal
         for ( const std::string& field : unvisited )
             list += ( list.empty() ? "" : ", " ) + field;
         return list;
-    }()
-         << ". Add them to Desert/Desert/Source/Engine/Core/SceneAssetRoots.cpp.";
+    }() << ". Add them to Desert/Desert/Source/Engine/Core/SceneAssetRoots.cpp.";
 }
 
 TEST( AssetRootsCensus, TheHandleSpeltAsAPlainIntegerIsVisitedToo )
@@ -163,7 +162,7 @@ TEST( AssetRootsCensus, TheHandleSpeltAsAPlainIntegerIsVisitedToo )
     ASSERT_FALSE( root.empty() );
 
     const std::string components = ReadWholeFile( root + "Desert/Desert/Source/Engine/ECS/Components.hpp" );
-    const std::string walk = ReadWholeFile( root + "Desert/Desert/Source/Engine/Core/SceneAssetRoots.cpp" );
+    const std::string walk       = ReadWholeFile( root + "Desert/Desert/Source/Engine/Core/SceneAssetRoots.cpp" );
     ASSERT_FALSE( components.empty() );
     ASSERT_FALSE( walk.empty() );
 
@@ -185,7 +184,7 @@ TEST( AssetRootsCensus, TheSceneSettingsFieldThatNamesAnAssetIsVisitedToo )
     ASSERT_FALSE( root.empty() );
 
     const std::string settings = ReadWholeFile( root + "Desert/Desert/Source/Engine/Core/SceneSettings.hpp" );
-    const std::string walk = ReadWholeFile( root + "Desert/Desert/Source/Engine/Core/SceneAssetRoots.cpp" );
+    const std::string walk     = ReadWholeFile( root + "Desert/Desert/Source/Engine/Core/SceneAssetRoots.cpp" );
     ASSERT_FALSE( settings.empty() );
     ASSERT_FALSE( walk.empty() );
 
@@ -196,8 +195,7 @@ TEST( AssetRootsCensus, TheSceneSettingsFieldThatNamesAnAssetIsVisitedToo )
     for ( const std::string& field : declared )
     {
         EXPECT_NE( walk.find( field ), std::string::npos )
-             << "SceneSettings::" << field
-             << " names an asset and the eviction root walk never mentions it";
+             << "SceneSettings::" << field << " names an asset and the eviction root walk never mentions it";
     }
 }
 
@@ -238,6 +236,81 @@ TEST( AssetEvictionCensus, EveryAssetClassThatNamesAnotherAssetIsExpandedByTheTr
     {
         EXPECT_NE( expand.find( edge.Class ), std::string::npos )
              << "AssetEviction::Expand no longer follows " << edge.Class << ": " << edge.Why;
+    }
+}
+
+TEST( AssetUnloadCensus, EveryUnloadBodyEitherClearsItsReadinessOrRefuses )
+{
+    // THE CONTRACT OVER ALL THIRTEEN, INCLUDING THE ONE THE RUNTIME SUITE CANNOT LINK.
+    //
+    // Desert/Tests/Engine/AssetEviction constructs twelve of the thirteen and asserts the property
+    // directly, which is stronger. PrefabAsset is the thirteenth: its CreateFromEntity reaches ECS::Entity
+    // and the scene serializer, so linking it would drag the whole world layer into a suite whose point is
+    // to run without one. It is held here instead, and so is every other body, so that the SET is complete
+    // in one place - a fourteenth asset type is caught by this row list going stale rather than by
+    // somebody remembering.
+    //
+    // What is asserted is the shape, not the behaviour: a body must contain either an assignment that
+    // clears the type's readiness or a refusal that returns an error. Six of the thirteen used to be
+    // `return BOOLSUCCESS;` and nothing else, and the shape is exactly what distinguishes those.
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    struct Body
+    {
+        const char* File;
+        const char* Class;
+    };
+
+    constexpr Body kBodies[] = {
+         { "Desert/Desert/Source/Engine/Assets/TextureAsset.cpp", "TextureAsset" },
+         { "Desert/Desert/Source/Engine/Assets/Shader/ShaderAsset.cpp", "ShaderAsset" },
+         { "Desert/Desert/Source/Engine/Assets/Skybox/SkyboxAsset.cpp", "SkyboxAsset" },
+         { "Desert/Desert/Source/Engine/Assets/Prefab/PrefabAsset.cpp", "PrefabAsset" },
+         { "Desert/Desert/Source/Engine/Assets/Mesh/StaticMeshAsset.cpp", "StaticMeshAsset" },
+         { "Desert/Desert/Source/Engine/Assets/Mesh/SkinnedMeshAsset.cpp", "SkinnedMeshAsset" },
+         { "Desert/Desert/Source/Engine/Assets/Mesh/SkeletonAsset.cpp", "SkeletonAsset" },
+         { "Desert/Desert/Source/Engine/Assets/Mesh/AnimationAsset.cpp", "AnimationAsset" },
+         { "Desert/Desert/Source/Engine/Assets/Mesh/SurfaceMaterialAsset.cpp", "SurfaceMaterialAsset" },
+         { "Desert/Desert/Source/Engine/Assets/CloudNoiseVolumeAsset.cpp", "CloudNoiseVolumeAsset" },
+         { "Desert/Desert/Source/Engine/Assets/CloudTypeAsset.cpp", "CloudTypeAsset" },
+         { "Desert/Desert/Source/Engine/Assets/CloudModellingVolumeAsset.cpp", "CloudModellingVolumeAsset" },
+         { "Desert/Desert/Source/Engine/Assets/CloudLayoutAsset.cpp", "CloudLayoutAsset" },
+    };
+
+    // The number is the finding this task started from and is worth pinning: thirteen implementations,
+    // and until now zero callers.
+    static_assert( sizeof( kBodies ) / sizeof( kBodies[0] ) == 13,
+                   "the asset layer has gained or lost an Unload implementation; add it to this list" );
+
+    for ( const Body& body : kBodies )
+    {
+        const std::string source = ReadWholeFile( root + body.File );
+        ASSERT_FALSE( source.empty() ) << body.File << " could not be read";
+
+        const std::string signature = std::string( body.Class ) + "::Unload()";
+        const std::size_t at        = source.find( signature );
+        ASSERT_NE( at, std::string::npos ) << body.Class << " no longer implements Unload";
+
+        // From the signature to the closing brace of the function: the next line that is exactly four
+        // spaces and a brace, i.e. namespace-member indentation. Coarse, and sufficient - every body in
+        // this directory is formatted that way, and a miss makes the window LONGER, never shorter.
+        const std::size_t end = source.find( "\n    }", at );
+        ASSERT_NE( end, std::string::npos ) << body.Class << "::Unload has no recognisable end";
+        const std::string bodyText = source.substr( at, end - at );
+
+        const bool clearsReadiness =
+             bodyText.find( "= false" ) != std::string::npos || bodyText.find( ".reset()" ) != std::string::npos;
+        const bool refuses = bodyText.find( "MakeFormattedError" ) != std::string::npos ||
+                             bodyText.find( "MakeError" ) != std::string::npos;
+
+        EXPECT_TRUE( clearsReadiness || refuses )
+             << body.Class
+             << "::Unload neither clears the asset's readiness nor refuses. A body that returns success "
+                "while leaving IsReadyForUse() true empties the asset AND makes it unreloadable: "
+                "EnsureLoaded short-circuits on that flag, so every consumer downstream gets a valid "
+                "object holding nothing, for ever. Six of the thirteen were `return BOOLSUCCESS;` and "
+                "nothing else before this task.";
     }
 }
 

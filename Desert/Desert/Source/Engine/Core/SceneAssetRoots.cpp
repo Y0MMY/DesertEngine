@@ -105,12 +105,10 @@ namespace Desert::Core
             roots.Mark( registry.get<ECS::UIIconComponent>( entity ).Data.Icon, "a UI icon draws it" );
 
         for ( const auto entity : registry.view<ECS::UIImageComponent>() )
-            roots.Mark( registry.get<ECS::UIImageComponent>( entity ).Data.Sprite,
-                        "a UI image draws it" );
+            roots.Mark( registry.get<ECS::UIImageComponent>( entity ).Data.Sprite, "a UI image draws it" );
 
         for ( const auto entity : registry.view<ECS::UITextComponent2D>() )
-            roots.Mark( registry.get<ECS::UITextComponent2D>( entity ).Data.Font,
-                        "a UI label is set in it" );
+            roots.Mark( registry.get<ECS::UITextComponent2D>( entity ).Data.Font, "a UI label is set in it" );
 
         for ( const auto entity : registry.view<ECS::UIButtonComponent>() )
         {

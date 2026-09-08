@@ -159,7 +159,8 @@ namespace Desert::Graphic
         Rows().erase( row );
     }
 
-    void ResourceLedger::Attribute( const uint64_t row, const ResourceOwner owner, const Common::AssetHandle asset )
+    void ResourceLedger::Attribute( const uint64_t row, const ResourceOwner owner,
+                                    const Common::AssetHandle asset )
     {
         std::lock_guard<std::mutex> guard( Lock() );
         if ( const auto it = Rows().find( row ); it != Rows().end() )
@@ -229,8 +230,7 @@ namespace Desert::Graphic
             handles.push_back( row.Asset );
         }
 
-        std::sort( handles.begin(), handles.end(),
-                   []( const Common::AssetHandle& a, const Common::AssetHandle& b )
+        std::sort( handles.begin(), handles.end(), []( const Common::AssetHandle& a, const Common::AssetHandle& b )
                    { return static_cast<uint64_t>( a ) < static_cast<uint64_t>( b ); } );
         handles.erase( std::unique( handles.begin(), handles.end() ), handles.end() );
         return handles;

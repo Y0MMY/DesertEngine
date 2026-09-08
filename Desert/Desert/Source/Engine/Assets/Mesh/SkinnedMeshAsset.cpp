@@ -136,8 +136,8 @@ namespace Desert::Assets
         // is what callers ask before using the rig — an unloaded mesh answering both as if it were loaded
         // is the same contradiction between a readiness flag and a getter that the cloud type had. The
         // resolve re-runs on the next EnsureLoaded, which is written to be re-runnable.
-        m_SkeletonSignature   = 0U;
-        m_SkeletonDependency  = AssetDependency<SkeletonAsset>{};
+        m_SkeletonSignature  = 0U;
+        m_SkeletonDependency = AssetDependency<SkeletonAsset>{};
 
         // The flag is what EnsureLoaded asks before deciding to parse, so an emptied asset that still
         // reports "ready" is an asset nobody will ever reload — the same never-recovers shape as the

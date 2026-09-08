@@ -215,7 +215,7 @@ TEST( AssetEviction, AnInMemoryPayloadIsRefusedByNameRatherThanReleased )
     // is COUNTED and CARRIED, not swallowed.
     AssetManager manager;
 
-    const auto captured = Register( manager, "probe/captured.deprefab", true );
+    const auto captured  = Register( manager, "probe/captured.deprefab", true );
     captured->Reloadable = false;
 
     RecordingSink sink;
@@ -273,8 +273,9 @@ TEST( AssetEviction, EveryUnloadLeavesTheAssetNotReadyOrRefusesWithAReason )
     const auto check = []( const char* name, AssetBase& asset )
     {
         EXPECT_FALSE( asset.IsReadyForUse() )
-             << name << " reports itself ready as a freshly constructed shell that has never been loaded. "
-                        "EnsureLoaded short-circuits on that, so this asset can never be parsed at all.";
+             << name
+             << " reports itself ready as a freshly constructed shell that has never been loaded. "
+                "EnsureLoaded short-circuits on that, so this asset can never be parsed at all.";
 
         const auto unloaded = asset.Unload();
         if ( !unloaded )
@@ -284,8 +285,9 @@ TEST( AssetEviction, EveryUnloadLeavesTheAssetNotReadyOrRefusesWithAReason )
         }
 
         EXPECT_FALSE( asset.IsReadyForUse() )
-             << name << " reports itself READY after a successful Unload. The payload is gone and "
-                        "EnsureLoaded will never re-read it: the asset is emptied and unreloadable.";
+             << name
+             << " reports itself READY after a successful Unload. The payload is gone and "
+                "EnsureLoaded will never re-read it: the asset is emptied and unreloadable.";
     };
 
     StaticMeshAsset staticMesh( AssetPriority::Medium, path );
@@ -415,9 +417,8 @@ TEST( AssetEviction, AMaterialsTextureSurvivesBecauseTheMaterialNamesIt )
     RecordingSink sink;
     const auto    outcome = AssetEviction::Run( manager, roots, sink );
 
-    EXPECT_EQ( outcome.Reachable, 2u )
-         << "the material -> texture edge was not followed: the trace reached " << outcome.Reachable
-         << " asset(s) where the material alone names one more";
+    EXPECT_EQ( outcome.Reachable, 2u ) << "the material -> texture edge was not followed: the trace reached "
+                                       << outcome.Reachable << " asset(s) where the material alone names one more";
     EXPECT_FALSE( roots.Contains( texture->GetMetadata().Handle ) )
          << "the ROOT set was mutated; the closure must be a copy so the caller's roots stay its own";
 

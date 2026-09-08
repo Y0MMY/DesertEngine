@@ -166,8 +166,8 @@ namespace Desert::Animation
         // one; this field was the exception.
         uint64_t SkeletonSignature = 0;
 
-         std::vector<BoneTrack> Tracks; // it = bone index
-        //std::unordered_map<std::string, BoneTrack> Tracks;
+        std::vector<BoneTrack> Tracks; // it = bone index
+        // std::unordered_map<std::string, BoneTrack> Tracks;
 
         std::vector<AnimationNotify> Notifies; // sorted-by-time markers fired during playback
     };
