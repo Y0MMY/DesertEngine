@@ -4,7 +4,7 @@
 
 namespace Desert::Editor
 {
-    class TransformComponentWidget final : public ComponentWidget<ECS::TransformComponent>
+    class TransformComponentWidget final : public IComponentWidget
     {
     public:
         TransformComponentWidget();

@@ -23,7 +23,7 @@ namespace Desert::Editor
     namespace ImGui = ::ImGui;
 
     AnimationComponentWidget::AnimationComponentWidget( const Animation::AnimationLibrary* animationLibrary )
-         : ComponentWidget( "Animation" ), m_AnimationLibrary( animationLibrary )
+         : IComponentWidget( "Animation" ), m_AnimationLibrary( animationLibrary )
     {
     }
 

@@ -8,7 +8,7 @@
 
 namespace Desert::Editor
 {
-    class AnimationComponentWidget final : public ComponentWidget<ECS::AnimationComponent>
+    class AnimationComponentWidget final : public IComponentWidget
     {
     public:
         // No AssetManager. It used to be a constructor parameter and a `m_AssetManager` member, and the

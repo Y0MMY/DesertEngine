@@ -4,7 +4,7 @@
 
 namespace Desert::Editor
 {
-    class SkinnedMeshComponentWidget final : public ComponentWidget<ECS::SkinnedMeshComponent>
+    class SkinnedMeshComponentWidget final : public IComponentWidget
     {
     public:
         SkinnedMeshComponentWidget( const std::weak_ptr<Assets::AssetManager>& assetManager );

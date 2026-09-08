@@ -32,7 +32,7 @@ namespace Desert::Editor
 
     StaticMeshComponentWidget::StaticMeshComponentWidget( const Assets::AssetManager* assetManager,
                                                           const ComponentEditContext* ctx )
-         : ComponentWidget( "3D Model" ), m_AssetManager( assetManager ), m_Ctx( ctx )
+         : IComponentWidget( "3D Model" ), m_AssetManager( assetManager ), m_Ctx( ctx )
     {
     }
 

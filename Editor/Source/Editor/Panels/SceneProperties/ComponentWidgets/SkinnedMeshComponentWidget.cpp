@@ -102,7 +102,7 @@ namespace Desert::Editor
 
     SkinnedMeshComponentWidget::SkinnedMeshComponentWidget(
          const std::weak_ptr<Assets::AssetManager>& assetManager )
-         : ComponentWidget( "Skinned Mesh" ), m_AssetManager( assetManager )
+         : IComponentWidget( "Skinned Mesh" ), m_AssetManager( assetManager )
     {
     }
 

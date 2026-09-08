@@ -10,7 +10,7 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
-    TransformComponentWidget::TransformComponentWidget() : ComponentWidget( "Transform" )
+    TransformComponentWidget::TransformComponentWidget() : IComponentWidget( "Transform" )
     {
     }
 

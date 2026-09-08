@@ -4,7 +4,7 @@
 
 namespace Desert::Editor
 {
-    class SkyboxComponentWidget final : public ComponentWidget<ECS::SkyboxComponent>
+    class SkyboxComponentWidget final : public IComponentWidget
     {
     public:
         SkyboxComponentWidget( const std::weak_ptr<Assets::AssetManager>& assetManager );

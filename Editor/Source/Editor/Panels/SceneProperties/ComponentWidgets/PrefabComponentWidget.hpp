@@ -4,7 +4,7 @@
 
 namespace Desert::Editor
 {
-    class PrefabComponentWidget final : public ComponentWidget<ECS::TransformComponent>
+    class PrefabComponentWidget final : public IComponentWidget
     {
     public:
         explicit PrefabComponentWidget( const Assets::AssetManager* assetManager );

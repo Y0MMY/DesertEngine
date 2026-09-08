@@ -7,7 +7,7 @@
 
 namespace Desert::Editor
 {
-    class StaticMeshComponentWidget final : public ComponentWidget<ECS::StaticMeshComponent>
+    class StaticMeshComponentWidget final : public IComponentWidget
     {
     public:
         StaticMeshComponentWidget( const Assets::AssetManager* assetManager,

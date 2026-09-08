@@ -16,7 +16,7 @@ namespace Desert::Editor
     namespace ImGui = ::ImGui;
 
     PrefabComponentWidget::PrefabComponentWidget( const Assets::AssetManager* assetManager )
-         : ComponentWidget( "Prefab" ), m_AssetManager( assetManager )
+         : IComponentWidget( "Prefab" ), m_AssetManager( assetManager )
     {
     }
 

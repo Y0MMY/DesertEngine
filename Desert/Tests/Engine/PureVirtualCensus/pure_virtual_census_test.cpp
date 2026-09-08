@@ -577,19 +577,6 @@ namespace
            "OWNER DECIDES: same surface." },
 
          // ---- EDITOR INTERFACES WHOSE CALLER WAS NEVER WRITTEN ---------------------------------------
-         { "IComponentWidget", "EntityHasComponent",
-           "Editor/Source/Editor/Panels/SceneProperties/ComponentWidgets/IComponentWidget.hpp",
-           "UNASSIGNED, and the most useful row of the three: the CRTP ComponentWidget<T> implements all "
-           "three `override final` for every widget, and ScenePropertiesPanel still asks "
-           "`entity.HasComponent<T>()` in a hand-written if-chain per component type. The generic route "
-           "exists and is bypassed, so every new component type costs another branch. A task should "
-           "either route Details through it or delete it." },
-         { "IComponentWidget", "AddComponentToEntity",
-           "Editor/Source/Editor/Panels/SceneProperties/ComponentWidgets/IComponentWidget.hpp",
-           "UNASSIGNED: same interface." },
-         { "IComponentWidget", "RemoveComponentFromEntity",
-           "Editor/Source/Editor/Panels/SceneProperties/ComponentWidgets/IComponentWidget.hpp",
-           "UNASSIGNED: same interface." },
 
          // ---- MATERIAL PROPERTY METADATA -------------------------------------------------------------
          { "IProperty", "GetTypeTag", "Desert/Desert/Source/Engine/Graphic/Materials/Properties/TProperty.hpp",
@@ -750,7 +737,9 @@ TEST( PureVirtualCensus, NoAbstractBaseIsLeftWithoutASingleImplementation )
 
 TEST( PureVirtualCensus, TheNumberIsStatedSoAShrinkageIsVisible )
 {
-    // 22: Г12 also gave `Device::IsFormatSupported` its FIRST caller — SceneRenderer's float-render-target
+    // 19: the three IComponentWidget rows left with the CRTP layer that existed only to implement them —
+    // they were not a generic route somebody bypassed, they were SUPERSEDED by ComponentEditorEntry's own
+    // Has/Add/Remove lambdas, and one of the three had a COMMENTED-OUT body. It was 22 when Г12 also gave `Device::IsFormatSupported` its FIRST caller — SceneRenderer's float-render-target
     // gate, which had been reading a cached bool computed once at device init for ONE hardcoded format,
     // while the comment above it claimed to read the introspection layer. That row left by being
     // ANSWERED, like `AssetBase::Unload` before it, and the doc comment that said 'prefer this over
@@ -762,7 +751,7 @@ TEST( PureVirtualCensus, TheNumberIsStatedSoAShrinkageIsVisible )
     // that was a design question is allowed to leave. Up is a regression; down is welcome, and this
     // line moves with it. The count is quoted because a per-row diff never says "there are four more
     // of these now".
-    EXPECT_EQ( std::size( k_Census ), 22u )
+    EXPECT_EQ( std::size( k_Census ), 19u )
          << "the number of pure virtuals implemented by everybody and called by nobody has changed";
 }
 
