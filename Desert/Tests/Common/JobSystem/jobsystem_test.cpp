@@ -4,6 +4,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <numeric>
 #include <thread>
 #include <vector>
@@ -168,9 +170,23 @@ TEST( JobSystem, AParallelLoopInsideEveryWorkerStillFinishes )
     while ( finished.load() < static_cast<int>( workers ) && std::chrono::steady_clock::now() < deadline )
         std::this_thread::yield();
 
-    ASSERT_EQ( finished.load(), static_cast<int>( workers ) )
-         << "a parallel loop nested inside the pool did not finish within 60 s — the pool is deadlocked, "
-            "which is what ParallelRanges' claim-don't-deal design exists to make impossible";
+    // AND THE PROCESS IS ENDED WHERE IT STANDS, because a deadlocked pool cannot be failed politely.
+    // MEASURED, not feared: sabotaging ParallelRanges back to the old deal-then-wait shape made gtest
+    // print its FAILED summary at 60 s exactly as intended — and then the binary never exited, because
+    // ~JobSystem joins workers that will never wake. The sweep's `binary | grep -q FAILED` then waits for
+    // a process that is gone in every sense but the one `wait` cares about, and a sweep stuck on a test is
+    // worse than a red one: it reads as "still running" and nobody looks. So the verdict is printed in
+    // gtest's own wording, where the sweep greps for it, and the process is killed rather than unwound.
+    if ( finished.load() < static_cast<int>( workers ) )
+    {
+        std::printf( "%s\n%s\n",
+                     "a parallel loop nested inside the pool did not finish within 60 s — the pool is "
+                     "deadlocked, which is what ParallelRanges' claim-don't-deal design exists to make "
+                     "impossible",
+                     "[  FAILED  ] JobSystem.AParallelLoopInsideEveryWorkerStillFinishes (deadlocked)" );
+        std::fflush( stdout );
+        std::_Exit( 1 );
+    }
 
     const long expected = 1023L * 1024L / 2L * static_cast<long>( workers );
     EXPECT_EQ( total.load(), expected );
