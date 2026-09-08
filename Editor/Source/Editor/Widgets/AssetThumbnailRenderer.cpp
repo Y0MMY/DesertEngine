@@ -220,6 +220,27 @@ namespace Desert::Editor
         if ( m_Phase != 0 )
             return Common::MakeFormattedError( "a capture is already in flight; '{}' was not queued", outPng );
 
+        // NO "IS THIS MATERIAL REALLY THERE" CHECK, AND THAT IS A DECISION — do not "finish the job" by
+        // adding the mirror of RequestMesh's guard below. Reviewed and refused deliberately, teamlead
+        // 2026-09-08.
+        //
+        // The asymmetry is real: a mesh that is not built photographs an empty backdrop, which was measured
+        // in this tree. Nothing equivalent was ever observed for a material, and the test that LOOKS like
+        // the missing guard does not ask the same question. MaterialService::Get( handle, path, pass )
+        // needs a shader path and a render pass to answer at all, so calling it here would ask "can a
+        // runtime material be built for the default pass right now" — while the capture builds it for the
+        // preview scene's pass, later, in a different renderer. A material that answers no to the first
+        // question and yes to the second is a FALSE refusal, and a false refusal here is worse than the
+        // hole: it puts a working slot into the per-process failure set, permanently, with a message that
+        // reads authoritative.
+        //
+        // Asset eviction does not open this hole either (checked when A7 landed): eviction parks a runtime
+        // material in the graveyard and MaterialService::Get rebuilds it from the shell, so an evicted
+        // material is not an unregistered one.
+        //
+        // WHAT WOULD CHANGE THE ANSWER: a measured case of a material capture producing a wrong picture, or
+        // a service question that can be asked in the capture's own terms — not the availability of some
+        // check that compiles.
         m_PendingHandle      = materialHandle;
         m_PendingPng         = outPng;
         m_PendingIsMesh      = false;
