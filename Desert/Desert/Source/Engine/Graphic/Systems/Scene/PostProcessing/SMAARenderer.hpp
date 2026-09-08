@@ -9,7 +9,8 @@ namespace Desert::Graphic::System
 {
     // SMAA 1x post-process (3 passes: edge detection -> blend-weight calculation -> neighborhood
     // blending). Reads the tonemapped LDR image (m_TargetFramebuffer) and writes the anti-aliased result
-    // into its own framebuffer (GetSystemFramebuffer()). Runs only when SceneSettings.AA == SMAA. Uses the
+    // into its own framebuffer (GetSystemFramebuffer()). Runs only when this machine's post AA is SMAA
+    // (Common::Settings::MachineSettings::AA; it was SceneSettings::AA until К3). Uses the
     // precomputed AreaTex/SearchTex LUTs loaded from Resources/Textures/SMAA.
     class SMAARenderer final : public RenderSystem
     {

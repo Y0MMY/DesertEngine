@@ -311,13 +311,14 @@ namespace Desert::Graphic
             DESERT_VERIFY( false );
         tonemapSystem->SetAutoExposureImage( autoExposureSystem->GetAdaptedLuminanceImage() );
 
-        // FXAA consumes the tonemapped image (LDR). It only runs when SceneSettings.AA == FXAA.
+        // FXAA consumes the tonemapped image (LDR). It only runs when the machine's post AA is FXAA
+        // (Common::Settings::MachineSettings::AA — it left SceneSettings with К3).
         RegisterSystem<System::FXAARenderer>( "FXAASystem", this, tonemapSystem->GetSystemFramebuffer(),
                                               m_RenderGraphBuilder );
         if ( !SP_CAST( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Initialize() )
             DESERT_VERIFY( false );
 
-        // SMAA consumes the same tonemapped image. Runs only when SceneSettings.AA == SMAA.
+        // SMAA consumes the same tonemapped image. Runs only when the machine's post AA is SMAA.
         RegisterSystem<System::SMAARenderer>( "SMAASystem", this, tonemapSystem->GetSystemFramebuffer(),
                                               m_RenderGraphBuilder );
         if ( !SP_CAST( System::SMAARenderer, m_RenderSystems["SMAASystem"] )->Initialize() )
