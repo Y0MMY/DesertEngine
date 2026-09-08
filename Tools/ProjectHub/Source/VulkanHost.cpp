@@ -130,6 +130,21 @@ namespace Hub
         ImGui_ImplVulkanH_Window Swapchain;
         bool                     NeedsRebuild = false;
 
+        // WHICH FRAME'S FENCE STILL OWES EACH ACQUIRE SEMAPHORE, and this vector is a DEFECT REPAIR
+        // rather than bookkeeping. ImGui's helper gives the window ImageCount image-acquired
+        // semaphores and cycles through them, but nothing in it waits before REUSING one: with two
+        // swapchain images the semaphore handed to vkAcquireNextImageKHR still has the wait from two
+        // frames ago pending, which is VUID-vkAcquireNextImageKHR-semaphore-01779. Measured, not
+        // reasoned: the Khronos validation layer reported it ten times (its duplicate limit) in a
+        // 240-frame run, and the run looked perfect on screen — this is the class of defect that
+        // ships because a frame is not evidence about synchronisation.
+        //
+        // The fix is one wait in the right place: a semaphore may be reused once the submit that
+        // waited on it has completed, and the fence of the FRAME that submit belonged to is exactly
+        // that signal. Waiting on every frame fence instead would also be correct and would cost the
+        // pipelining — one frame in flight instead of two.
+        std::vector<VkFence> SemaphoreOwedBy;
+
         // What a thumbnail actually is on this backend. The ThumbnailCache only ever sees the
         // descriptor set (that IS ImTextureID for imgui_impl_vulkan), so the other three handles
         // have to be findable from it.
@@ -470,6 +485,7 @@ namespace Hub
                                                 framebufferHeight, kMinImageCount );
         if ( device->Swapchain.Swapchain == VK_NULL_HANDLE )
             return Common::MakeError<bool>( "the swapchain could not be created for this window's surface." );
+        device->SemaphoreOwedBy.assign( device->Swapchain.ImageCount, VK_NULL_HANDLE );
 
         // ---- ImGui ----------------------------------------------------------------------------
         ImGui_ImplVulkan_InitInfo init{};
@@ -522,6 +538,10 @@ namespace Hub
                                                     framebufferWidth, framebufferHeight, kMinImageCount );
             m_Device->Swapchain.FrameIndex = 0;
             m_Device->NeedsRebuild         = false;
+            // The helper destroyed and recreated every fence, so the handles recorded against the
+            // old ones are dangling. Waiting on a dangling fence is the defect this vector exists to
+            // prevent, spelled the other way round.
+            m_Device->SemaphoreOwedBy.assign( m_Device->Swapchain.ImageCount, VK_NULL_HANDLE );
         }
 
         ImGui_ImplVulkan_NewFrame();
@@ -544,6 +564,18 @@ namespace Hub
 
         VkSemaphore imageAcquired = window.FrameSemaphores[window.SemaphoreIndex].ImageAcquiredSemaphore;
         VkSemaphore renderDone    = window.FrameSemaphores[window.SemaphoreIndex].RenderCompleteSemaphore;
+
+        // BEFORE the acquire, never after: see Device::SemaphoreOwedBy. The fence is only waited on,
+        // not reset — the frame that owns it resets it below when its own turn comes round.
+        if ( const VkFence owed = m_Device->SemaphoreOwedBy[window.SemaphoreIndex]; owed != VK_NULL_HANDLE )
+        {
+            const VkResult owedWait = vkWaitForFences( m_Device->Handle, 1, &owed, VK_TRUE, UINT64_MAX );
+            if ( owedWait != VK_SUCCESS )
+            {
+                ReportCall( "vkWaitForFences (acquire semaphore still owed)", owedWait );
+                return;
+            }
+        }
 
         VkResult result = vkAcquireNextImageKHR( m_Device->Handle, window.Swapchain, UINT64_MAX, imageAcquired,
                                                  VK_NULL_HANDLE, &window.FrameIndex );
@@ -624,6 +656,9 @@ namespace Hub
             ReportCall( "vkQueueSubmit (frame)", result );
             return;
         }
+        // THIS submit is what still owes the acquire semaphore, and its fence is when the debt is
+        // paid. Recorded after the submit succeeded: a submit that never happened owes nothing.
+        m_Device->SemaphoreOwedBy[window.SemaphoreIndex] = frame.Fence;
 
         VkPresentInfoKHR present{};
         present.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
