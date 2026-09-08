@@ -128,11 +128,22 @@ namespace Desert::Migration
     //                   in this file not gated on its own number
     inline constexpr int kSceneVersionMachineQuality = 15;
 
+    //  16             - a script slot names its `.lua` with a ROOT-TAGGED KEY (`assets:Scripts/x.lua`)
+    //                   instead of the rooted path the editor happened to be standing in
+    //                   (`Resources/Assets/Scripts/x.lua`). The rooted spelling was the last content
+    //                   reference in a scene that did not survive packaging: a packaged game remaps the
+    //                   assets root to <package>/Assets/, so the stored string named a directory that
+    //                   does not exist there. Measured on a mounted archive by I8 - the stored spelling
+    //                   gave Exists=0, the same file through the scripts root gave Exists=1. The JSON
+    //                   field is renamed with the value, `Path` -> `ScriptKey`, because the value is no
+    //                   longer a path and a name that says otherwise is how it got used as one
+    inline constexpr int kSceneVersionScriptRoot = 16;
+
     // The last step this tool knows and the generation the engine requires are ONE number, and this is
     // where that is checked. If a schema step is ever added here without raising Core::kSceneVersion, the
     // tool would stamp files at a version the loader refuses - every scene in the repository would stop
     // opening at once, and the file that caused it would look correct in isolation.
-    static_assert( kSceneVersionMachineQuality == kSceneVersion,
+    static_assert( kSceneVersionScriptRoot == kSceneVersion,
                    "the last migration step and the engine's required scene version must be the same "
                    "generation - raise Core::kSceneVersion in Engine/Core/Serialize/SceneFormat.hpp" );
 
@@ -836,6 +847,57 @@ namespace Desert::Migration
     RetiredKeysMigrationReport MigrateRetiredKeys( std::optional<rfl::Generic>&     settings,
                                                    std::vector<Assets::EntityData>& entities );
 
+    // What MigrateScriptRootV15ToV16 did to one file.
+    struct ScriptRootMigrationReport
+    {
+        int Entities = 0; // entities carrying a "Script" payload that was touched
+        int Slots    = 0; // script slots re-spelled under the new key, the Empty ones below INCLUDED
+        int Empty    = 0; // of those, the ones that named no script - the key stays empty, not "assets:"
+
+        // Slots whose stored spelling names no place under a `Scripts/` folder, so the census has no
+        // root to measure it against. The value is carried across UNCHANGED under the new field name -
+        // which is exactly what it did before, since PathForStableKey hands an untagged string back as a
+        // path - and NAMED, because such a slot still does not resolve in a packaged game and a count
+        // alone would not say which entity to re-point (DC 1.4). No scene in this repository has one.
+        std::vector<std::string> UnrootedNames;
+    };
+
+    // Raises a scene from schema v15 to v16: a script slot stops naming its `.lua` by the path the editor
+    // was standing in and names it by the ROOT-TAGGED KEY every other content reference in the file
+    // already uses.
+    //
+    // WHAT IT REWRITES. Inside every entity's "Script" payload, each element of "Scripts" loses its
+    // `Path` key and gains `ScriptKey`. `Resources/Assets/Scripts/Examples/MoveAlongX.lua` becomes
+    // `assets:Scripts/Examples/MoveAlongX.lua`. The tag comes from Common::AssetHandle::AssetsTag(), so
+    // the migration cannot spell it differently from the runtime that reads it back.
+    //
+    // HOW IT FINDS THE ROOT, WITHOUT A FILESYSTEM AND WITHOUT AN assetsRoot PARAMETER. The v7 -> v8
+    // material step measures its paths against the root it is HANDED, and that works there because those
+    // paths were absolute and therefore contained the whole root sequence. These do not: the editor's
+    // working directory is `Editor/`, so a scene carries `Resources/Assets/Scripts/...` while the tool is
+    // run from the repository root and would be handed `Editor/Resources/Assets` - the sequence is simply
+    // not in the string, and matching against it would find nothing and report every slot as unrooted.
+    // So the root is derived from the STORED PATH instead, through
+    // Constants::Path::RootForContentPath(ContentDir::Script) - the census's own lexical inverse, which
+    // finds the last `Scripts/` component and hands back what precedes it. That is the same sentence
+    // SceneOutputRoot in the tool's main is: derive the root from the FILE, never from where the process
+    // is standing. It makes the answer identical for `Resources/Assets/Scripts/x.lua` and for
+    // `/Users/somebody/Proj/Editor/Resources/Assets/Scripts/x.lua`, which is what the editor and this
+    // tool respectively produce.
+    //
+    // A value the census cannot place - a `.lua` somewhere that is not a `Scripts/` folder - is carried
+    // over unchanged and NAMED. That is not a silent fallback: an untagged key is returned verbatim by
+    // PathForStableKey, so the slot keeps exactly the behaviour it had, and the report says which slot
+    // still has it.
+    //
+    // PURE - no GPU, no filesystem, no global state. AssetsTag() reads a table of string literals whose
+    // value cannot vary with the project root; RootForContentPath is lexical by construction and says so.
+    //
+    // Idempotent: a slot object with no `Path` key is left byte-identical and reports zero.
+    //
+    // SHELF LIFE: this raises v15 to v16 and nothing else. It is deleted once no v15 file remains.
+    ScriptRootMigrationReport MigrateScriptRootV15ToV16( std::vector<Assets::EntityData>& entities );
+
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
     {
@@ -873,6 +935,9 @@ namespace Desert::Migration
         // the schema was below kSceneVersionDebugView
         bool                     DebugViewRaised = false;
         DebugViewMigrationReport DebugView;
+        // the schema was below kSceneVersionScriptRoot
+        bool                      ScriptRootRaised = false;
+        ScriptRootMigrationReport ScriptRoot;
         // the schema was below kSceneVersionRetiredKeys
         bool                       RetiredKeysRaised = false;
         RetiredKeysMigrationReport RetiredKeys;
@@ -882,7 +947,7 @@ namespace Desert::Migration
             return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised || CloudSpeciesRaised ||
                    CloudTypeRaised || CloudSetRaised || TerrainMaterialRaised || MaterialPathRaised ||
                    GravityUnitsRaised || UIVisibilityRaised || SSRUnitsRaised || CloudMaterialRaised ||
-                   DebugViewRaised || RetiredKeysRaised;
+                   DebugViewRaised || ScriptRootRaised || RetiredKeysRaised;
         }
     };
 

@@ -390,6 +390,29 @@ namespace Desert::Migration
                 }
                 out << ")";
             }
+            if ( report.ScriptRootRaised )
+            {
+                // v15, not the previous PRINTED step (v13): 14 and 15 are rows of kRetiredKeys rather
+                // than steps of their own, so the last line above this one names 13 and a file arriving
+                // here is at 15. Printing the previous printed number would report a transition no file
+                // made — the same wrong-transition trap the retired-keys line below documents.
+                out << " scene v" << Desert::Migration::kSceneVersionMachineQuality << "->v"
+                    << Desert::Migration::kSceneVersionScriptRoot << " (";
+                if ( report.ScriptRoot.Slots > 0 )
+                    out << report.ScriptRoot.Slots << " script reference(s) root-tagged on "
+                        << report.ScriptRoot.Entities << " entity(ies), " << report.ScriptRoot.Empty
+                        << " of them an empty slot";
+                else if ( report.ScriptRoot.UnrootedNames.empty() )
+                    out << "stamp only - no entity named a script";
+                else
+                    out << "no reference could be root-tagged";
+                // Named, not counted, like every step above that can refuse a value: a reference the
+                // census could not place still does not resolve in a packaged game, and the operator has
+                // to see which entity to re-point.
+                for ( const auto& name : report.ScriptRoot.UnrootedNames )
+                    out << "; NOT under a Scripts/ folder, carried over untagged: " << name;
+                out << ")";
+            }
             if ( report.RetiredKeysRaised )
             {
                 // NOT a step's own pair of numbers, unlike every line above: the retirement pass is

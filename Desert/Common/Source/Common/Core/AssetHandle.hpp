@@ -85,6 +85,25 @@ namespace Common
             return roots;
         }
 
+        // The tag PROJECT CONTENT is keyed behind, read out of the table above instead of spelled a
+        // second time. It exists for callers that must compose a key WITHOUT touching the filesystem or
+        // the live project root: a scene migration is pure by contract (DC §4.4), so it cannot call
+        // StableKeyForPath — that one calls fs::absolute and compares against the roots as they stand
+        // right now — yet the key it writes has to be the key StableKeyForPath would have produced.
+        //
+        // The value is a compile-time string literal and cannot vary with the project root; only the
+        // ROW is looked up, and it is looked up by the assets root's own address so there is no second
+        // spelling of "assets" anywhere in the repository.
+        static std::string_view AssetsTag() noexcept
+        {
+            for ( const PathRoot& candidate : ContentRoots() )
+            {
+                if ( candidate.Root == &Constants::Path::ASSETS_PATH )
+                    return candidate.Tag;
+            }
+            return {};
+        }
+
         // Builds the stable key a path-derived handle is hashed from: the path RELATIVE to whichever
         // root contains it, behind that root's tag.
         //
