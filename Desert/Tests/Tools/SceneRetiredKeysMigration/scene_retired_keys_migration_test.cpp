@@ -258,18 +258,19 @@ TEST( SceneRetiredKeysMigration, ASceneWithNoSettingsBlockGetsTheCanonicalOne )
     EXPECT_FALSE( KeysOf( settings ).empty() );
 }
 
-// ── the head, and the relation ───────────────────────────────────────────────────────────────────
+// ── this step's own number, and the relation ─────────────────────────────────────────────────────
 
-// THE HEAD ASSERTION, which moved here from SceneDebugViewMigration because this is the newest step now.
-// It is the run-time half of the static_assert in SceneMigration.hpp: if a step is ever added without
-// raising Core::kSceneVersion the tool stamps files at a version the loader refuses, and every scene in
-// the repository stops opening at once while each file looks correct in isolation.
-TEST( SceneRetiredKeysMigration, ThisIsTheHeadStepAndItSitsAboveItsPredecessor )
+// THE STEP'S PLACE, which is all this suite can still say about the head. The HEAD assertion moved on to
+// Desert/Tests/Tools/SceneScriptRootMigration when I9 raised Core::kSceneVersion to 16 — it travels with
+// the newest step, which is the only suite that can hold it without going red the day the next one lands.
+// What stays here is this step's own generation and its place above its predecessor: those are facts
+// about the machine-quality retirement and they do not move.
+TEST( SceneRetiredKeysMigration, ThisStepSitsAboveItsPredecessor )
 {
     EXPECT_EQ( 15, Migration::kSceneVersionMachineQuality );
     EXPECT_GT( Migration::kSceneVersionMachineQuality, Migration::kSceneVersionRetiredKeys );
-    EXPECT_EQ( Migration::kSceneVersionMachineQuality, Core::kSceneVersion )
-         << "a newer step exists; move this assertion to that suite the way this one moved here";
+    EXPECT_LE( Migration::kSceneVersionMachineQuality, Core::kSceneVersion )
+         << "a step cannot sit above the head the loader requires";
 }
 
 // THE RELATION, and it is why this suite is worth more than its assertions: a row of kRetiredKeys names a
