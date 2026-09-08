@@ -30,6 +30,18 @@ namespace Desert::Graphic
             MarkClean();
         }
 
+        /// Point this sampler at @p texture, or at NOTHING when it is null.
+        ///
+        /// WHY THIS ACCEPTS A NULL AND `Texture2DProperty::SetImage` REFUSES ONE. The two are not
+        /// inconsistent; they answer different questions, and the difference is worth stating because the
+        /// next reader will otherwise "fix" one of them.
+        ///
+        /// A 2D slot is a MATERIAL PARAMETER a person authored: `u_AlbedoTexture` empty means "the shader's
+        /// own default for this slot", which only the shader schema knows, so М9 made clearing go through
+        /// `Material::BindSchemaDefaultTexture` and made a raw null a loud refusal. There is no such
+        /// authored default for a `samplerCube`: every cube binding in this engine is PER-FRAME SCENE
+        /// STATE — the baked environment — and the question a null asks is "what does a scene with no sky
+        /// look like", which the backend already answers with the fallback cube it seeds the binding with.
         void SetTexture( const ImageCube* texture )
         {
             m_Texture = texture;
