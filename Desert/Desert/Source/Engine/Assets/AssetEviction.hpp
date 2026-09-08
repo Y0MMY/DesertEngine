@@ -36,9 +36,10 @@ namespace Desert::Assets
      *   * A TIMER has the same defect with a different clock, and adds one of its own: it fires while the
      *     user is working, so an asset can be released between the frame that showed it and the click
      *     that edits it.
-     *   * MANUALLY is not a policy. It is offered as well (see Run), because a person profiling a level
-     *     needs to be able to ask — but a feature that only works when somebody remembers it is not a fix
-     *     for a leak.
+     *   * MANUALLY is not a policy. It is offered as well — the editor's command palette carries "Action /
+     *     Release unused assets", which raises the same request the scene change does — because a person
+     *     profiling a level needs to be able to ask without changing scene. But a feature that only works
+     *     when somebody remembers it is not a fix for a leak, which is why it is not the trigger.
      *   * A SCENE CHANGE is when the answer actually changes. It is the only moment at which the set of
      *     needed assets is different from what it was, it is already a moment the user waits through, the
      *     device is already idled there (SceneRenderer::RebindScene), and it is precisely the transition
@@ -229,8 +230,6 @@ namespace Desert::Assets
         /// which are ABOVE this layer, so the asset layer must be handed them rather than fetch them.
         static void RunIfDue( const std::function<AssetRootSet()>& collectRoots );
 
-        /// Was a sweep requested and not yet run? For tests, which drive Request and RunIfDue directly.
-        [[nodiscard]] static bool IsDue();
     };
 
 } // namespace Desert::Assets

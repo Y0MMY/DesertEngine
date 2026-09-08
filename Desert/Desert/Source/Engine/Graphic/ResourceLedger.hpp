@@ -81,7 +81,7 @@ namespace Desert::Graphic
         Material,
 
         // NOT a kind: the number of them. A new kind is added ABOVE this line and turns
-        // Desert/Tests/Engine/ResourceLedger red until it is named in ResourceKindName.
+        // Desert/Tests/Engine/AssetEviction red until it is named in ResourceKindName.
         Count,
     };
 
@@ -312,13 +312,12 @@ namespace Desert::Graphic
         /// log and for the control channel; the numbers are the same object as `Take()`.
         [[nodiscard]] static std::string Report();
 
-        /// Asset handles the ledger currently has an `AssetService` row for. Asset eviction's INPUT: the
-        /// set it is allowed to consider, which is by construction the set that can be rebuilt from a file.
-        [[nodiscard]] static std::vector<Common::AssetHandle> AssetBackedHandles();
-
-        /// How many live rows name @p asset. Zero for an asset whose GPU objects have been released — and
-        /// that is how a test tells eviction happened from outside the services.
-        [[nodiscard]] static uint32_t RowsFor( Common::AssetHandle asset );
+        // TWO MORE QUERIES WERE DRAFTED HERE AND ARE GONE: `AssetBackedHandles()`, which would have given
+        // eviction its candidate set, and `RowsFor( handle )`. Neither ever had a caller — the sweep walks
+        // the REGISTRY, which is the authority on what assets exist, and the ledger is the authority on
+        // what is on the device; asking the ledger which assets to consider would have been the second
+        // source of truth for a question that already has one. Written down rather than silently absent
+        // because "the ledger cannot list an asset's rows" is a reasonable thing to expect of it.
 
     private:
         friend class ResourceOwnership;

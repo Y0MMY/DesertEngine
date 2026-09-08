@@ -1,6 +1,5 @@
 #include <Engine/Graphic/ResourceLedger.hpp>
 
-#include <algorithm>
 #include <mutex>
 #include <unordered_map>
 
@@ -214,39 +213,6 @@ namespace Desert::Graphic
             }
         }
         return census;
-    }
-
-    std::vector<Common::AssetHandle> ResourceLedger::AssetBackedHandles()
-    {
-        std::lock_guard<std::mutex> guard( Lock() );
-
-        std::vector<Common::AssetHandle> handles;
-        for ( const auto& [id, row] : Rows() )
-        {
-            if ( row.Owner != ResourceOwner::AssetService )
-                continue;
-            if ( static_cast<uint64_t>( row.Asset ) == 0 )
-                continue;
-            handles.push_back( row.Asset );
-        }
-
-        std::sort( handles.begin(), handles.end(), []( const Common::AssetHandle& a, const Common::AssetHandle& b )
-                   { return static_cast<uint64_t>( a ) < static_cast<uint64_t>( b ); } );
-        handles.erase( std::unique( handles.begin(), handles.end() ), handles.end() );
-        return handles;
-    }
-
-    uint32_t ResourceLedger::RowsFor( const Common::AssetHandle asset )
-    {
-        std::lock_guard<std::mutex> guard( Lock() );
-
-        uint32_t count = 0;
-        for ( const auto& [id, row] : Rows() )
-        {
-            if ( static_cast<uint64_t>( row.Asset ) == static_cast<uint64_t>( asset ) )
-                ++count;
-        }
-        return count;
     }
 
     std::string ResourceLedger::Report()

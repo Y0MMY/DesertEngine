@@ -90,11 +90,6 @@ namespace Desert::Assets
         FramesUntilSweep() = kQuietFramesBeforeSweep;
     }
 
-    bool AssetEvictionSchedule::IsDue()
-    {
-        return FramesUntilSweep() > 0;
-    }
-
     void AssetEvictionSchedule::RunIfDue( const std::function<AssetRootSet()>& collectRoots )
     {
         if ( FramesUntilSweep() == 0 )
