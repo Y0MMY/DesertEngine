@@ -446,6 +446,84 @@ TEST( CornellSymmetry, TheTwoSideWallsDifferInColourAndInNothingElse )
          << "the two side walls of the Cornell box have different roughness";
 }
 
+// A MEASURED REFUSAL, kept as an assertion so that it cannot rot into a stale comment.
+//
+// CB_OrangeCube renders black in the acceptance frame, and that was reported alongside the wall as a
+// second defect. It is not one: the cube sits at z = -120 with a half extent of 70 (scale 1.4 on a
+// 100-unit primitive), so its front face is at z = -50 with a normal of +Z, while BOTH of the scene's
+// lights are behind it.
+//
+//   point light  CB_BackLight at (0, 250, -250):  L = normalize(0, 120, -200), N.L = -0.858
+//   sun          CB_Sun travelling normalize(0.6, -1, 0.2): L = -that, N.L = -0.169
+//
+// `EvaluateDirectLight` returns exactly vec3(0) at a non-positive cosine, so the front face receives no
+// analytic light at all and shows only the ambient floor times its albedo. The cube's TOP face (normal
+// +Y) has N.L = +0.359 against the point light and +0.845 against the sun, which is precisely why the
+// two top corners that clear the glass sphere are the only orange in the frame.
+//
+// Verified rather than argued: a throwaway variant that moves the SAME point light from z = -250 to
+// z = +250 and changes nothing else renders the cube's front face bright orange.
+//
+// So there is nothing to fix here, and this test is the deliverable — it pins the geometry the
+// explanation rests on. If a future edit moves the cube or a light, this goes red and the explanation
+// above stops being quoted at a scene it no longer describes.
+TEST( CornellSymmetry, TheOrangeCubesFrontFaceIsTurnedAwayFromBothLights )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+    const std::string scenePath = root + "Editor/Resources/Assets/Scenes/CornellDemo.desce";
+    const auto        scene     = ParseObject( ReadAll( scenePath ), scenePath );
+
+    const Entity cube = EntityByTag( scene, "CB_OrangeCube" );
+    ASSERT_GT( cube.Scale.z, 0.0f );
+
+    const glm::vec3 frontFace = cube.Translation + glm::vec3( 0.0f, 0.0f, kCubeHalfExtent * cube.Scale.z );
+    const glm::vec3 frontNormal{ 0.0f, 0.0f, 1.0f };
+    const glm::vec3 topFace    = cube.Translation + glm::vec3( 0.0f, kCubeHalfExtent * cube.Scale.y, 0.0f );
+    const glm::vec3 topNormal{ 0.0f, 1.0f, 0.0f };
+
+    const PointLightPayload light = LoadPointLight( scene, "CB_BackLight" );
+    // The sun's direction is its TRANSLATION, normalized (Engine/Core/Scene.cpp) — not its rotation,
+    // which nothing reads. It is the direction the light TRAVELS, so the direction toward it is minus it.
+    const glm::vec3 towardSun = -glm::normalize( EntityByTag( scene, "CB_Sun" ).Translation );
+
+    EXPECT_LE( glm::dot( frontNormal, glm::normalize( light.Position - frontFace ) ), 0.0f )
+         << "the point light is no longer behind the orange cube";
+    EXPECT_LE( glm::dot( frontNormal, towardSun ), 0.0f ) << "the sun is no longer behind the orange cube";
+
+    EXPECT_GT( glm::dot( topNormal, glm::normalize( light.Position - topFace ) ), 0.0f );
+    EXPECT_GT( glm::dot( topNormal, towardSun ), 0.0f );
+
+    // And the cube's material is not a second instance of the wall's defect: it is an ordinary
+    // dielectric, so "black" here is about where the light is and not about what the surface is.
+    const Material orange = LoadMaterial( root, MaterialPathOf( cube ) );
+    EXPECT_NEAR( orange.Metallic, 0.0f, 1e-5f );
+}
+
+// The scene's OTHER light is deliberately not symmetric, and that is worth pinning too — otherwise the
+// next reader measures the two walls, finds them unequal even after the fix, and reopens a closed
+// question. CB_Sun travels normalize(0.6, -1, 0.2): it reaches the right wall's inner face at
+// N.L = +0.507 and misses the left wall's entirely at -0.507. Measured contribution to the frame:
+// deleting CB_Sun takes the right wall from 0.563 to 0.503 mean sRGB luminance and leaves the left wall
+// where it is.
+TEST( CornellSymmetry, TheSunIsOffAxisOnPurposeAndOnlyReachesOneWall )
+{
+    const Fixture fixture = LoadFixture();
+
+    const std::string root  = RepoRoot();
+    const std::string path  = root + "Editor/Resources/Assets/Scenes/CornellDemo.desce";
+    const auto        scene = ParseObject( ReadAll( path ), path );
+
+    const glm::vec3 towardSun = -glm::normalize( EntityByTag( scene, "CB_Sun" ).Translation );
+
+    const float onLeft  = glm::dot( fixture.LeftNormal, towardSun );
+    const float onRight = glm::dot( fixture.RightNormal, towardSun );
+
+    EXPECT_LT( onLeft, 0.0f );
+    EXPECT_GT( onRight, 0.0f );
+    EXPECT_NEAR( onLeft, -onRight, 1e-5f ) << "the two walls face opposite ways; the cosines must too";
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );
