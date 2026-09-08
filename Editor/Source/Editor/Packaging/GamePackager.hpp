@@ -60,12 +60,19 @@ namespace Desert::Editor
     // the last step before the game reaches a player: everything that did not make it is discovered by
     // whoever RUNS the game, not by whoever built it.
     //
-    // WHY `Success` IS NOT REDEFINED TO MEAN "everything cooked". Because that answer is not available:
-    // this repository deliberately ships a broken shader (Resources/Shaders/Programs/Graph/MatBroken.shader)
-    // so that the engine's own "registered but has no compiled stages" refusal is a reachable, tested
-    // path. A packager that refused over a compile failure could not package this project at all. A
-    // project may legitimately ship content that is already broken, and the runtime reports that content
-    // for itself; the packager's job is to say what it shipped, not to decide the project is invalid.
+    // WHY `Success` IS NOT REDEFINED TO MEAN "everything cooked". Because a project may legitimately ship
+    // content that is already broken — an unbakeable font, a mesh that will not import, a shader a
+    // material still names — and the runtime reports that content for itself. The packager's job is to
+    // say what it shipped, not to decide the project is invalid; a packager that refused over a compile
+    // failure would be unable to package such a project at all, and the person who has to fix the asset
+    // would lose the build they were about to test it in.
+    //
+    // (This paragraph used to rest its case on ONE example, `Resources/Shaders/Programs/Graph/
+    // MatBroken.shader`, which this repository shipped on purpose. Г20 moved that fixture into
+    // Desert/Tests/Engine/ShaderCacheKey/Fixtures — it was compiled at every editor start and printed
+    // two errors into every clean log, which is a cost the argument never needed. The argument is about
+    // what a PROJECT is allowed to contain, not about what this one happens to contain, and the tests
+    // below still exercise it with a corrupt `.ttf`.)
     //
     // SO THE ANSWER IS STRUCTURED INSTEAD. `Success` keeps its one meaning — a package exists — and what
     // the cook could not put into it comes back as NUMBERS a caller can branch on, with `Complete()` as

@@ -1567,22 +1567,18 @@ TEST_F( ShaderRootFixture, NoShippedShaderClaimsOneDescriptorSlotTwice )
                                    << " shipped shaders under Resources/Shaders — the walk found"
                                       " nothing to examine, so a green result would mean nothing";
 
-    // The ONE shipped shader that is not meant to compile: MatBroken.shader is generated from
-    // Assets/ShaderGraphs/MatBroken.dgraph, a deliberately mistyped graph kept so the editor's handling
-    // of a bad graph has something real to fail on (it assigns a vec2 to a vec4 at line 25). It is named
-    // rather than detected, and its presence is asserted, so that a day when it compiles — or when it is
-    // deleted — is a red test rather than a silently shrinking census.
-    const std::filesystem::path kDeliberatelyBroken = "Resources/Shaders/Programs/Graph/MatBroken.shader";
-    ASSERT_TRUE( std::filesystem::exists( kDeliberatelyBroken ) )
-         << kDeliberatelyBroken.string() << " is gone; drop this exception instead of carrying it";
-
+    // THERE IS NO EXCEPTION ANY MORE (Г20). This census used to skip one file —
+    // Resources/Shaders/Programs/Graph/MatBroken.shader, a shader deliberately kept broken — and skipping
+    // it was the smaller half of the cost: `AssetPreloader` compiles every `.shader` under this same root
+    // at every editor start, so that fixture printed two errors into every clean log, for ever. An error
+    // that is always present distinguishes nothing, and a genuinely broken shader was indistinguishable
+    // from it. The fixture now lives in this suite's own Fixtures/ directory, where a TEST reaches it and
+    // nobody else does, and the shipped tree is a tree in which EVERY file is meant to compile — which is
+    // a stronger claim than this loop could make while it carried a name to skip.
     int passesChecked = 0;
 
     for ( const auto& file : files )
     {
-        if ( file == kDeliberatelyBroken )
-            continue;
-
         const auto parsed = Desert::Core::Preprocess::DShaderParser::Parse( ReadFile( file ) );
         ASSERT_TRUE( parsed.IsSuccess() ) << file.string() << ": " << parsed.GetError();
 
@@ -1613,7 +1609,61 @@ TEST_F( ShaderRootFixture, NoShippedShaderClaimsOneDescriptorSlotTwice )
                 checkPass( pass.Name, pass.Stages );
     }
 
-    EXPECT_GE( passesChecked, (int)files.size() - 1 );
+    // One pass minimum per file, and no `- 1` for a skipped one any more.
+    EXPECT_GE( passesChecked, (int)files.size() );
+}
+
+// ─── The broken-shader fixture is still broken ────────────────────────────────────────────────────
+//
+// Г20. The repository keeps ONE shader that is meant not to compile, because two engine refusals are
+// only reachable when such a shader exists: `ShaderService::Register`'s "registered but has no compiled
+// stages" (which keeps a failed shader's NAME so a material does not silently fall back to the standard
+// one) and the sentence `MaterialEditorPanel::PreviewUnavailableReason` writes for that state.
+//
+// WHAT THIS REPLACES, and the difference is the whole task. The census above used to name the fixture
+// and SKIP it, asserting only that the file existed — a test satisfied by the presence of a file, which
+// stays green if somebody repairs the shader and green if the shader never meant anything. Meanwhile the
+// fixture sat in the shipped shader tree, so `AssetPreloader` compiled it at every editor start and put
+// two errors in every clean log (measured on Desert_Sandbox: exactly two, both this file). The fixture
+// is now reached HERE and only here, and it is reached by being COMPILED: repair it and this goes red.
+TEST_F( ShaderRootFixture, TheBrokenShaderFixtureStillDoesNotCompile )
+{
+    const std::filesystem::path fixture =
+         s_RepoRoot / "Desert" / "Tests" / "Engine" / "ShaderCacheKey" / "Fixtures" / "MatBroken.shader";
+    ASSERT_TRUE( std::filesystem::exists( fixture ) )
+         << fixture.string()
+         << " is gone. Deleting it does not remove the engine states it stands for - it removes the only "
+            "thing that reaches them.";
+
+    // It has to be a well-formed DSL document: the failure being asserted is a GLSL type error, and a
+    // fixture that failed to parse would exercise a different refusal while looking like this one.
+    const auto parsed = Desert::Core::Preprocess::DShaderParser::Parse( ReadFile( fixture ) );
+    ASSERT_TRUE( parsed.IsSuccess() ) << fixture.string() << ": " << parsed.GetError();
+    const auto stage = parsed.GetValue().Stages.find( ShaderStage::Fragment );
+    ASSERT_NE( stage, parsed.GetValue().Stages.end() ) << "the fixture declares no fragment stage";
+
+    // Compiled the way the engine compiles, not the way this suite usually does: `CompileStage` EXPECTs
+    // success, which is exactly wrong here.
+    shaderc::Compiler       compiler;
+    shaderc::CompileOptions options;
+    options.SetIncluder( std::make_unique<Includer>() );
+    options.SetTargetEnvironment( shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1 );
+    options.SetWarningsAsErrors();
+
+    const auto result =
+         compiler.CompileGlslToSpv( stage->second, shaderc_fragment_shader, fixture.string().c_str(), options );
+    EXPECT_NE( result.GetCompilationStatus(), shaderc_compilation_status_success )
+         << "the fixture COMPILES. Whoever repaired it also removed the only shader in this repository "
+            "that reaches ShaderService's \"registered but has no compiled stages\" refusal and the "
+            "Material Editor's message for it. Break it again, or delete both this test and the fixture "
+            "and say which refusal is now unreachable.";
+
+    // ...and it fails for the reason it is kept for. Any old error would pass the assertion above — a
+    // typo in an include, a renamed header — and then the fixture would still be "broken" while standing
+    // for nothing.
+    EXPECT_NE( std::string( result.GetErrorMessage() ).find( "cannot convert" ), std::string::npos )
+         << "the fixture no longer fails on the vec2 -> vec4 assignment it is kept for:\n"
+         << result.GetErrorMessage();
 }
 
 int main( int argc, char** argv )

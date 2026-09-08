@@ -507,8 +507,11 @@ TEST( PackagedContent, AnAssetTheCookCannotBakeMakesThePackageIncompleteAndSaysH
     const auto result = Desert::Editor::BuildContentPak();
 
     // A PACKAGE STILL EXISTS, and that is deliberate rather than a compromise: a project may ship content
-    // that is already broken — this repository does, on purpose, so the engine's own refusal path stays
-    // reachable — and the packager's job is to say what it shipped, not to declare the project invalid.
+    // that is already broken, and the packager's job is to say what it shipped, not to declare the
+    // project invalid. (This used to add "this repository does, on purpose" and point at a broken shader
+    // in Editor/Resources/Shaders. Г20 moved that fixture into a test tree — it was compiled at every
+    // editor start — so the claim is no longer true of this repository and the fixture above, a `.ttf`
+    // this suite writes itself, is what the argument now rests on.)
     EXPECT_TRUE( result.Success ) << result.Message;
 
     // ...but it is NOT complete, and it says how many, in a number rather than in prose.
