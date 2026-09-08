@@ -167,20 +167,29 @@ namespace Desert::Graphic
     }
 
     /// The IBL inputs of Mesh/AmbientIBL.glslh: the diffuse irradiance and prefiltered specular cubes and
-    /// the split-sum BRDF LUT. Each is bound only when it exists, so a scene with no baked environment
-    /// keeps the descriptor's dummy cube rather than an undefined one.
+    /// the split-sum BRDF LUT.
+    ///
+    /// THE TWO CUBES ARE SET EVERY CALL, null included — that is the relation this function exists to
+    /// keep: **the environment a surface is shaded by belongs to the scene that surface is in**. The
+    /// comment that used to stand here claimed a null "keeps the descriptor's dummy cube"; it kept the
+    /// PREVIOUS SCENE's cube, because a slot that is not written is a slot that remembers, and this
+    /// applier is called from a producer that restates absence every frame precisely so that it need not.
+    /// Measured before the fix, CornellDemo (which has no sky at all) after one visit to Clouds_Protocol:
+    /// every pixel changed, mean 0.477 -> 0.794, green-wall saturation 0.626 -> 0.313.
+    ///
+    /// The BRDF LUT keeps its guard, and the asymmetry is deliberate: it is a renderer-global built once
+    /// by Renderer::Init and never released, so it is never legitimately absent — a null here is a
+    /// startup-order fault, and overwriting a good LUT with the fallback would hide it.
     inline void SceneEnvironmentBind( Material* material, ImageCube* irradiance, ImageCube* prefiltered,
                                       Image2D* brdfLut )
     {
         if ( !material )
             return;
 
-        if ( irradiance )
-            if ( auto* tex = material->Get<TextureCubeProperty>( MaterialPBRBase::kEnvIrradianceName ) )
-                tex->SetTexture( irradiance );
-        if ( prefiltered )
-            if ( auto* tex = material->Get<TextureCubeProperty>( MaterialPBRBase::kEnvSpecularName ) )
-                tex->SetTexture( prefiltered );
+        if ( auto* tex = material->Get<TextureCubeProperty>( MaterialPBRBase::kEnvIrradianceName ) )
+            tex->SetTexture( irradiance );
+        if ( auto* tex = material->Get<TextureCubeProperty>( MaterialPBRBase::kEnvSpecularName ) )
+            tex->SetTexture( prefiltered );
         if ( brdfLut )
             if ( auto* tex = material->Get<Texture2DProperty>( MaterialPBRBase::kBrdfLutName ) )
                 tex->SetImage( brdfLut );

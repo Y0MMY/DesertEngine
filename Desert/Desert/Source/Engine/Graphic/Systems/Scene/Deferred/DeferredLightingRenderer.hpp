@@ -104,9 +104,10 @@ namespace Desert::Graphic::System
 
             if ( !complete )
                 LOG_ERROR( "DeferredLighting: no baked environment to shade the ambient with — irradiance "
-                           "cube {}, prefiltered cube {}, BRDF LUT {}. Static opaque geometry will be lit "
-                           "by the descriptor fallback, and will not match the forward-drawn skinned, "
-                           "custom-shader and glass meshes in the same frame.",
+                           "cube {}, prefiltered cube {}, BRDF LUT {}. Every missing one is bound to the "
+                           "engine's EMPTY environment (a black cube), so static opaque geometry gets no "
+                           "ambient at all — a deterministic wrong answer rather than the previous scene's "
+                           "sky, which is what it used to get (Г14).",
                            environment.Irradiance ? "present" : "MISSING",
                            environment.Prefiltered ? "present" : "MISSING",
                            environment.BrdfLut ? "present" : "MISSING" );

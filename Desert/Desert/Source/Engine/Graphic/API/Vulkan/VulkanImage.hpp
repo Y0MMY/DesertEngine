@@ -216,6 +216,16 @@ namespace Desert::Graphic::API::Vulkan
         // --- Vulkan Specific ---
         NO_DISCARD Common::BoolResultStr RT_Invalidate();
 
+        /// Writes one colour into every texel of every face and mip, immediately.
+        ///
+        /// WHY A CUBE NEEDS THIS AND A 2D DOES NOT. `UploadData` is a no-op for cubes, so the pixels a
+        /// caller puts in `ImageCubeSpecification::Data` never reach the device and a freshly created cube
+        /// holds whatever the allocator handed out. That is tolerable for a cube a compute pass is about
+        /// to fill, and it is NOT tolerable for the one cube whose CONTENT is a statement — the fallback a
+        /// binding points at when the scene has no environment (Г14). A statement made out of undefined
+        /// memory is not a statement.
+        NO_DISCARD Common::BoolResultStr RT_ClearToColor( float r, float g, float b, float a );
+
     private:
         Common::BoolResultStr CreateResource();
         void UploadData( VkCommandBuffer cmdBuffer, VkBuffer stagingBuffer );

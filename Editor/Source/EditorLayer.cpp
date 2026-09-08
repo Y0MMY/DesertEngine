@@ -3018,6 +3018,16 @@ namespace Desert::Editor
                                   [path] { Editor::Core::SceneOpenRequest::Request( path ); } } );
         }
 
+        // A SECOND LIVE SCENE, for the same reason the levels above are here: the channel's vocabulary IS
+        // this list, and "New Scene View" was reachable only from Window -> Viewports. That made the one
+        // configuration where a renderer can bleed into another renderer — two SceneRenderers recording in
+        // one frame against the same shared materials — the one configuration nothing could verify
+        // unattended. Г14 needed exactly that check.
+        //
+        // Sets the same deferred flag the menu item does rather than calling AddSceneView(): it allocates a
+        // renderer slot and GPU resources, which must not happen inside the ImGui pass.
+        commands.push_back( { "Scene", "New Scene View", [this] { m_AddSceneViewRequested = true; } } );
+
         // NAMED VIEWPOINTS for the focused document's preview — the replacement for `--preview-orbit
         // yaw,pitch`, whose continuous angle pair a palette entry has nowhere to carry. See
         // Editor/Core/PreviewViewpoints.hpp for why names are MORE reproducible than numbers, not less.

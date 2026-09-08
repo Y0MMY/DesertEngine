@@ -104,18 +104,24 @@ namespace Desert::Graphic
             if ( m_GI && giImage )
                 m_GI->SetImage( giImage.get() );
 
-            // The baked sky. Bound all-or-nothing, matching Graphic::SceneEnvironmentBind's shape so
-            // the two paths cannot end up sampling different generations of the same bake. Incomplete is
-            // reported by the caller (DeferredLightingRenderer) — it is a bake failure, not a mode.
-            if ( environment.IsComplete() )
-            {
-                if ( m_EnvIrradiance )
-                    m_EnvIrradiance->SetTexture( environment.Irradiance );
-                if ( m_EnvSpecular )
-                    m_EnvSpecular->SetTexture( environment.Prefiltered );
-                if ( m_BrdfLut )
-                    m_BrdfLut->SetImage( environment.BrdfLut );
-            }
+            // The baked sky, SET EVERY FRAME INCLUDING WHEN IT IS ABSENT — matching
+            // Graphic::SceneEnvironmentBind's shape, so the two paths cannot end up sampling different
+            // generations of the same bake, and now also so neither can sample a different SCENE's.
+            //
+            // This used to be gated on `environment.IsComplete()`, and the gate is what let a renderer
+            // carry one scene's sky into the next (Г14). The gate read as caution — "do not half-bind a
+            // split-sum set" — but a slot that is not written keeps what it had, so refusing to write an
+            // absent environment is precisely how the previous scene's environment survives. The
+            // completeness of the set is still asserted, by the caller, as a REPORT
+            // (DeferredLightingRenderer::ReportEnvironmentGap): it is a bake failure, not a mode.
+            if ( m_EnvIrradiance )
+                m_EnvIrradiance->SetTexture( environment.Irradiance );
+            if ( m_EnvSpecular )
+                m_EnvSpecular->SetTexture( environment.Prefiltered );
+            // Same asymmetry as SceneEnvironmentBind: the LUT is a renderer-global that is never
+            // legitimately absent, so a null is a fault to leave visible rather than a state to bind.
+            if ( m_BrdfLut && environment.BrdfLut )
+                m_BrdfLut->SetImage( environment.BrdfLut );
 
             SetLightDir( lightDir );
             SetLightColor( lightColor );

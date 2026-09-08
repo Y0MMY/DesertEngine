@@ -661,6 +661,39 @@ namespace Desert::Graphic::API::Vulkan
     {
     }
 
+    Common::BoolResultStr VulkanImageCube::RT_ClearToColor( float r, float g, float b, float a )
+    {
+        if ( m_Resource.Image == VK_NULL_HANDLE )
+            return Common::MakeFormattedError<bool>( "ImageCube '{}': RT_ClearToColor before the image exists",
+                                                     m_Specification.Tag );
+
+        const auto cmdAlloc = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+        if ( !cmdAlloc.IsSuccess() )
+            return Common::MakeFormattedError<bool>( "ImageCube '{}': RT_ClearToColor has no command buffer: {}",
+                                                     m_Specification.Tag, cmdAlloc.GetError() );
+
+        const VkCommandBuffer cmd = cmdAlloc.GetValue();
+
+        // The layout the image is meant to live in, restored afterwards: a clear is a transfer and the
+        // sampler wants SHADER_READ_ONLY back. Leaving it in TRANSFER_DST would be a descriptor pointing at
+        // a layout no shader may read, which validation catches and a release build does not.
+        const VkImageLayout restore = m_Resource.Layout;
+        TransitionLayout( cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL );
+
+        const VkClearColorValue       colour = { { r, g, b, a } };
+        const VkImageSubresourceRange range  = { .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                                                 .baseMipLevel   = 0,
+                                                 .levelCount     = m_Resource.MipLevels,
+                                                 .baseArrayLayer = 0,
+                                                 .layerCount     = 6 };
+        vkCmdClearColorImage( cmd, m_Resource.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &colour, 1, &range );
+
+        TransitionLayout( cmd, restore );
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmd );
+
+        return Common::MakeSuccess( true );
+    }
+
     void VulkanImageCube::TransitionLayout( VkCommandBuffer cmd, VkImageLayout newLayout, uint32_t mip )
     {
         Graphic::API::Vulkan::Utils::InsertImageMemoryBarrier( cmd, m_Resource.Image, m_Resource.Format,
