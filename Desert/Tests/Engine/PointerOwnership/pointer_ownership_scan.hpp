@@ -57,10 +57,14 @@ namespace Desert::Tests::PointerCensus
     {
         switch ( f )
         {
-            case Form::Unique: return "unique_ptr";
-            case Form::Weak: return "weak_ptr";
-            case Form::Shared: return "shared_ptr";
-            case Form::Raw: return "raw";
+            case Form::Unique:
+                return "unique_ptr";
+            case Form::Weak:
+                return "weak_ptr";
+            case Form::Shared:
+                return "shared_ptr";
+            case Form::Raw:
+                return "raw";
         }
         return "?";
     }
@@ -235,9 +239,9 @@ namespace Desert::Tests::PointerCensus
 
             // (depth, class name or empty) for every open brace, innermost last.
             std::vector<std::pair<int, std::string>> braces;
-            int                                      depth      = 0;
-            std::size_t                              stmtStart  = 0;
-            std::string                              relative   = fs::relative( path, root ).generic_string();
+            int                                      depth     = 0;
+            std::size_t                              stmtStart = 0;
+            std::string                              relative  = fs::relative( path, root ).generic_string();
 
             for ( std::size_t i = 0; i < src.size(); ++i )
             {
@@ -262,7 +266,7 @@ namespace Desert::Tests::PointerCensus
                 const std::string stmt = src.substr( stmtStart, i - stmtStart );
                 const std::size_t at   = stmtStart;
                 (void)at;
-                stmtStart              = i + 1;
+                stmtStart = i + 1;
 
                 if ( braces.empty() || braces.back().second.empty() )
                     continue; // not directly inside a class body

@@ -20,9 +20,11 @@
 #include "pointer_ownership_register.hpp"
 #include "pointer_ownership_scan.hpp"
 
+#include <entt/entt.hpp>
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <map>
 #include <string>
 #include <vector>
@@ -64,6 +66,25 @@ namespace
     }
 } // namespace
 
+// The listing the register was WRITTEN from, and the one the next stage will widen it from. Disabled
+// because it asserts nothing; run it with
+//   ./PointerOwnership --gtest_also_run_disabled_tests --gtest_filter=*Dump*
+// after adding a tree to ScannedTrees(), and every new member arrives with its file, line and
+// declaration ready to be answered for.
+TEST( PointerOwnership, DISABLED_DumpEveryMember )
+{
+    ASSERT_FALSE( RepoRoot().empty() );
+    int counts[4] = { 0, 0, 0, 0 };
+    for ( const Member& m : Members() )
+    {
+        ++counts[static_cast<int>( m.Kind )];
+        std::printf( "%s|%d|%s|%s|%s|%s\n", FormName( m.Kind ), m.Line, m.File.c_str(), m.Class.c_str(),
+                     m.Name.c_str(), m.Decl.c_str() );
+    }
+    std::printf( "TOTAL %zu unique=%d weak=%d shared=%d raw=%d\n", Members().size(), counts[0], counts[1],
+                 counts[2], counts[3] );
+}
+
 // ------------------------------------------------------------------------------------------------
 // The number
 // ------------------------------------------------------------------------------------------------
@@ -77,9 +98,19 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     ASSERT_FALSE( Members().empty() ) << "the scan found no pointer members at all -- the reader is blind, "
                                          "and every assertion below is vacuous.";
 
-    // MEASURED ON dev @ 8f7f49b4, not estimated. Whole tree, the same scan over a wider ScannedTrees():
-    // 738 members (316 raw / 282 shared / 106 unique / 34 weak). Stage 1 covers Graphic, ShaderResources
-    // and Assets, where the cost of a lifetime mistake is a use-after-free of a device object.
+    // MEASURED, not estimated, and measured with THIS scanner. Run over the whole tree by widening
+    // ScannedTrees() (Desert/Desert/Source, Desert/Common/Source, Editor/Source, Runtime/Source) it
+    // reports 761 members: 337 raw, 283 shared, 107 unique, 34 weak. Stage 1 is the 395 below, in
+    // Graphic + ShaderResources + Assets, where the cost of a lifetime mistake is a use-after-free of a
+    // device object or of a loaded asset.
+    //
+    // A NOTE ON A NUMBER THAT MOVED, because the first commit of this task quotes a different one. The
+    // register was scoped from a throwaway prototype that reported 738/316, and it was WRONG BY 23 in
+    // the direction that matters: it skipped every CONTAINER of raw pointers -- `std::vector<IProperty*>
+    // m_RegisteredProperties`, `std::unordered_map<uint32_t, Image*> m_BoundInputs`,
+    // `std::vector<RenderCommand*> m_Commands` -- and a container of raw pointers raises exactly the same
+    // two questions as one raw pointer. This scanner counts them, and three of them turned out to carry
+    // load-bearing arguments.
     EXPECT_EQ( CountOf( Form::Raw ), 145 );
     EXPECT_EQ( CountOf( Form::Shared ), 196 );
     EXPECT_EQ( CountOf( Form::Unique ), 37 );
@@ -105,14 +136,13 @@ TEST( PointerOwnership, EveryRawPointerMemberNamesItsGuard )
         if ( FindRow( m ) != nullptr )
             continue;
         ++unlisted;
-        ADD_FAILURE()
-             << m.File << ":" << m.Line << " " << m.Class << "::" << m.Name << " (" << m.Decl
-             << ")\nis a raw pointer member with no row in the register. A raw pointer answers NEITHER "
-                "ownership question by itself, so add a row to pointer_ownership_register.hpp saying:\n"
-                "  (1) who is obliged to destroy the pointee, and\n"
-                "  (2) what stops it dying before this object does.\n"
-                "If the answer to (2) is 'nothing', that is a defect: fix it, or file it as Guard::Debt "
-                "with the task that owns the fix.";
+        ADD_FAILURE() << m.File << ":" << m.Line << " " << m.Class << "::" << m.Name << " (" << m.Decl
+                      << ")\nis a raw pointer member with no row in the register. A raw pointer answers NEITHER "
+                         "ownership question by itself, so add a row to pointer_ownership_register.hpp saying:\n"
+                         "  (1) who is obliged to destroy the pointee, and\n"
+                         "  (2) what stops it dying before this object does.\n"
+                         "If the answer to (2) is 'nothing', that is a defect: fix it, or file it as Guard::Debt "
+                         "with the task that owns the fix.";
     }
     EXPECT_EQ( unlisted, 0 );
 }
@@ -126,11 +156,9 @@ TEST( PointerOwnership, TheRegisterDescribesMembersThatStillExist )
 
     for ( const Row& r : Register() )
     {
-        const bool alive = std::any_of( Members().begin(), Members().end(),
-                                        [&r]( const Member& m ) {
-                                            return m.Kind == Form::Raw && m.File == r.File &&
-                                                   m.Class == r.Class && m.Name == r.Member;
-                                        } );
+        const bool alive = std::any_of(
+             Members().begin(), Members().end(), [&r]( const Member& m )
+             { return m.Kind == Form::Raw && m.File == r.File && m.Class == r.Class && m.Name == r.Member; } );
         EXPECT_TRUE( alive ) << r.File << " " << r.Class << "::" << r.Member
                              << " has a register row but the scan no longer finds the member. Delete the "
                                 "row, or find out why the scan stopped seeing it.";
@@ -172,20 +200,17 @@ TEST( PointerOwnership, MaterialPropertyStorageIsAddressStable )
          ReadRepoFile( "Desert/Desert/Source/Engine/Graphic/Materials/MaterialExecutor.hpp" );
     const std::string executorCpp =
          ReadRepoFile( "Desert/Desert/Source/Engine/Graphic/Materials/MaterialExecutor.cpp" );
-    const std::string materialHpp =
-         ReadRepoFile( "Desert/Desert/Source/Engine/Graphic/Materials/Material.hpp" );
+    const std::string materialHpp = ReadRepoFile( "Desert/Desert/Source/Engine/Graphic/Materials/Material.hpp" );
 
     // (1) The storage holds HANDLES, not objects. `std::vector<T>` would move every property when it
     //     grew, and all 46 cached pointers would dangle on the next `emplace`.
-    EXPECT_NE( executorHpp.find( "using PropertyStorage = std::vector<std::shared_ptr<T>>" ),
-               std::string::npos )
+    EXPECT_NE( executorHpp.find( "using PropertyStorage = std::vector<std::shared_ptr<T>>" ), std::string::npos )
          << "MaterialExecutor::PropertyStorage is no longer a vector of shared_ptr. If the properties "
             "are stored BY VALUE, every material's cached property pointer dangles the moment the "
             "vector grows.";
 
     // (2) The material owns the executor, so the observed dies with the observer.
-    EXPECT_NE( materialHpp.find( "std::unique_ptr<MaterialExecutor> m_MaterialExecutor" ),
-               std::string::npos )
+    EXPECT_NE( materialHpp.find( "std::unique_ptr<MaterialExecutor> m_MaterialExecutor" ), std::string::npos )
          << "Material no longer owns its MaterialExecutor by unique_ptr; the 46 cached property pointers "
             "lose the reason they cannot outlive their pointee.";
 
@@ -303,6 +328,68 @@ TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
     // the seven real findings in a diff of two hundred files.
     EXPECT_EQ( CountOf( Form::Shared ), 196 );
     EXPECT_GT( CountOf( Form::Shared ), CountOf( Form::Unique ) + CountOf( Form::Weak ) );
+}
+
+// ------------------------------------------------------------------------------------------------
+// The fact three Debt rows rest on, instantiated rather than reasoned about
+// ------------------------------------------------------------------------------------------------
+
+TEST( PointerOwnership, EnttComponentAddressesAreNotStable )
+{
+    // FIVE OF THE REGISTER'S ROWS SAY "the address of a std::vector member of an ECS component", and
+    // whether that is a defect turns entirely on one property of the vendored entt: does a component
+    // keep its address when the pool changes? THE ANSWER IS NO, and it is asserted here rather than
+    // read off a header, because the header is the thing that would change under us.
+    //
+    // `storage<Entity, Type>` keeps `std::vector<object_type> instances` (entt.hpp) — components live
+    // BY VALUE in a flat vector. `emplace` push_backs, so growth moves every component; `erase` is
+    // swap-and-pop, so destroying one entity moves ANOTHER component over it. Newer entt uses paged
+    // storage and would make both of these stable; this test is what will say so on the day the
+    // submodule moves.
+    //
+    // Why it matters here and not merely in the abstract: MeshECSSystem records `&mesh.RuntimeSlotPtrs`
+    // into the render command buffer, ScriptSystem is registered AFTER it and runs Lua (`World
+    // .spawnMarker` adds a StaticMeshComponent, `entity:destroy()` removes one), and the commands are
+    // only executed and dereferenced afterwards. The two ends of that window are in different files and
+    // nothing between them says the pointer must survive it.
+    struct Probe
+    {
+        std::vector<int> Slots;
+        int              Filler = 0;
+    };
+
+    entt::registry reg;
+
+    // Growth. Reserving would only postpone it; the point is that nothing in the engine reserves.
+    const auto first                  = reg.create();
+    reg.emplace<Probe>( first ).Slots = { 1, 2, 3 };
+    const void* before                = &reg.get<Probe>( first ).Slots;
+
+    bool moved = false;
+    for ( int i = 0; i < 64 && !moved; ++i )
+    {
+        const auto e                  = reg.create();
+        reg.emplace<Probe>( e ).Slots = { i };
+        moved                         = ( &reg.get<Probe>( first ).Slots ) != before;
+    }
+    EXPECT_TRUE( moved )
+         << "adding components no longer moves the ones already in the pool. That would make five of "
+            "this register's Debt rows obsolete -- check whether the ECS storage became paged, and if "
+            "it did, close A8-3 with this test as the evidence.";
+
+    // Swap-and-pop. The LAST component in the pool is moved over the erased slot, so a pointer to the
+    // last one is stolen from under its holder even though that entity was never touched.
+    entt::registry two;
+    const auto     keep               = two.create();
+    const auto     tail               = two.create();
+    two.emplace<Probe>( keep ).Slots  = { 1 };
+    two.emplace<Probe>( tail ).Slots  = { 2, 3 };
+    const std::vector<int>* tailSlots = &two.get<Probe>( tail ).Slots;
+
+    two.destroy( keep );
+    ASSERT_TRUE( two.valid( tail ) ) << "the surviving entity must still be valid";
+    EXPECT_NE( &two.get<Probe>( tail ).Slots, tailSlots )
+         << "destroying ANOTHER entity no longer moves this one's component. Same question as above.";
 }
 
 int main( int argc, char** argv )

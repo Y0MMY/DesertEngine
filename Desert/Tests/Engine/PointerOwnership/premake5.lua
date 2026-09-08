@@ -31,6 +31,11 @@ project(test_name)
         externalincludedirs { path }
     end
 
+    -- entt, for the one test that compiles the ECS storage rather than reading it. `EnttComponent
+    -- AddressesAreNotStable` is the proof behind three of the register's Debt rows, and a proof that
+    -- reasons about a header instead of instantiating it is a comment.
+    externalincludedirs { deps.DesertSpecific.IncludeDir.entt }
+
     for _, define in ipairs(deps.TestSpecific.Defines) do
         defines { define }
     end

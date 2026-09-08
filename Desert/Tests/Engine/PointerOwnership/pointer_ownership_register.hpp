@@ -78,7 +78,7 @@ namespace Desert::Tests::PointerCensus
         const char* Class;  // the class or struct the member is declared in
         const char* Member; // the member's name
         Guard       How;
-        const char* Why;    // the argument, in one sentence; the long form is the paragraph it cites
+        const char* Why;       // the argument, in one sentence; the long form is the paragraph it cites
         const char* Task = ""; // required, and only meaningful, for Guard::Debt
     };
 
@@ -116,6 +116,11 @@ namespace Desert::Tests::PointerCensus
     // ----------------------------------------------------------------------------------------------
     // THE 145 ROWS. Sorted by file and line, which is the order the scan reports them in.
     // ----------------------------------------------------------------------------------------------
+    //
+    // The table is kept out of the formatter's hands: one row is three lines — where, what, why — and
+    // reflowing it packs several rows onto a line and makes the 145 unreadable as a list. The directive
+    // must be exactly this string; trailing text after "off" makes clang-format ignore it.
+    // clang-format off
     inline const std::vector<Row>& Register()
     {
         static const std::vector<Row> rows = {
@@ -472,7 +477,15 @@ namespace Desert::Tests::PointerCensus
           "resolved from ImageService, whose only release path is Renderer::Shutdown -- terminal, and after the last Flush" },
         { "Desert/Desert/Source/Engine/Graphic/Render2D/Render2D.hpp",
           "Render2D", "m_Backdrop", Guard::Debt,
-          "BackdropBlurRenderer::Resize replaces its shared_ptr<Image2D> and destroys the old object while this pointer still equals it. The pointer itself is re-pointed by the UI pass before every Flush, but it is also the KEY of m_GlassExecutors, and that cache is never erased -- so each resize leaks a MaterialExecutor whose Texture2DProperty still holds the freed image, and a new image at the same heap address hits the stale entry", "A8-1" },
+          "BackdropBlurRenderer::Resize replaces its shared_ptr<Image2D> and destroys the old object "
+          "while this pointer still equals it. The pointer ITSELF is re-pointed by the UI pass before "
+          "every Flush, so the draw is safe -- but it is also the KEY of m_GlassExecutors, and none of "
+          "Render2D's three executor caches is ever erased, not even by Init(). Each resize therefore "
+          "leaves a MaterialExecutor whose Texture2DProperty still holds the freed image, and a new "
+          "image landing on the same heap address would hit that stale entry. NOT FIXED HERE ON PURPOSE: "
+          "the entries own live descriptor sets, so dropping one is a deletion-queue operation and not a "
+          "cache.clear() -- clearing it from SetBackdrop, which runs inside the UI pass, would destroy a "
+          "descriptor set a frame in flight is still reading", "A8-1" },
         { "Desert/Desert/Source/Engine/Graphic/SceneRenderer.cpp",
           "ExternalPassSystem", "m_Renderer", Guard::ObservedContainsUs,
           "the SceneRenderer owns its render systems, so it cannot be destroyed while one of them is alive" },
@@ -574,4 +587,5 @@ namespace Desert::Tests::PointerCensus
         };
         return rows;
     }
+    // clang-format on
 } // namespace Desert::Tests::PointerCensus
