@@ -97,9 +97,27 @@ namespace Desert::Editor
         // from @p center to that distance when the grab started, which keeps the feel identical at any
         // zoom or camera angle without needing a 3D ray intersection. Returns true when it wrote a value;
         // pushes one undo entry per completed drag.
+        /**
+         * @brief One proportional drag handle.
+         *
+         * @param value       what the DRAG scales. May be a derived quantity (the spot cone drags
+         *                    tan(angle), because the rim's distance from the axis IS range*tan(angle)),
+         *                    and may therefore be a caller's local.
+         * @param undoTarget  the AUTHORED field the undo entry must address. For a derived @p value this
+         *                    is a DIFFERENT object; for a direct one it is `&value`.
+         *
+         * THE TWO ARE SEPARATE PARAMETERS BECAUSE CONFLATING THEM WAS A DEFECT. This used to store
+         * `&value` in a member on mouse-down and use it on the release frame — and the spot-cone caller
+         * passes a stack local, so the release read `*m_ActiveHandleTarget` in a dead frame and then
+         * handed that dead address to CommandHistory, whose ByteCommand::Undo memcpy's into it. A Ctrl+Z
+         * after a cone drag wrote four bytes into somebody else's stack; it "worked" only because the
+         * frame's layout repeats. Nothing addressed across frames now: the pointer used at release is the
+         * one this frame passed in, and the undo entry addresses a component field, which is what
+         * CommandHistory::DropVolatile is able to protect. A8-2.
+         */
         bool DragValueHandle( HandleKind kind, const Common::UUID& owner, const ImVec2& center,
                               const ImVec2& handle, float& value, float minValue, float maxValue,
-                              const char* tooltip );
+                              const char* tooltip, float* undoTarget );
 
         // Is this the entity the Details panel is showing? Handles only appear on the selected light —
         // otherwise a scene full of lights would be a minefield of grab dots.
@@ -118,8 +136,11 @@ namespace Desert::Editor
         // captured bytes become one undo entry when the mouse is released.
         HandleKind   m_ActiveHandle = HandleKind::None;
         Common::UUID m_ActiveHandleOwner;
-        float*       m_ActiveHandleTarget = nullptr; // the float being edited (undo target)
-        float        m_DragStartValue     = 0.0f;
-        float        m_DragStartDistance  = 0.0f;
+        // BOTH START VALUES ARE HELD BY VALUE, and no address is held at all — see DragValueHandle's note.
+        // `m_DragStartValue` is the proxy the drag scales; `m_DragStartAuthored` is what the undo entry
+        // must restore, and the two differ whenever the handle edits a derived quantity.
+        float m_DragStartValue    = 0.0f;
+        float m_DragStartAuthored = 0.0f;
+        float m_DragStartDistance = 0.0f;
     };
 } // namespace Desert::Editor

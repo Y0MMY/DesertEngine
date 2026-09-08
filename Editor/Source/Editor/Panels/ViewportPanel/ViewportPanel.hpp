@@ -50,6 +50,16 @@ namespace Desert::Editor
         ViewportPanel( const std::shared_ptr<Desert::Core::Scene>& scene,
                        const Assets::AssetManager* assetManager = nullptr, std::string title = "Scene###scene" );
         ~ViewportPanel() override; // defined in the .cpp (unique_ptr<AsyncMeshLoader> needs the complete type)
+
+        // A SELF-REGISTERING TYPE MUST NOT BE COPYABLE OR MOVABLE. The constructor pushes `this` into
+        // s_Live and the destructor erases by pointer value, so a copy would never register yet would
+        // take the ORIGINAL's entry out on destruction, and a moved-from object would leave a live entry
+        // naming a shell. Nothing in the tree copies one today — every panel is std::make_unique'd —
+        // which is exactly why the compiler should be what keeps it that way rather than habit. A8-2.
+        ViewportPanel( const ViewportPanel& )            = delete;
+        ViewportPanel& operator=( const ViewportPanel& ) = delete;
+        ViewportPanel( ViewportPanel&& )                 = delete;
+        ViewportPanel& operator=( ViewportPanel&& )      = delete;
         void OnUIRender() override;
 
         // The scene image must reach the window edges — any padding would frame it with dead pixels.

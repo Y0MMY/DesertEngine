@@ -511,10 +511,15 @@ namespace Desert::Editor
         // the menu, the command palette and --open-panel would each have had to remember.
         PanelRegistry m_Panels;
 
-        // Contextual panels (IPanel::IsContextual): which ones WE opened, so a panel the user opened by
-        // hand is never auto-closed, and the one to bring to the front of its dock this frame.
-        std::unordered_set<Editor::IPanel*> m_ContextualShown;
-        std::string                         m_FocusPanel;
+        // `m_ContextualShown` STOOD HERE — a set of raw panel pointers, inserted and erased in five
+        // places and QUERIED IN NONE. Its own comment claimed it was what stopped a panel the user opened
+        // by hand from being auto-closed; that is actually done by `IPanel::Pinned()`, which every branch
+        // of UpdateContextualPanels already tests. So the set was write-only state, and one that went
+        // dangling wholesale at `m_Panels.Clear()`. Removed with its five writes (A8-2), which is the same
+        // decision this task took on `CloudNoiseService::GetGeneration` and `InstancesDirty`.
+        //
+        // The panel to bring to the front of its dock this frame IS read, and stays.
+        std::string m_FocusPanel;
 
         CommandPalette m_CommandPalette;
 
