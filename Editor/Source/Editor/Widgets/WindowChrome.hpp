@@ -42,6 +42,17 @@ namespace Desert::Editor::UI
     /// Nothing here stores window state. "Is the window maximized" is asked of the OS on every use — see
     /// Window::IsWindowMaximized — because a flag of ours beside the window manager's own answer is two
     /// owners of one fact, and they part company the first time anything else maximizes the window.
+    ///
+    /// WHAT HAS AND HAS NOT BEEN EXECUTED, because half of this file answers a mouse and this machine has
+    /// no mouse to give it. Maximize and Restore have been driven end to end through the control channel
+    /// and photographed at OS level in both states (the middle button's glyph follows the OS's answer, one
+    /// square restored, two maximized). The resize ARITHMETIC has a suite of its own
+    /// (Desert/Tests/Editor/WindowResize). The GESTURES — the drag, the double-click, and grabbing a grip —
+    /// have never been performed: synthetic input is unavailable here, and У9 measured a SECOND door shut
+    /// rather than assuming the first. `osascript`/System Events was already known to lack assistive
+    /// access; `CGEventPost( kCGHIDEventTap, ... )` was tried next and the cursor did not move by one
+    /// pixel — before 1028,698, after a posted move to 215,50 still 1028,698. Both doors are the same
+    /// accessibility gate. Anyone extending this file should expect to test the gestures by hand.
     class WindowChrome
     {
     public:

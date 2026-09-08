@@ -4464,7 +4464,17 @@ namespace Desert::Editor
 
         if ( !renameScene )
         {
-            ImGui::TextUnformatted( m_MainScene->GetSceneName().c_str() );
+            // A SELECTABLE, NOT TEXT, and the difference is not cosmetic. ImGui gives a plain text item the
+            // id 0, so IsAnyItemHovered() is FALSE while the cursor is over it — and the bar is now the
+            // window's title bar, whose empty space is "drag the window" and whose empty space double-
+            // clicked is "maximize". Left as text, this name would have been empty space: a double click
+            // meant to rename the level would have renamed it AND maximized the window at the same time,
+            // and a drag from it would have carried the window off. An id also buys the hover highlight,
+            // which is the affordance the tooltip was standing in for.
+            const std::string& sceneName = m_MainScene->GetSceneName();
+            const ImVec2       nameSize  = ImGui::CalcTextSize( sceneName.c_str() );
+            ImGui::Selectable( sceneName.c_str(), false, ImGuiSelectableFlags_AllowDoubleClick,
+                               ImVec2( nameSize.x, 0.0f ) );
 
             if ( ImGui::IsItemHovered() )
             {
@@ -4472,7 +4482,7 @@ namespace Desert::Editor
                 if ( ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
                 {
                     renameScene     = true;
-                    sceneNameBuffer = m_MainScene->GetSceneName();
+                    sceneNameBuffer = sceneName;
                 }
             }
         }

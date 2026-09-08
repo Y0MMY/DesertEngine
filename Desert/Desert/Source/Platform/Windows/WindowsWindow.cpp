@@ -40,17 +40,26 @@ namespace Desert::Platform::Windows
         auto width  = m_Data.Specification.Width;
         auto height = m_Data.Specification.Height;
 
-        GLFWmonitor*       monitor      = glfwGetPrimaryMonitor();
-        const GLFWvidmode* mode         = glfwGetVideoMode( monitor );
-        int                posX         = 0, posY = 0;
-        bool               setPos       = false;
-        const bool         coverTaskbar = m_Data.Specification.Fullscreen && m_Data.Specification.FullscreenCoverTaskbar;
+        // NO MONITOR IS A REAL STATE ON THIS SIDE TOO, and this file did not say so. MacOSWindow::Init has
+        // carried the guard and the explanation since a closed lid produced an empty display list there;
+        // the same two calls stood here unguarded, so a Windows host with every display asleep or detached
+        // (a headless CI runner, an RDP session that has dropped its console) dereferenced null in
+        // glfwGetVideoMode before it reached a single frame. Found while У9 was reading both files to keep
+        // them one shape; the fallback is the authored size, as on macOS, and it says so.
+        GLFWmonitor*       monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode    = monitor ? glfwGetVideoMode( monitor ) : nullptr;
+        if ( !monitor )
+            LOG_ERROR( "No monitor is online: window falls back to {}x{}, fullscreen ignored", width, height );
+
+        int        posX = 0, posY = 0;
+        bool       setPos       = false;
+        const bool coverTaskbar = m_Data.Specification.Fullscreen && m_Data.Specification.FullscreenCoverTaskbar;
 
         // Covering the taskbar means the window has no frame whatever the specification says: there is
         // nowhere on the monitor to put one.
         const bool wantsFrame = m_Data.Specification.Decorated && !coverTaskbar;
 
-        if ( m_Data.Specification.Fullscreen )
+        if ( m_Data.Specification.Fullscreen && monitor && mode )
         {
             if ( coverTaskbar )
             {
