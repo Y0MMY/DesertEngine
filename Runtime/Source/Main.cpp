@@ -1,21 +1,26 @@
 // Desert Runtime — the standalone PLAYER. Runs a project's scene in Play mode, no editor UI.
 //
-// PACKAGED (UE-style, zero-config): double-click the exe. It mounts the archive named after itself next
-// to it — MyGame.exe -> MyGame.dpak (else Content.dpak) — and opens the project descriptor Game.deproj
-// from the archive root. The scene is the project's DefaultScene. Ship a folder of just: exe + one .dpak.
+// PACKAGED (UE-style, zero-config): double-click the exe, or run it with no arguments at all. It mounts
+// the archive named after itself next to it — MyGame.exe -> MyGame.dpak (else Content.dpak) — and opens
+// the project descriptor Project::kPackagedDescriptorName from the archive root. The scene is the
+// project's DefaultScene. A package is a folder of just: the binary + one .dpak.
 //
-// MEASURED 2026-09-07 AND NOT FIXED HERE: NOTHING IN THIS REPOSITORY PRODUCES A `Game.deproj`. The
-// editor's PackageGame() writes `<Name>.deproj` LOOSE beside the archive and emits a launcher script
-// that runs `Runtime --project <Name>.deproj`; scripts/MacOS/Package.sh packs Editor/Resources under a
-// "Resources" prefix and writes no descriptor at all — running the Runtime in its output gets as far as
-// "No game to run", which was confirmed by doing it. So the zero-config discovery below has never once
-// selected a real game: every shipped launch goes through --project. The branch is live code with no
-// producer, which is the §1.3 shape, and deciding between the two conventions (teach the packager to
-// emit Game.deproj, or delete the discovery and keep --project) is a change of shipping format rather
-// than a fix to slip into this one. Named here so the next person does not re-derive it.
+// WHY THIS IS THE ONLY WAY A SHIPPED GAME STARTS (П5, decided 2026-09-08; supersedes the defect note
+// that stood here). Until this change NOTHING produced that descriptor: PackageGame() wrote
+// `<Name>.deproj` LOOSE beside the archive and generated a launcher script carrying
+// `--project <Name>.deproj`, so the discovery below had never once selected a real game and a player
+// who ran the binary directly got "No game to run". Two conventions were available — teach the packager
+// to emit the descriptor, or delete the discovery and require the flag — and the first was chosen for a
+// reason that is about the product rather than about the code: A SHIPPED GAME MUST NOT REQUIRE A
+// COMMAND LINE. A launcher script is an environment fixture (on macOS it sets VK_ICD_FILENAMES and
+// DYLD_* before the image loads, which nothing inside this process can do); it is not allowed to be the
+// only thing that knows what game this is. So the descriptor now travels INSIDE the archive, under one
+// name shared as a symbol by the packager and this file, and the generated launchers pass no project at
+// all. There is no second path: `--project` cannot be produced by packaging.
 //
-// DEV: pass --project <path/to/.deproj> [--scene <path/to/.desce>] to run a loose on-disk project; these
-// override the packaged discovery. Launch via scripts/MacOS/RunRuntime.sh.
+// DEV: pass --project <path/to/.deproj> [--scene <path/to/.desce>] to run a LOOSE ON-DISK project; this
+// is the editor's and the developer's door, never a shipped one, and it overrides the discovery above.
+// Launch via scripts/MacOS/RunRuntime.sh.
 
 #include <Engine/Desert.hpp>
 #include <Engine/EntryPoint.hpp>
@@ -128,14 +133,15 @@ std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char**
     if ( content.ExitCode != Desert::Player::kContentOk )
         FailStartup( content.Message, content.ExitCode );
 
-    // PACKAGED: the descriptor lives at the archive root as Game.deproj — open it through the now-mounted
-    // VFS. The result is checked here rather than inferred from HasProject() below, because the two
-    // failures need opposite advice: a descriptor that is ABSENT means the archive is not a game
-    // package, while one that is present and unparseable means the package is damaged — and the old
-    // message told everybody to go and add the file that was already there.
+    // PACKAGED: the descriptor lives at the archive root under the one name the packager writes it as —
+    // open it through the now-mounted VFS. The result is checked here rather than inferred from
+    // HasProject() below, because the two failures need opposite advice: a descriptor that is ABSENT
+    // means the archive is not a game package, while one that is present and unparseable means the
+    // package is damaged — and the old message told everybody to go and add the file that was already
+    // there.
     if ( !Desert::Project::ProjectContext::HasProject() )
     {
-        const fs::path descriptor = baseDir / "Game.deproj";
+        const fs::path descriptor = baseDir / Desert::Project::kPackagedDescriptorName;
         if ( !Desert::Project::ProjectContext::Open( descriptor.string() ) &&
              Common::Utils::FileSystem::Exists( descriptor ) )
         {
@@ -151,10 +157,10 @@ std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char**
     if ( !Desert::Project::ProjectContext::HasProject() )
     {
         FailStartup( fmt::format( "No game to run.\n"
-                                  "  Packaged: put '{}.dpak' (or 'Content.dpak') containing a 'Game.deproj' "
+                                  "  Packaged: put '{}.dpak' (or 'Content.dpak') containing a '{}' "
                                   "next to the executable.\n"
                                   "  Dev:      pass --project <path/to/.deproj> [--scene <path/to/.desce>].",
-                                  exePath.stem().string() ),
+                                  exePath.stem().string(), Desert::Project::kPackagedDescriptorName ),
                      1 );
     }
 

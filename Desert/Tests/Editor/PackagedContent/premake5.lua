@@ -15,8 +15,13 @@ project(test_name)
     -- before it packs (PackageCook), so the real cook comes too: the shader compiler (shaderc, no
     -- VkDevice — the same recipe as Tests/Engine/PBRSceneFrame), the font baker (stb_truetype) and
     -- the icon baker, each with its cache seam. Still nothing from the renderer.
+    -- THE PLAYER'S OWN DISCOVERY, compiled in beside the packer (П5). What a package is and what a
+    -- player looks for are decided in two different binaries, so the only place their agreement can be
+    -- asserted is a test that holds both — and the disagreement this closes (a descriptor nothing
+    -- wrote, discovered by nothing) survived precisely because nothing linked the two ends together.
     files {
         test_files,
+        "%{wks.location}/Runtime/Source/PackagedContent.cpp",
         "%{wks.location}/Editor/Source/Editor/Packaging/GamePackager.cpp",
         "%{wks.location}/Editor/Source/Editor/Packaging/PackageCook.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Project/ProjectContext.cpp",
@@ -37,6 +42,7 @@ project(test_name)
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
         "%{wks.location}/Editor/Source",
+        "%{wks.location}/Runtime/Source",
     }
     externalincludedirs {
         "%{wks.location}/ThirdParty/reflect-cpp/include",

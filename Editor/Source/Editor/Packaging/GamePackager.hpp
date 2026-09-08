@@ -5,6 +5,14 @@
 
 namespace Desert::Editor
 {
+    // THE PLAYER BINARY'S NAME INSIDE A .app. macOS starts whatever CFBundleExecutable names, and that
+    // has to be the launcher SCRIPT (only a process started by the script inherits the Vulkan
+    // environment dyld reads at image load), so the real binary cannot also be called "Runtime". This
+    // is a constant rather than a literal spelled three times — the packager copies it, the launcher
+    // execs it and a test has to be able to find it — and the three drifting apart produces a bundle
+    // macOS reports as "damaged", which is the least diagnosable failure in the whole packager.
+    inline constexpr const char* kBundlePlayerBinary = "Runtime-bin";
+
     // EVERY FIELD HERE IS READ BY PackageGame, AND THAT IS CHECKED — Desert/Tests/Editor/
     // BuildSettingsConsumers asserts the relation in both directions: no option the Build Settings panel
     // offers that the packager ignores, and no option the packager honours that nothing can set. It was
@@ -75,25 +83,35 @@ namespace Desert::Editor
     };
 
     // Bakes the CURRENTLY OPEN project into a self-contained game FOR THIS EDITOR'S OWN HOST (.app
-    // bundle by default on macOS, plain folder otherwise):
+    // bundle by default on macOS, plain folder otherwise). THE PRODUCT IS A BINARY AND ONE ARCHIVE,
+    // in one directory, and it starts with no arguments (П5):
     //
-    //   launcher            — sets the Vulkan env where that is needed, cds to the content dir and runs
-    //                         the player binary; run.sh or run.bat, whichever the host uses
-    //   <Name>.deproj       — regenerated: AssetsRoot "Assets", DefaultScene rebased
+    //   the player binary   — the Runtime for options.Config
     //   Content.dpak        — ALL content in one archive, tree by tree out of the shared census in
     //                         PackagedContentTrees.hpp: project assets (raw mesh sources stripped —
     //                         the runtime reads cooked meshes only), the cooked cache, and the engine
-    //                         shaders, fonts and icons. The Runtime mounts it at startup and every
-    //                         content read resolves through the VFS.
+    //                         shaders, fonts and icons — PLUS the regenerated descriptor at the
+    //                         archive root under Project::kPackagedDescriptorName. The Runtime mounts
+    //                         the archive found beside its own executable, opens that descriptor out
+    //                         of it, and every content read resolves through the same mount.
+    //   launcher            — run.sh / run.bat. It exists for the VULKAN ENVIRONMENT ONLY (Finder
+    //                         hands a double-clicked app no VK_ICD_FILENAMES and no DYLD_*, and both
+    //                         must be set before the image loads). It is not a second way to start
+    //                         the game and it names no project: the binary run directly comes up too.
     //   Contents/Frameworks — (bundle only) MoltenVK + the Vulkan loader, so the player machine
     //                         needs no Homebrew; falls back to the target's Homebrew when the local
     //                         artifacts are absent.
     //
+    // In a .app the binary and the archive live together in Contents/MacOS; Contents/Resources is not
+    // produced. That split was what forced the launcher to pass `--project`, and it is gone with it.
+    //
     // Pure CPU + filesystem — safe to run on a JobSystem worker.
     PackageResult PackageGame( const PackageOptions& options );
 
-    // Rebuilds ONLY the content archive (no Runtime copy, no bundle) — written next to the .deproj so
-    // the standalone Runtime can mount it for the CURRENT dev project. Loose files still override pak
-    // entries (disk-first VFS), so a stale archive can never shadow fresh edits in dev.
+    // Rebuilds ONLY the content archive (no Runtime copy, no bundle) — written next to the project's
+    // own .deproj so the standalone Runtime can mount it for the CURRENT dev project. Same census AND
+    // same embedded descriptor as PackageGame, so the two entry points produce the same KIND of
+    // archive. Loose files still override pak entries (disk-first VFS), so a stale archive can never
+    // shadow fresh edits in dev.
     PackageResult BuildContentPak();
 } // namespace Desert::Editor
