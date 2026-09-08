@@ -43,6 +43,7 @@
 #include <filesystem>
 #include <fstream>
 #include <set>
+#include <utility>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -65,7 +66,18 @@ namespace
         Handles,
         // Draws a picture the site next to it in the same file already queued, and therefore can never be
         // the first to look. An exception, spelled out, with the argument for why it is one.
-        Rereads
+        Rereads,
+
+        // Decodes a file that IS ALREADY THE PICTURE — a .png, .tga, .hdr the browser shows directly —
+        // rather than a rendered thumbnail. It owes no request because there is nothing to render: the
+        // asset is its own preview. Editor/Widgets/ThumbnailFormats.hpp calls the same thing
+        // Producer::Decoded, and these rows are the sites that consume it.
+        //
+        // ADDED BY M11, AND FOUND BY THE TEST THAT ADDED IT. The function-level discovery below reported
+        // FileExplorerPanel::DrawTextureThumbnail on its first run — a decoding site with no row, correct
+        // and unclassified for as long as this census has existed, because the file-level sweep only ever
+        // asked whether its FILE was listed.
+        DecodesSource
     };
 
     struct Site
@@ -104,6 +116,20 @@ namespace
            Role::Shows, "RequestMesh", "the Collections card grid" },
 
          { "Editor/Source/Editor/Panels/FileExplorer/FileExplorerPanel.cpp",
+           "FileExplorerPanel::DrawPaintedThumbnail", Role::Shows, "RequestPainted",
+           "the asset browser's tile for the four CLOUD formats, whose picture is PAINTED from the "
+           "file's own bytes on a JobSystem worker rather than photographed by the renderer. It owes a "
+           "request for exactly the same reason the two grids above it do — the difference between a "
+           "capture and a paint is which queue it lands in, not whether the slot has to ask" },
+
+         { "Editor/Source/Editor/Panels/FileExplorer/FileExplorerPanel.cpp",
+           "FileExplorerPanel::DrawTextureThumbnail", Role::DecodesSource, "",
+           "the asset browser's texture tile. It decodes the IMAGE FILE ITSELF — not a cached render — "
+           "so there is nothing for it to queue: spending an offscreen capture here would produce a "
+           "picture of the picture we started with. It is deliberately independent of the cook pipeline "
+           "so that EVERY image previews, not only the already-cooked ones" },
+
+         { "Editor/Source/Editor/Panels/FileExplorer/FileExplorerPanel.cpp",
            "FileExplorerPanel::EmitAssetDragSource", Role::Rereads, "",
            "the drag ghost. It shows the picture of the tile being dragged, and a tile cannot be dragged "
            "without having been drawn — DrawRenderedMaterialThumbnail / DrawRenderedMeshThumbnail queued "
@@ -140,10 +166,23 @@ namespace
 
     constexpr Mechanism kMechanism[] = {
          { "Editor/Source/Editor/Widgets/ThumbnailService.cpp", "the queue every slot asks through" },
-         { "Editor/Source/Editor/Widgets/ThumbnailCache.cpp", "where DiskPath is DEFINED" },
          { "Editor/Source/EditorLayer.cpp",
            "drives the service — one Tick() per frame and one Shutdown() at teardown. It owns no row and "
            "draws no picture; it is the clock, not a consumer" },
+
+         // ThumbnailCache.cpp WAS excused here as "where DiskPath is DEFINED" and no longer is: M11 moved
+         // the cache-path rule to Editor/Widgets/ThumbnailKey.hpp, beside the rule that names the file,
+         // because ThumbnailCache.cpp cannot be linked without a renderer and the sweep's decision had to
+         // become testable. The exemption went with the definition rather than being left to match
+         // nothing — a skip list that matches nothing is a place to hide a real slot later.
+
+         { "Editor/Source/Editor/Widgets/ThumbnailScan.cpp",
+           "the background sweep's deciding half: which files under the browser's root have no usable "
+           "picture. It computes cache paths and asks the freshness rule; it decodes nothing and draws "
+           "nothing, and it is deliberately free of the service so a suite can drive it" },
+         { "Editor/Source/Editor/Widgets/ThumbnailSweep.cpp",
+           "the other half of the sweep: it hands what the scan found to the service, at most eight per "
+           "frame. A producer of requests, never a consumer of pictures — nothing here decodes one" },
     };
 
     std::string RepoRoot()
@@ -283,18 +322,86 @@ namespace
             if ( ext != ".cpp" && ext != ".hpp" )
                 continue;
 
+            // `ThumbnailKey::DiskPath` RATHER THAN `ThumbnailCache::DiskPath`, because M11 moved the
+            // cache-path rule out of ThumbnailCache.cpp: that translation unit includes
+            // Engine/Graphic/Image.hpp and so cannot be linked without a renderer, and the background
+            // sweep — which decides what has no picture — had to be drivable by a test.
+            //
             // `ThumbnailService::`, WITH the scope operator, and never the bare name: an
             // `#include <Editor/Widgets/ThumbnailService.hpp>` is not a literal and so survives the
             // stripper, and a panel that merely includes the header is not touching the cache. Measured:
             // CollectionsPanel.hpp includes it and does nothing else with it.
             const std::string code = CT::StripCommentsAndLiterals( ReadFile( it->path().string() ) );
-            if ( code.find( "ThumbnailCache::DiskPath" ) == std::string::npos &&
+            if ( code.find( "ThumbnailKey::DiskPath" ) == std::string::npos &&
                  code.find( "ThumbnailService::" ) == std::string::npos )
                 continue;
 
             // Relative to the repository root, forward slashes, so it can be compared with the table.
             const std::string rel = fs::relative( it->path(), fs::path( root ), ec ).generic_string();
             out.insert( rel );
+        }
+        return out;
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Every `Class::Function` DEFINED in one file, with its body.
+    //
+    // M11 ADDED THIS AND THE REASON IS ITS OWN NEAR MISS. The discovery sweep below finds new FILES; it
+    // cannot find a new FUNCTION inside a file that is already listed — and this census's own header says
+    // the unit is a function, not a file. `FileExplorerPanel::DrawPaintedThumbnail` (the cloud tile) was
+    // exactly that case: a sixth drawing site, in a file with four rows already, decoding a cached
+    // picture. Every test here would have stayed green over it.
+    //
+    // So the file-level question is now asked one level down: whatever DECODES a thumbnail in a censused
+    // file must have a row of its own.
+    std::vector<std::pair<std::string, std::string>> DefinitionsIn( const std::string& code )
+    {
+        std::vector<std::pair<std::string, std::string>> out;
+
+        for ( std::size_t at = code.find( "::" ); at != std::string::npos; at = code.find( "::", at + 2 ) )
+        {
+            // The qualifier behind the `::` and the name in front of the `(`.
+            std::size_t qualifierStart = at;
+            while ( qualifierStart > 0 && CT::IsIdentChar( code[qualifierStart - 1] ) )
+                --qualifierStart;
+            const std::string qualifier = code.substr( qualifierStart, at - qualifierStart );
+            const std::string name      = CT::IdentAt( code, at + 2 );
+            if ( qualifier.empty() || name.empty() )
+                continue;
+
+            std::size_t i = CT::SkipSpace( code, at + 2 + name.size() );
+            if ( i >= code.size() || code[i] != '(' )
+                continue;
+
+            // Walk to the matching `)`, then past a trailing `const`/`noexcept`. A DEFINITION is the one
+            // followed by `{`; a call and a declaration are not.
+            int depth = 0;
+            for ( ; i < code.size(); ++i )
+            {
+                if ( code[i] == '(' )
+                    ++depth;
+                else if ( code[i] == ')' && --depth == 0 )
+                {
+                    ++i;
+                    break;
+                }
+            }
+            i = CT::SkipSpace( code, i );
+            while ( CT::WordAt( code, i, "const" ) || CT::WordAt( code, i, "noexcept" ) )
+                i = CT::SkipSpace( code, i + ( code[i] == 'c' ? 5u : 8u ) );
+            if ( i >= code.size() || code[i] != '{' )
+                continue;
+
+            const std::size_t open = i;
+            depth                  = 0;
+            for ( ; i < code.size(); ++i )
+            {
+                if ( code[i] == '{' )
+                    ++depth;
+                else if ( code[i] == '}' && --depth == 0 )
+                    break;
+            }
+            out.emplace_back( qualifier + "::" + name, code.substr( open, i - open ) );
         }
         return out;
     }
@@ -542,6 +649,54 @@ TEST( ThumbnailRequesters, TheCensusNamesEveryFileThatTouchesTheThumbnailCache )
              << ") and no longer touches the thumbnail cache. Drop the exemption: a skip that matches "
                 "nothing is a place to hide something later.";
     }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 4b. AND THE DISCOVERY GOES ONE LEVEL DOWN: a new drawing FUNCTION in an already-censused file.
+//
+// The sweep above finds new FILES. It is blind to a sixth drawing site added to a file that already has
+// four rows — and this census's own header says the unit is a function rather than a file, precisely
+// because FileExplorerPanel.cpp holds several independent sites. M11 added one (the cloud tile) and every
+// test here would have stayed green over it, which is what this closes.
+// ---------------------------------------------------------------------------------------------------
+TEST( ThumbnailRequesters, NoCensusedFileHidesAnUndeclaredDrawingSite )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    std::set<std::string> censused;
+    for ( const Site& site : kSites )
+        censused.insert( site.Function );
+
+    std::set<std::string> files;
+    for ( const Site& site : kSites )
+        files.insert( site.File );
+
+    int drawing = 0;
+    for ( const std::string& file : files )
+    {
+        const std::string code = CodeOf( root, file );
+        ASSERT_FALSE( code.empty() ) << "could not read " << file;
+
+        for ( const auto& [name, body] : DefinitionsIn( code ) )
+        {
+            if ( !DecodesAThumbnail( body ) )
+                continue;
+            ++drawing;
+
+            EXPECT_TRUE( censused.count( name ) != 0 )
+                 << name << " (in " << file
+                 << ") decodes a cached thumbnail and has no row in this census.\n"
+                    "  It is a drawing site like any other and owes a ThumbnailService request. Add a row: "
+                    "Role::Shows with the entry point it must reach, or Role::Rereads with an argument for "
+                    "why it can never be the first to look.";
+        }
+    }
+
+    EXPECT_GE( drawing, 5 ) << "only " << drawing
+                            << " drawing sites were FOUND by reading the censused files, which is fewer "
+                               "than the census claims exist — the definition scanner has stopped seeing "
+                               "them, and a scanner that finds nothing certifies nothing";
 }
 
 int main( int argc, char** argv )

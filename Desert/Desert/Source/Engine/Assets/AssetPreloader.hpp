@@ -32,7 +32,21 @@ namespace Desert::Assets
         // Individual stages — public so the editor's staged startup loader can run them one per frame
         // behind a progress overlay. ORDER MATTERS: shaders must be loaded before any render system is
         // constructed (default PBR materials resolve their shader in the constructor).
-        void PreloadMeshes();
+        // SIX ASSET KINDS UNDER THREE ROOTS, and the name says so because it used to say "meshes" and
+        // walked static meshes, cooked textures, animations, skeletons, project materials and skinned
+        // meshes. A name that promises less than the code does is how a reader comes to believe there is
+        // a second scan somewhere for the other five.
+        //
+        // Kept as ONE function rather than split into honest halves, and that is a decision with a
+        // reason: the six scans must all precede the three register loops at its tail, and those loops
+        // carry a stated order dependency (textures before materials, or a runtime material rebuilds
+        // against images that are about to be replaced). Splitting it would move that ordering
+        // constraint out into two startup sequences in two different layers, where nothing states it.
+        //
+        // NOT the same walk as the editor's thumbnail sweep (Editor/Widgets/ThumbnailSweep.hpp), which
+        // covers overlapping directories and is deliberately not derived from this one. The difference
+        // is written down there, in one place, beside the walk that came second.
+        void PreloadCookedAssetsAndMaterials();
         void PreloadSkyboxes();
         void PreloadShaders();
         // Cloud noise volumes (`.dcnv`). Scanned so the type asset's slot can offer them by name and so a

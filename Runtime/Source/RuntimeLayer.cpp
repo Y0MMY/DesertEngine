@@ -78,7 +78,7 @@ namespace Desert::Player
         // The runtime does NOT cook: it plays what the editor cooked. Assets load from the project's
         // Cooked/ tree (missing cooked content = open the project in the editor once).
         m_AssetPreloader->PreloadShaders(); // MUST precede the render systems (ctors resolve shaders)
-        m_AssetPreloader->PreloadMeshes();
+        m_AssetPreloader->PreloadCookedAssetsAndMaterials();
         m_AssetPreloader->PreloadSkyboxes();
         m_AssetPreloader->PreloadCloudNoiseVolumes();
         m_AssetPreloader->PreloadCloudTypes(); // MUST follow the volumes: a type binds the one it names
