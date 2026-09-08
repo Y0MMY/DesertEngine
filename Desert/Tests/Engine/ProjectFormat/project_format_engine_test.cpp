@@ -191,8 +191,8 @@ TEST( ProjectContextDescriptor, SavingCarriesAcrossAKeyWrittenAfterTheProjectWas
     }
 
     // RecordInRecent::No — a test must not file itself in the developer's own recent list.
-    ASSERT_TRUE( Desert::Project::ProjectContext::Open(
-         deproj.string(), Desert::Project::ProjectContext::RecordInRecent::No ) );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( deproj.string(),
+                                                        Desert::Project::ProjectContext::RecordInRecent::No ) );
 
     // ... and NOW another program adds a key this build has never heard of.
     {
