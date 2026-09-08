@@ -303,32 +303,44 @@ namespace Common::Utils
             return Common::MakeSuccess( std::move( built ) );
         }
 
-        PakWriter writer( outPatch );
-        if ( !writer.IsOpen() )
-            return Common::MakeFormattedError<PatchBuild>( "the patch archive {} could not be created",
-                                                           outPatch.string() );
+        // The writing is done in its own scope so that a failure part-way through can DELETE what it
+        // started, and delete it after the writer has closed the handle (removing an open file is legal
+        // on POSIX and refused on Windows). A half-written .dpak left behind by a refusal is the worst
+        // artifact this function could produce: it has a patch's name, a patch's extension and some of a
+        // patch's contents, and the archive it does not finish is the one a player would mount.
+        std::string failure;
+        {
+            PakWriter writer( outPatch );
+            if ( !writer.IsOpen() )
+                return Common::MakeFormattedError<PatchBuild>( "the patch archive {} could not be created",
+                                                               outPatch.string() );
 
-        for ( const auto* keys : { &built.Diff.Added, &built.Diff.Changed } )
-            for ( const auto& key : *keys )
-            {
-                const auto data = newer.Read( key );
-                if ( !data )
-                    return Common::MakeFormattedError<PatchBuild>(
-                         "entry '{}' could not be read out of {} — the patch would be missing a file it "
-                         "says it delivers",
-                         key, newerPak.string() );
-                if ( !writer.AddData( key, data->data(), data->size() ) )
-                    return Common::MakeFormattedError<PatchBuild>( "entry '{}' could not be written into {}", key,
-                                                                   outPatch.string() );
-            }
+            for ( const auto* keys : { &built.Diff.Added, &built.Diff.Changed } )
+                for ( const auto& key : *keys )
+                {
+                    if ( !failure.empty() )
+                        break;
+                    const auto data = newer.Read( key );
+                    if ( !data )
+                        failure = "entry '" + key + "' could not be read out of " + newerPak.string() +
+                                  " — the patch would be missing a file it says it delivers";
+                    else if ( !writer.AddData( key, data->data(), data->size() ) )
+                        failure = "entry '" + key + "' could not be written into " + outPatch.string();
+                }
 
-        if ( !writer.SetDeletedKeys( built.Diff.Removed ) )
-            return Common::MakeError<PatchBuild>( "a deleted key cannot be recorded (empty, reserved, or "
-                                                  "containing a line break)" );
+            if ( failure.empty() && !writer.SetDeletedKeys( built.Diff.Removed ) )
+                failure = "a deleted key cannot be recorded (empty, reserved, or containing a line break)";
 
-        if ( writer.Finalize() == 0 )
-            return Common::MakeFormattedError<PatchBuild>( "the patch archive {} could not be finalized",
-                                                           outPatch.string() );
+            if ( failure.empty() && writer.Finalize() == 0 )
+                failure = "the patch archive " + outPatch.string() + " could not be finalized";
+        }
+
+        if ( !failure.empty() )
+        {
+            std::error_code ec;
+            std::filesystem::remove( outPatch, ec );
+            return Common::MakeFormattedError<PatchBuild>( "{}", failure );
+        }
 
         built.Written = true;
         return Common::MakeSuccess( std::move( built ) );
