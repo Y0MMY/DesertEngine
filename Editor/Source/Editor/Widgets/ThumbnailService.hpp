@@ -245,11 +245,11 @@ namespace Desert::Editor
             std::string Source;
             std::string Png;
         };
-        std::vector<PaintRequest>              m_PaintQueue;
-        std::future<Common::BoolResultStr>     m_PaintInFlight;
-        std::string                            m_PaintInFlightIdentity;
-        std::string                            m_PaintInFlightSource;
-        int                                    m_Painted = 0; ///< reported with m_Captured when the queue drains
+        std::vector<PaintRequest>          m_PaintQueue;
+        std::future<Common::BoolResultStr> m_PaintInFlight;
+        std::string                        m_PaintInFlightIdentity;
+        std::string                        m_PaintInFlightSource;
+        int                                m_Painted = 0; ///< reported with m_Captured when the queue drains
 
         static std::optional<std::filesystem::file_time_type> PngStamp( const std::string& png );
     };

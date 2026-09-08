@@ -119,34 +119,58 @@ namespace Desert::Editor
     } // namespace
 
     static const std::unordered_map<FileType, std::string> s_FileTypesToString = {
-         { FileType::Unknown, "Unknown" }, { FileType::Scene, "Scene" },       { FileType::Prefab, "Prefab" },
-         { FileType::Script, "Script" },   { FileType::Shader, "Shader" },     { FileType::Texture, "Texture" },
-         { FileType::Font, "Font" },       { FileType::Cubemap, "Cubemap" },   { FileType::Model, "Model" },
-         { FileType::Audio, "Audio" },     { FileType::Material, "Material" },
-         { FileType::ShaderGraph, "Shader Graph" }, { FileType::Cloud, "Cloud" },
+         { FileType::Unknown, "Unknown" },   { FileType::Scene, "Scene" },
+         { FileType::Prefab, "Prefab" },     { FileType::Script, "Script" },
+         { FileType::Shader, "Shader" },     { FileType::Texture, "Texture" },
+         { FileType::Font, "Font" },         { FileType::Cubemap, "Cubemap" },
+         { FileType::Model, "Model" },       { FileType::Audio, "Audio" },
+         { FileType::Material, "Material" }, { FileType::ShaderGraph, "Shader Graph" },
+         { FileType::Cloud, "Cloud" },
     };
 
     static const std::unordered_map<std::string, FileType> s_FileTypes = {
-         { "lsn", FileType::Scene },   { "deprefab", FileType::Prefab }, { "prefab", FileType::Prefab },
-         { "lprefab", FileType::Prefab }, { "cs", FileType::Script },
-         { "lua", FileType::Script },  { "glsl", FileType::Shader },    { "shader", FileType::Shader },
-         { "frag", FileType::Shader }, { "vert", FileType::Shader },    { "comp", FileType::Shader },
-         { "png", FileType::Texture }, { "jpg", FileType::Texture },    { "jpeg", FileType::Texture },
-         { "bmp", FileType::Texture }, { "gif", FileType::Texture },    { "tga", FileType::Texture },
-         { "ttf", FileType::Font },    { "hdr", FileType::Cubemap },    { "obj", FileType::Model },
-         { "fbx", FileType::Model },   { "gltf", FileType::Model },     { "glb", FileType::Model },
+         { "lsn", FileType::Scene },
+         { "deprefab", FileType::Prefab },
+         { "prefab", FileType::Prefab },
+         { "lprefab", FileType::Prefab },
+         { "cs", FileType::Script },
+         { "lua", FileType::Script },
+         { "glsl", FileType::Shader },
+         { "shader", FileType::Shader },
+         { "frag", FileType::Shader },
+         { "vert", FileType::Shader },
+         { "comp", FileType::Shader },
+         { "png", FileType::Texture },
+         { "jpg", FileType::Texture },
+         { "jpeg", FileType::Texture },
+         { "bmp", FileType::Texture },
+         { "gif", FileType::Texture },
+         { "tga", FileType::Texture },
+         { "ttf", FileType::Font },
+         { "hdr", FileType::Cubemap },
+         { "obj", FileType::Model },
+         { "fbx", FileType::Model },
+         { "gltf", FileType::Model },
+         { "glb", FileType::Model },
          { "blend", FileType::Model },
-         { "mp3", FileType::Audio },   { "m4a", FileType::Audio },      { "wav", FileType::Audio },
-         { "ogg", FileType::Audio },   { "lmat", FileType::Material },
+         { "mp3", FileType::Audio },
+         { "m4a", FileType::Audio },
+         { "wav", FileType::Audio },
+         { "ogg", FileType::Audio },
+         { "lmat", FileType::Material },
          // Engine-native extensions (see Common::Constants::Extensions).
-         { "demat", FileType::Material }, { "desce", FileType::Scene }, { "demesh", FileType::Model },
+         { "demat", FileType::Material },
+         { "desce", FileType::Scene },
+         { "demesh", FileType::Model },
          { "dgraph", FileType::ShaderGraph },
          // The four cloud formats. Typed here for the first time in M11 — they used to fall through to
          // FileType::Unknown, which is why they had one grey glyph between them, no colour, no entry in
          // the type filter and no thumbnail. THIS MAP IS THE CENSUS'S SUBJECT: every key in it must have
          // a row in Editor/Widgets/ThumbnailFormats.hpp saying who makes its picture or why nobody does,
          // and Desert/Tests/Editor/ThumbnailFormats reads this literal to check it.
-         { "dclayout", FileType::Cloud }, { "dcnv", FileType::Cloud }, { "dcmv", FileType::Cloud },
+         { "dclayout", FileType::Cloud },
+         { "dcnv", FileType::Cloud },
+         { "dcmv", FileType::Cloud },
          { "decloudtype", FileType::Cloud },
     };
 
@@ -1120,16 +1144,16 @@ namespace Desert::Editor
                         const char* Label;
                         int         Type;
                     } kTypeFilters[] = {
-                        { "All Types", -1 },
-                        { "Scenes", static_cast<int>( FileType::Scene ) },
-                        { "Prefabs", static_cast<int>( FileType::Prefab ) },
-                        { "Scripts", static_cast<int>( FileType::Script ) },
-                        { "Textures", static_cast<int>( FileType::Texture ) },
-                        { "Materials", static_cast<int>( FileType::Material ) },
-                        { "Models", static_cast<int>( FileType::Model ) },
-                        { "Shader Graphs", static_cast<int>( FileType::ShaderGraph ) },
-                        { "Audio", static_cast<int>( FileType::Audio ) },
-                        { "Clouds", static_cast<int>( FileType::Cloud ) },
+                         { "All Types", -1 },
+                         { "Scenes", static_cast<int>( FileType::Scene ) },
+                         { "Prefabs", static_cast<int>( FileType::Prefab ) },
+                         { "Scripts", static_cast<int>( FileType::Script ) },
+                         { "Textures", static_cast<int>( FileType::Texture ) },
+                         { "Materials", static_cast<int>( FileType::Material ) },
+                         { "Models", static_cast<int>( FileType::Model ) },
+                         { "Shader Graphs", static_cast<int>( FileType::ShaderGraph ) },
+                         { "Audio", static_cast<int>( FileType::Audio ) },
+                         { "Clouds", static_cast<int>( FileType::Cloud ) },
                     };
                     const char* currentFilter = "All Types";
                     for ( const auto& f : kTypeFilters )
@@ -1528,8 +1552,8 @@ namespace Desert::Editor
                     // written since M10 moved a mesh's thumbnail onto its cooked `.stmesh`. The ghost has
                     // been silently falling back to the type icon for every mesh ever since, which is
                     // exactly the kind of "it still works, just worse" a re-read site decays into.
-                    img = m_Thumbnails->Get(
-                         ThumbnailKey::DiskPath( CookPaths::CookedMesh( assetPath, ".stmesh" ).generic_string() ) );
+                    img = m_Thumbnails->Get( ThumbnailKey::DiskPath(
+                         CookPaths::CookedMesh( assetPath, ".stmesh" ).generic_string() ) );
                 }
             }
 
@@ -2194,8 +2218,7 @@ namespace Desert::Editor
                      DrawRenderedMaterialThumbnail( entry, ImVec2( thumb, thumb ) ) ) ||
                    ( entry->Type == FileType::Model &&
                      DrawRenderedMeshThumbnail( entry, ImVec2( thumb, thumb ) ) ) ||
-                   ( entry->Type == FileType::Cloud &&
-                     DrawPaintedThumbnail( entry, ImVec2( thumb, thumb ) ) ) );
+                   ( entry->Type == FileType::Cloud && DrawPaintedThumbnail( entry, ImVec2( thumb, thumb ) ) ) );
             if ( !drewThumb )
             {
                 const ImVec4 col = entry->IsFile ? entry->FileTypeColour : ImVec4( 0.95f, 0.82f, 0.42f, 1.0f );

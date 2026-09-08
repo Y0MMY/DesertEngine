@@ -84,8 +84,8 @@ namespace Desert::Editor::CloudThumbnail
          *
          * @p channels is the source's stride; @p pick is which of them to read.
          */
-        float BoxSample( const unsigned char* src, uint32_t srcW, uint32_t srcH, uint32_t channels,
-                         uint32_t pick, uint32_t ox, uint32_t oy, uint32_t outW, uint32_t outH )
+        float BoxSample( const unsigned char* src, uint32_t srcW, uint32_t srcH, uint32_t channels, uint32_t pick,
+                         uint32_t ox, uint32_t oy, uint32_t outW, uint32_t outH )
         {
             const float x0 = static_cast<float>( ox ) * static_cast<float>( srcW ) / static_cast<float>( outW );
             const float x1 =
@@ -183,8 +183,7 @@ namespace Desert::Editor::CloudThumbnail
                         // two panels.
                         if ( !layout.Mask.empty() )
                         {
-                            const float mask =
-                                 BoxSample( layout.Mask.data(), res, res, 1u, 0u, x, y, half, half );
+                            const float mask = BoxSample( layout.Mask.data(), res, res, 1u, 0u, x, y, half, half );
                             value *= std::clamp( mask / 128.0f, 0.0f, 2.0f );
 
                             // AND THE MASK IS ADDED ON TOP OF ITS OWN MULTIPLICATION, which looks like two
@@ -202,8 +201,8 @@ namespace Desert::Editor::CloudThumbnail
                         lowest  = std::min( lowest, value );
                         highest = std::max( highest, value );
 
-                        PutPixel( out, offsetX + x, offsetY + y, value * kTint[slot][0],
-                                  value * kTint[slot][1], value * kTint[slot][2] );
+                        PutPixel( out, offsetX + x, offsetY + y, value * kTint[slot][0], value * kTint[slot][1],
+                                  value * kTint[slot][2] );
                     }
                 }
             }
@@ -276,8 +275,8 @@ namespace Desert::Editor::CloudThumbnail
         // `.dcmv` — the sculpted body, side on
         // ------------------------------------------------------------------------------------------
 
-        Common::ResultStr<std::vector<unsigned char>> PaintModellingVolume(
-             const std::vector<unsigned char>& bytes )
+        Common::ResultStr<std::vector<unsigned char>>
+        PaintModellingVolume( const std::vector<unsigned char>& bytes )
         {
             auto decoded = Assets::DecodeCloudModellingVolume( bytes );
             if ( !decoded )
@@ -313,8 +312,8 @@ namespace Desert::Editor::CloudThumbnail
                     {
                         // Channel 0 is the profile/density the march reads; the other three are the
                         // material terms and say nothing about the shape.
-                        const size_t at =
-                             ( ( static_cast<size_t>( z ) * h + y ) * w + x ) * Assets::kCloudModellingBytesPerVoxel;
+                        const size_t at = ( ( static_cast<size_t>( z ) * h + y ) * w + x ) *
+                                          Assets::kCloudModellingBytesPerVoxel;
                         best = std::max( best, body.Voxels[at] );
                     }
                     // The volume's y runs UP and an image's rows run DOWN, so the row is flipped here
@@ -326,9 +325,9 @@ namespace Desert::Editor::CloudThumbnail
 
             // 128 x 64 into a square: full width, letterboxed vertically. Stretching to fill would make
             // every body twice as tall as it is, and the proportions are the point of a side view.
-            std::vector<unsigned char> out       = Backdrop();
-            const uint32_t             bandH     = kSide / 2u; // h/w == 1/2 exactly, by the format's constants
-            const uint32_t             bandTop   = ( kSide - bandH ) / 2u;
+            std::vector<unsigned char> out     = Backdrop();
+            const uint32_t             bandH   = kSide / 2u; // h/w == 1/2 exactly, by the format's constants
+            const uint32_t             bandTop = ( kSide - bandH ) / 2u;
 
             for ( uint32_t y = 0; y < bandH; ++y )
             {
@@ -435,8 +434,8 @@ namespace Desert::Editor::CloudThumbnail
                         continue;
 
                     const uint32_t from = static_cast<uint32_t>( std::max( 0.0f, centreX - halfWidth ) );
-                    const uint32_t to   = static_cast<uint32_t>(
-                         std::min( static_cast<float>( kSide ), centreX + halfWidth ) );
+                    const uint32_t to =
+                         static_cast<uint32_t>( std::min( static_cast<float>( kSide ), centreX + halfWidth ) );
                     for ( uint32_t x = from; x < to; ++x )
                     {
                         const float across =
@@ -503,11 +502,11 @@ namespace Desert::Editor::CloudThumbnail
         // truncated PNG at the cache path. That file is FRESH by modification time and undecodable
         // for ever, which is the one state the freshness rule cannot repair.
         const std::string temp = png + ".part";
-        if ( !stbi_write_png( temp.c_str(), static_cast<int>( kSide ), static_cast<int>( kSide ), 4,
-                              pixels.data(), static_cast<int>( kSide ) * 4 ) )
+        if ( !stbi_write_png( temp.c_str(), static_cast<int>( kSide ), static_cast<int>( kSide ), 4, pixels.data(),
+                              static_cast<int>( kSide ) * 4 ) )
         {
-            return Common::MakeFormattedError<bool>(
-                 "stbi_write_png refused to write '{}' ({}x{} RGBA8)", temp, kSide, kSide );
+            return Common::MakeFormattedError<bool>( "stbi_write_png refused to write '{}' ({}x{} RGBA8)", temp,
+                                                     kSide, kSide );
         }
 
         std::filesystem::rename( temp, png, ec );
@@ -516,8 +515,7 @@ namespace Desert::Editor::CloudThumbnail
             std::error_code cleanupEc;
             std::filesystem::remove( temp, cleanupEc );
             return Common::MakeFormattedError<bool>(
-                 "'{}' was painted but could not be moved into place from '{}': {}", png, temp,
-                 ec.message() );
+                 "'{}' was painted but could not be moved into place from '{}': {}", png, temp, ec.message() );
         }
         return Common::MakeSuccess( true );
     }

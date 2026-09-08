@@ -7,6 +7,7 @@
 #include <functional>
 #include <future>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace Desert::Assets
@@ -114,8 +115,8 @@ namespace Desert::Editor
      * what keeps the loop's period bounded; the assets past the bound are found on the next pass, which
      * runs as soon as this batch drains.
      */
-    [[nodiscard]] std::vector<ThumbnailSweepCandidate>
-    ScanForMissingThumbnails( const std::filesystem::path& root, std::size_t limit );
+    [[nodiscard]] std::vector<ThumbnailSweepCandidate> ScanForMissingThumbnails( const std::filesystem::path& root,
+                                                                                 std::size_t limit );
 
     class ThumbnailSweeper
     {
@@ -187,10 +188,23 @@ namespace Desert::Editor
         /// The root the pending list was found under. A change means the project changed under us.
         std::filesystem::path m_Root;
 
-        /// How many this pass has queued, reported once when it finishes. A sweep that says nothing is
+        /// How many assets THIS pass offered that no earlier pass had. A sweep that says nothing is
         /// indistinguishable from a sweep that is not running, which is the reading somebody will reach
-        /// for the first time a thumbnail is missing.
-        int  m_QueuedThisPass = 0;
-        bool m_Announced      = false;
+        /// for the first time a thumbnail is missing — and a sweep that says the same thing every three
+        /// seconds is a log nobody reads, which comes to the same end by the other road. Measured: the
+        /// first version announced 133 assets once every 1.4 s for the whole session, because a scan run
+        /// while the capture queue is full finds exactly the assets already in it.
+        int  m_OfferedThisPass = 0;
+        bool m_Announced       = false;
+
+        /// Assets this sweep has already handed to the service, by path. Two passes over an asset that
+        /// has not been captured YET are one finding, not two; and an asset the service has permanently
+        /// refused stays "needs a picture" to the freshness rule for ever, so without this it would be
+        /// announced on every pass until the editor closed.
+        ///
+        /// It does NOT gate the hand-over, only the announcement: an asset EDITED after it was offered
+        /// must be re-queued, and the service's own dedup is the thing that decides whether that costs a
+        /// capture. Cleared with the rest when the project changes.
+        std::unordered_set<std::string> m_Offered;
     };
 } // namespace Desert::Editor

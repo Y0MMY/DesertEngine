@@ -239,8 +239,8 @@ namespace Desert::Editor
                 // that will not decode, a layout with no pattern, a type whose profile is all zeros — and
                 // none of them is fixed by asking again next frame. Same per-process memory as the
                 // capture path, and for the same reason: a wipe of the cache is what clears it.
-                LOG_WARN( "[Thumbnails] '{}' could not be painted: {} — not retrying.",
-                          m_PaintInFlightSource, result.GetError() );
+                LOG_WARN( "[Thumbnails] '{}' could not be painted: {} — not retrying.", m_PaintInFlightSource,
+                          result.GetError() );
                 m_Failed.insert( m_PaintInFlightIdentity );
             }
             m_Queued.erase( m_PaintInFlightIdentity );
@@ -254,8 +254,7 @@ namespace Desert::Editor
         // Drop anything the queue no longer owes, exactly as the capture path does and for the same
         // reason: two panels can name one asset, and a request can sit here while the other one's paint
         // lands.
-        while ( !m_PaintQueue.empty() &&
-                !NeedsCapture( m_PaintQueue.front().Png, m_PaintQueue.front().Source ) )
+        while ( !m_PaintQueue.empty() && !NeedsCapture( m_PaintQueue.front().Png, m_PaintQueue.front().Source ) )
         {
             m_Queued.erase( m_PaintQueue.front().Identity );
             m_PaintQueue.erase( m_PaintQueue.begin() );
@@ -274,8 +273,8 @@ namespace Desert::Editor
         // cloud bake: work outside the pool is invisible to the profiler, unbounded in thread count, and
         // obeys no shared budget. The lambda captures its two strings BY VALUE, so nothing it touches can
         // outlive or be outlived by this object.
-        m_PaintInFlight = Common::JobSystem::Get().Async(
-             [source = req.Source, png = req.Png] { return CloudThumbnail::Write( source, png ); } );
+        m_PaintInFlight = Common::JobSystem::Get().Async( [source = req.Source, png = req.Png]
+                                                          { return CloudThumbnail::Write( source, png ); } );
     }
 
     void ThumbnailService::Tick()
@@ -293,8 +292,8 @@ namespace Desert::Editor
         // is a cold cache doing its job, and "0, 0, 8" is the cache doing its job.
         if ( !HasWork() && ( m_Captured || m_Painted || m_Skipped ) )
         {
-            LOG_INFO( "[Thumbnails] queue drained: {} captured, {} painted, {} already fresh on disk.",
-                      m_Captured, m_Painted, m_Skipped );
+            LOG_INFO( "[Thumbnails] queue drained: {} captured, {} painted, {} already fresh on disk.", m_Captured,
+                      m_Painted, m_Skipped );
             m_Captured = 0;
             m_Painted  = 0;
             m_Skipped  = 0;

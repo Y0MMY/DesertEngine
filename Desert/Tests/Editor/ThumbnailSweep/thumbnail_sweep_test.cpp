@@ -107,8 +107,7 @@ namespace
 
     bool Mentions( const std::vector<ThumbnailSweepCandidate>& candidates, const std::string& needle )
     {
-        return std::any_of( candidates.begin(), candidates.end(),
-                            [&needle]( const ThumbnailSweepCandidate& c )
+        return std::any_of( candidates.begin(), candidates.end(), [&needle]( const ThumbnailSweepCandidate& c )
                             { return c.AssetPath.find( needle ) != std::string::npos; } );
     }
 } // namespace
@@ -125,12 +124,12 @@ TEST( ThumbnailSweep, OnlyGeneratedProducersAreSwept )
 {
     TempProject project;
 
-    WriteFile( project.Assets() / "Materials/Oak.demat", "{}" );      // RenderedMaterial
-    WriteFile( project.Assets() / "Clouds/Types/A.decloudtype", "{}" ); // Painted
+    WriteFile( project.Assets() / "Materials/Oak.demat", "{}" );             // RenderedMaterial
+    WriteFile( project.Assets() / "Clouds/Types/A.decloudtype", "{}" );      // Painted
     WriteFile( project.Assets() / "Textures/Bark.png", "not really a png" ); // Decoded
-    WriteFile( project.Assets() / "Scenes/Level.desce", "{}" );       // Authored
-    WriteFile( project.Assets() / "Scripts/Player.lua", "-- hi" );    // None
-    WriteFile( project.Assets() / "Notes/readme.txt", "hello" );      // not a format at all
+    WriteFile( project.Assets() / "Scenes/Level.desce", "{}" );              // Authored
+    WriteFile( project.Assets() / "Scripts/Player.lua", "-- hi" );           // None
+    WriteFile( project.Assets() / "Notes/readme.txt", "hello" );             // not a format at all
 
     const auto found = ScanForMissingThumbnails( project.Assets(), 64 );
 
@@ -152,8 +151,7 @@ TEST( ThumbnailSweep, OnlyGeneratedProducersAreSwept )
     EXPECT_FALSE( Mentions( found, "Player.lua" ) )
          << "a script was swept. Producer::None rows carry a written reason there must be no picture, and "
             "sweeping one would queue work whose result nothing would ever draw.";
-    EXPECT_FALSE( Mentions( found, "readme.txt" ) )
-         << "a file the Content Browser does not even type was swept.";
+    EXPECT_FALSE( Mentions( found, "readme.txt" ) ) << "a file the Content Browser does not even type was swept.";
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -272,8 +270,7 @@ TEST( ThumbnailSweep, OneFrameHandsOverAtMostItsShareAndTheWholeBatchEventuallyG
     const std::set<std::string> unique( handed.begin(), handed.end() );
     EXPECT_EQ( unique.size(), handed.size() ) << "an asset was handed over twice in one pass";
 
-    EXPECT_EQ( frames, ( kTotal + ThumbnailSweeper::kRequestsPerFrame - 1 ) /
-                            ThumbnailSweeper::kRequestsPerFrame )
+    EXPECT_EQ( frames, ( kTotal + ThumbnailSweeper::kRequestsPerFrame - 1 ) / ThumbnailSweeper::kRequestsPerFrame )
          << "the pass took " << frames << " frames for " << kTotal << " assets at "
          << ThumbnailSweeper::kRequestsPerFrame << " a frame — the pacing is not what the constant says";
 }
@@ -318,8 +315,8 @@ TEST( ThumbnailSweep, TheSweepBuildsNoRendererOfItsOwn )
     const std::string root = RepoRoot();
     ASSERT_FALSE( root.empty() ) << "repository root not found from the test's working directory";
 
-    for ( const char* file : { "Editor/Source/Editor/Widgets/ThumbnailSweep.cpp",
-                               "Editor/Source/Editor/Widgets/ThumbnailScan.cpp" } )
+    for ( const char* file :
+          { "Editor/Source/Editor/Widgets/ThumbnailSweep.cpp", "Editor/Source/Editor/Widgets/ThumbnailScan.cpp" } )
     {
         const std::string code = ReadFile( root + file );
         ASSERT_FALSE( code.empty() ) << "could not read " << file;

@@ -31,19 +31,32 @@ namespace Desert::Editor
         // ── Collect ───────────────────────────────────────────────────────────────────────────────────
         if ( m_Scan.valid() && m_Scan.wait_for( std::chrono::seconds( 0 ) ) == std::future_status::ready )
         {
-            m_Pending        = m_Scan.get();
-            m_Scan           = {};
-            m_Next           = 0;
-            m_QueuedThisPass = 0;
-            m_Announced      = false;
+            m_Pending         = m_Scan.get();
+            m_Scan            = {};
+            m_Next            = 0;
+            m_OfferedThisPass = 0;
+            m_Announced       = false;
         }
 
         // ── Hand out this frame's share ───────────────────────────────────────────────────────────────
         if ( !m_Pending.empty() )
         {
-            m_QueuedThisPass += Drain(
-                 [manager]( const ThumbnailSweepCandidate& candidate )
+            Drain(
+                 [this, manager]( const ThumbnailSweepCandidate& candidate )
                  {
+                     // NEW TO THIS SWEEP? Only for the announcement and for the one warning below — the
+                     // hand-over itself happens either way, because an asset edited since it was offered
+                     // has to be re-queued and only the service can decide whether that costs a capture.
+                     //
+                     // AN ASSET THAT CAN NEVER HAVE A PICTURE IS RE-FOUND FOR EVER, and that is by
+                     // design rather than an oversight: the freshness rule answers "no usable picture"
+                     // about it truthfully on every pass, and the service's failure set is what stops the
+                     // work. What must not repeat is the LOG LINE — three refusable materials would
+                     // otherwise print three warnings every three seconds for the whole session.
+                     const bool firstOffer = m_Offered.insert( candidate.AssetPath ).second;
+                     if ( firstOffer )
+                         ++m_OfferedThisPass;
+
                      switch ( candidate.By )
                      {
                          case ThumbnailFormats::Producer::Painted:
@@ -61,10 +74,11 @@ namespace Desert::Editor
                              {
                                  // A background pass must not shout. This is the ONLY line a failed
                                  // background resolve produces, it is a warning rather than an error
-                                 // because nobody asked for this asset by name, and it happens once —
-                                 // the service's failure set remembers an asset it could not queue.
-                                 LOG_WARN( "[Thumbnails] sweep skipped '{}': {}", candidate.AssetPath,
-                                           subject.GetError() );
+                                 // because nobody asked for this asset by name, and it is printed ONCE
+                                 // per asset per session — see `firstOffer` above.
+                                 if ( firstOffer )
+                                     LOG_WARN( "[Thumbnails] sweep skipped '{}': {}", candidate.AssetPath,
+                                               subject.GetError() );
                                  return;
                              }
                              ThumbnailService::Get().RequestMaterial(
@@ -76,8 +90,7 @@ namespace Desert::Editor
                          {
                              if ( !manager )
                                  return;
-                             const auto subject =
-                                  ThumbnailSubject::ResolveMesh( *manager, candidate.AssetPath );
+                             const auto subject = ThumbnailSubject::ResolveMesh( *manager, candidate.AssetPath );
                              if ( !subject )
                              {
                                  // AN UNCOOKED MESH IS THE COMMON CASE AND IS NOT NEWS. Logging it would
@@ -104,11 +117,11 @@ namespace Desert::Editor
             if ( m_Pending.empty() && !m_Announced )
             {
                 m_Announced = true;
-                if ( m_QueuedThisPass > 0 )
+                if ( m_OfferedThisPass > 0 )
                 {
-                    LOG_INFO( "[Thumbnails] background sweep of '{}' queued {} asset(s) with no usable "
+                    LOG_INFO( "[Thumbnails] background sweep of '{}' found {} asset(s) with no usable "
                               "picture. Nothing was clicked; they render as slots and workers come free.",
-                              m_Root.generic_string(), m_QueuedThisPass );
+                              m_Root.generic_string(), m_OfferedThisPass );
                 }
             }
             return; // one thing per frame: hand out, or scan. Never both.
@@ -116,6 +129,19 @@ namespace Desert::Editor
 
         // ── Start the next pass ───────────────────────────────────────────────────────────────────────
         if ( m_Scan.valid() )
+            return;
+
+        // NOT WHILE THE QUEUE IT FEEDS IS STILL FULL. A scan run against a queue of a hundred pending
+        // captures re-finds exactly those hundred — their pictures have not been written yet, so the
+        // freshness rule still says "capture" for every one of them — and hands them over again for the
+        // service to reject. Measured before this gate: a 133-asset cold cache produced one full scan
+        // every 1.4 seconds for the entire drain, each one a directory walk and 266 stat calls on a
+        // worker, to discover nothing that was not already known.
+        //
+        // It also makes the INTERVAL mean what its comment says. Three seconds is the latency of "I just
+        // dropped a file in"; without this gate the real interval was however long a pass took to hand
+        // out, and the sweep spent the drain re-asking a question it was still waiting on the answer to.
+        if ( ThumbnailService::Get().HasWork() )
             return;
 
         if ( --m_FramesUntilScan > 0 )

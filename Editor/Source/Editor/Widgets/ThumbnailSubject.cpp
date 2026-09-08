@@ -7,6 +7,7 @@
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
 #include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
+#include <Engine/Core/Formats/ShaderProgramMeta.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include <filesystem>
@@ -27,8 +28,43 @@ namespace Desert::Editor::ThumbnailSubject
         }
         if ( !asset )
         {
-            return Common::MakeFormattedError<Material>(
-                 "'{}' is not a material the asset manager will accept", assetPath );
+            return Common::MakeFormattedError<Material>( "'{}' is not a material the asset manager will accept",
+                                                         assetPath );
+        }
+
+        // ── CAN THE PREVIEW'S DRAW PATH EXECUTE THIS MATERIAL AT ALL? ─────────────────────────────────
+        //
+        // FOUND BY THE SWEEP, AND ONLY REACHABLE BECAUSE OF IT. A thumbnail is a MESH draw — the material
+        // on a sphere or on a card — so it is the mesh path, and the mesh path draws exactly
+        // `Core::Formats::kMeshPathDomain`. It refuses anything else BY NAME, at LOG_ERROR, once per
+        // attempt (MeshRenderer::DrawGenericMeshes).
+        //
+        // While a thumbnail existed only for materials somebody browsed to, that never fired: nobody
+        // opens the folder holding `CloudRaymarch.demat`. The background sweep photographs every material
+        // in the project, so on its first run against this repository it produced three of those errors —
+        // Volume, Skybox and Terrain — and then wrote each refusal's empty frame to disk AS THE PICTURE OF
+        // THE MATERIAL. A black square that the freshness rule would call correct for ever.
+        //
+        // Refused here instead, with the domain named, so the browser falls back to the albedo swatch (a
+        // true statement about the material) and the sweep skips it once rather than photographing
+        // nothing. The predicate is the draw path's OWN — never `IsUserAssignable()`, which is the union
+        // of three paths and is exactly the mistake ShaderProgramMeta.hpp warns about above it.
+        if ( auto* shaders = Runtime::ResourceRegistry::GetShaderService() )
+        {
+            const std::string shaderName = asset->Data().EffectiveShaderName();
+            if ( const auto shader = shaders->GetByName( shaderName ) )
+            {
+                const Core::Formats::ShaderDomain domain = shader->GetProgramMeta().Domain;
+                if ( !Core::Formats::DrawnByMeshPath( domain ) )
+                {
+                    return Common::MakeFormattedError<Material>(
+                         "'{}' uses the shader '{}', whose domain is {} — the thumbnail is a MESH draw and "
+                         "the mesh path executes only {}. Photographing it would write an empty frame and "
+                         "file it as the picture of this material",
+                         assetPath, shaderName, Core::Formats::ShaderDomainName( domain ),
+                         Core::Formats::ShaderDomainName( Core::Formats::kMeshPathDomain ) );
+                }
+            }
         }
 
         if ( !Runtime::ResourceRegistry::GetMaterialService()->Get( asset->GetMetadata().Handle ) )
@@ -59,8 +95,7 @@ namespace Desert::Editor::ThumbnailSubject
         auto asset = manager.FindByPath<Assets::MeshAsset>( cooked );
         if ( !asset )
         {
-            auto created =
-                 manager.CreateAsset<Assets::StaticMeshAsset>( Assets::AssetPriority::High, cooked );
+            auto created = manager.CreateAsset<Assets::StaticMeshAsset>( Assets::AssetPriority::High, cooked );
             if ( !created )
                 return Common::MakeFormattedError<Mesh>( "'{}' could not be created as a static mesh", cooked );
 
@@ -76,8 +111,7 @@ namespace Desert::Editor::ThumbnailSubject
             asset = created;
         }
 
-        const auto* runtimeMesh =
-             Runtime::ResourceRegistry::GetMeshService()->Get( asset->GetMetadata().Handle );
+        const auto* runtimeMesh = Runtime::ResourceRegistry::GetMeshService()->Get( asset->GetMetadata().Handle );
         if ( !runtimeMesh || runtimeMesh->GetSubmeshes().empty() )
         {
             return Common::MakeFormattedError<Mesh>(

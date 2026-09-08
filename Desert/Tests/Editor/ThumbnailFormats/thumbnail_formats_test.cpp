@@ -101,8 +101,8 @@ namespace
         // A CUSTOM RAW-STRING DELIMITER, because the pattern itself contains `)"` — a capture group
         // closing just before a quote — and the default `R"( ... )"` would end the literal there.
         const std::regex pattern( R"re(\{\s*"([A-Za-z0-9_]+)"\s*,\s*FileType::)re" );
-        for ( auto it = std::sregex_iterator( table.begin(), table.end(), pattern );
-              it != std::sregex_iterator(); ++it )
+        for ( auto it = std::sregex_iterator( table.begin(), table.end(), pattern ); it != std::sregex_iterator();
+              ++it )
             out.insert( ( *it )[1].str() );
         return out;
     }
@@ -159,8 +159,9 @@ TEST( ThumbnailFormats, EveryRowIsWellFormedAndUnique )
              << "' says nothing about what its picture is. Every row is a statement somebody has to be "
                 "able to disagree with.";
         EXPECT_TRUE( seen.insert( format.Extension ).second )
-             << "'" << format.Extension << "' appears twice — Find() answers with the first and the "
-                                           "second row is text nobody can tell is dead";
+             << "'" << format.Extension
+             << "' appears twice — Find() answers with the first and the "
+                "second row is text nobody can tell is dead";
     }
 }
 
@@ -191,15 +192,16 @@ TEST( ThumbnailFormats, EveryRefusalCarriesAReasonRatherThanADeferral )
         if ( const std::size_t cite = why.find( "same as ." ); cite != std::string::npos )
         {
             std::string target;
-            for ( std::size_t i = cite + 9; i < why.size() && std::isalnum( static_cast<unsigned char>( why[i] ) ); ++i )
+            for ( std::size_t i = cite + 9; i < why.size() && std::isalnum( static_cast<unsigned char>( why[i] ) );
+                  ++i )
                 target += why[i];
 
             const TF::Format* cited = TF::Find( target );
-            ASSERT_NE( cited, nullptr ) << "'" << format.Extension << "' cites '." << target
-                                        << "' for its reason and no such row exists";
+            ASSERT_NE( cited, nullptr )
+                 << "'" << format.Extension << "' cites '." << target << "' for its reason and no such row exists";
             EXPECT_EQ( cited->By, TF::Producer::None )
-                 << "'" << format.Extension << "' is refused a picture because '." << target
-                 << "' is — and '." << target
+                 << "'" << format.Extension << "' is refused a picture because '." << target << "' is — and '."
+                 << target
                  << "' HAS a producer. A citation that points at a row with a picture is an argument that "
                     "says the opposite of what it is being used for.";
             why = Lowered( cited->What );
@@ -210,8 +212,8 @@ TEST( ThumbnailFormats, EveryRefusalCarriesAReasonRatherThanADeferral )
              << "' is refused a picture in a few words. The reason is what a future reader has to argue "
                 "against before adding one, so it has to BE an argument.";
 
-        for ( const char* deferral : { "todo", "not yet", "not built", "for now", "later", "unimplemented",
-                                       "fixme", "hack" } )
+        for ( const char* deferral :
+              { "todo", "not yet", "not built", "for now", "later", "unimplemented", "fixme", "hack" } )
         {
             EXPECT_EQ( why.find( deferral ), std::string::npos )
                  << "'" << format.Extension << "' is refused a picture because of '" << deferral
@@ -236,8 +238,8 @@ TEST( ThumbnailFormats, EveryExtensionTheBrowserShowsHasARowAndEveryRowIsShown )
     ASSERT_FALSE( root.empty() ) << "repository root not found from the test's working directory";
 
     const std::set<std::string> browser = BrowserExtensions( root );
-    ASSERT_FALSE( browser.empty() ) << "the browser's s_FileTypes table could not be read from "
-                                    << kBrowserTable << " — the parse is broken, not the tree";
+    ASSERT_FALSE( browser.empty() ) << "the browser's s_FileTypes table could not be read from " << kBrowserTable
+                                    << " — the parse is broken, not the tree";
     ASSERT_GE( browser.size(), 30u ) << "only " << browser.size()
                                      << " extensions were parsed out of the browser's table; the "
                                         "initialiser's shape must have changed under this regex";
@@ -337,8 +339,8 @@ TEST( ThumbnailFormats, EveryPaintedFormatPaintsTheShippedLibraryAndNotAFlatSqua
             const std::vector<unsigned char>& rgba = pixels.GetValue();
             const std::size_t                 side = Desert::Editor::CloudThumbnail::kSize;
             ASSERT_EQ( rgba.size(), side * side * 4u )
-                 << asset.generic_string() << " painted " << rgba.size() << " bytes, not " << side << "x"
-                 << side << " RGBA8. Every producer must write at the ONE size ThumbnailCache uploads at, "
+                 << asset.generic_string() << " painted " << rgba.size() << " bytes, not " << side << "x" << side
+                 << " RGBA8. Every producer must write at the ONE size ThumbnailCache uploads at, "
                     "or the grid shows two of them at two sharpnesses.";
 
             std::set<std::array<unsigned char, 3>> tones;

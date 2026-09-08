@@ -343,7 +343,6 @@ namespace
         return out;
     }
 
-
     // ------------------------------------------------------------------------------------------------
     // Every `Class::Function` DEFINED in one file, with its body.
     //
@@ -651,7 +650,6 @@ TEST( ThumbnailRequesters, TheCensusNamesEveryFileThatTouchesTheThumbnailCache )
                 "nothing is a place to hide something later.";
     }
 }
-
 
 // ---------------------------------------------------------------------------------------------------
 // 4b. AND THE DISCOVERY GOES ONE LEVEL DOWN: a new drawing FUNCTION in an already-censused file.

@@ -72,8 +72,7 @@ namespace Desert::Editor
             // THE SAME QUESTION EVERY READER ASKS. Not `exists(png)`: that is the gate M8 found had
             // drifted away from the readers' rule, leaving assets that were neither drawn nor scheduled
             // for the life of the project.
-            if ( ThumbnailFreshness::Judge(
-                      ThumbnailFreshness::Observe( candidate.Png, candidate.Subject ) ) !=
+            if ( ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( candidate.Png, candidate.Subject ) ) !=
                  ThumbnailFreshness::Verdict::Capture )
                 continue;
 
@@ -91,8 +90,9 @@ namespace Desert::Editor
         m_Pending.clear();
         m_Next            = 0;
         m_FramesUntilScan = 0;
-        m_QueuedThisPass  = 0;
+        m_OfferedThisPass = 0;
         m_Announced       = false;
+        m_Offered.clear();
     }
 
     void ThumbnailSweeper::SetPendingForTest( std::vector<ThumbnailSweepCandidate> pending )
