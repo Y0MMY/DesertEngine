@@ -8,7 +8,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -493,8 +495,116 @@ namespace Desert::Editor::MaterialEdit
         return outRefusal.empty() ? found : nullptr;
     }
 
-    /// EVERY property the document offers, in the order the shader declares them — which is the order the
-    /// window draws them, so a client reading this list and a person reading the panel walk the same rows.
+    // ── THE PARAMETER TABLE'S GROUPS ───────────────────────────────────────────────────────────────────
+
+    /// ONE GROUP of the parameter table: a `Category` the shader author wrote, and the params carrying it.
+    struct ParameterGroup
+    {
+        /// The author's category text, verbatim. EMPTY means these params declare no Category at all — a
+        /// group of its own rather than a silent default; see PlanParameterGroups.
+        std::string Category;
+
+        /// Indices into ShaderProgramMeta::Params, in declaration order within the group. INDICES AND NOT
+        /// POINTERS: a plan that outlives the schema it describes is a defect a pointer hides and a
+        /// subscript catches, and the plan is rebuilt every frame from a schema resolved seconds earlier.
+        std::vector<std::size_t> Params;
+
+        /// Where this group sits in the author's own work order, 0-based — the number the window prints
+        /// ("00 · Cloud Types"). ABSENT for the uncategorised group, which is not a stage of anyone's order
+        /// and must not be given a place in it.
+        std::optional<std::size_t> Ordinal;
+    };
+
+    /// THE PARAMETER TABLE'S GROUPS, in the order the shader file declares them.
+    ///
+    /// `ShaderParam::Category` has been filled in by shader authors since the DSL gained the attribute and
+    /// read by NOBODY. Fifty-two params across the shipped shaders carry one of nine values — Surface,
+    /// Textures, Glass, Weather, Placement, Layout, Cloud Types, Detail, Lighting — and the Material Editor
+    /// drew every one of them in a single flat table, so the cloud material's thirty-four arrived as one
+    /// undivided list. Desert/Tests/Engine/CloudMaterialSchema has meanwhile been asserting that every cloud
+    /// param carries a category "so it does not land in an unnamed group": an assertion about a value that
+    /// had no consumer. This function is the consumer, and that assertion is now about something.
+    ///
+    /// THE ORDER IS THE FILE'S, AND IT IS DERIVED RATHER THAN LISTED. A group appears where its first member
+    /// is declared. The alternative — a table of category names in a preferred order — would be a SECOND
+    /// census beside the shader, and when it fell behind, a new category would silently sink to the bottom
+    /// or vanish. Nothing here can fall behind, because there is no second list. The file order is already a
+    /// work order: CloudRaymarch declares Cloud Types, Weather, Placement, Layout, Detail, Lighting, which
+    /// is the order a sky is built in, and Epic number their own cloud material's groups the same way
+    /// ("00 - Cloud Layout", "01 - Cloud Shape", "02 - Storm").
+    ///
+    /// PARAMS OF ONE CATEGORY NEED NOT BE CONTIGUOUS. They are in every shipped shader today and nothing
+    /// keeps them that way. A plan built by watching for the category to CHANGE would open one group twice
+    /// and number the second copy as though it were new — so this walks the list once and appends to
+    /// whichever group already exists.
+    ///
+    /// AN UNCATEGORISED PARAM GETS A GROUP THAT SAYS SO. It is not folded into the previous named group and
+    /// not left in an unnamed block that reads as a rendering accident. Six shipped shaders have such params
+    /// (Terrain declares four: DetailTiling, u_GrassTex, u_RockTex, u_SnowTex; MatProbe, MatProbeUnlit,
+    /// Skybox, TextSDF and Unlit one each), and the caller must tell "nothing here is categorised" — draw
+    /// the flat table exactly as before — from "some of it is", where the leftovers get their own heading.
+    /// Those are different facts about the shader and must not produce the same picture.
+    [[nodiscard]] inline std::vector<ParameterGroup>
+    PlanParameterGroups( const ::Desert::Core::Formats::ShaderProgramMeta& schema )
+    {
+        std::vector<ParameterGroup> groups;
+
+        for ( std::size_t index = 0; index < schema.Params.size(); ++index )
+        {
+            const std::string& category = schema.Params[index].Category;
+
+            auto group = std::find_if( groups.begin(), groups.end(),
+                                       [&category]( const ParameterGroup& g ) { return g.Category == category; } );
+            if ( group == groups.end() )
+            {
+                ParameterGroup fresh;
+                fresh.Category = category;
+                groups.push_back( std::move( fresh ) );
+                group = std::prev( groups.end() );
+            }
+            group->Params.push_back( index );
+        }
+
+        // The uncategorised group goes LAST, wherever its first member happened to be declared. Two reasons,
+        // and the second is the one that matters: it is not a stage of the author's order, so it must not
+        // take a number in the middle of it; and moving it to the end means a shader that categorised
+        // NOTHING produces exactly one group, which is what lets the window reproduce the old flat table
+        // without a special case in the drawing code.
+        const auto unnamed = std::find_if( groups.begin(), groups.end(),
+                                           []( const ParameterGroup& g ) { return g.Category.empty(); } );
+        if ( unnamed != groups.end() && std::next( unnamed ) != groups.end() )
+            std::rotate( unnamed, std::next( unnamed ), groups.end() );
+
+        std::size_t ordinal = 0;
+        for ( ParameterGroup& group : groups )
+        {
+            if ( !group.Category.empty() )
+                group.Ordinal = ordinal++;
+        }
+
+        return groups;
+    }
+
+    /// Does this plan divide the table at all? FALSE for a shader that categorised nothing — one group, with
+    /// no name — which the window draws as the single flat table it drew before groups existed. The
+    /// distinction is the whole point: an undivided table is what "this shader has no categories" looks
+    /// like, and a table under one heading called something would be this code inventing a fact.
+    [[nodiscard]] inline bool HasNamedGroups( const std::vector<ParameterGroup>& groups )
+    {
+        return std::any_of( groups.begin(), groups.end(),
+                            []( const ParameterGroup& group ) { return !group.Category.empty(); } );
+    }
+
+    /// EVERY property the document offers, in the order the WINDOW DRAWS THEM — which since the parameter
+    /// table gained groups is the plan's order, not the schema's declaration order.
+    ///
+    /// THE TWO ORDERS HAVE TO BE ONE, and this is the line that makes them one. The census and the panel
+    /// walking the same rows in the same sequence is the relation a client depends on when it reads
+    /// `properties`, counts to the ninth row and then talks about "the ninth row" to a person looking at the
+    /// window. Both now consume PlanParameterGroups, so there is one order and not two that agree by
+    /// inspection — Desert/Tests/Editor/MaterialEditStates asserts the agreement rather than trusting it.
+    /// (They differ only for a shader that interleaves categories; none does today, which is exactly the
+    /// condition under which a relation quietly stops holding and nobody notices.)
     ///
     /// @p parentData is the parent material's data in instance mode, null for a base material.
     [[nodiscard]] inline std::vector<EditableProperty>
@@ -504,38 +614,46 @@ namespace Desert::Editor::MaterialEdit
         std::vector<EditableProperty> properties;
         properties.reserve( schema.Params.size() );
 
-        for ( const auto& p : schema.Params )
+        const std::vector<ParameterGroup> groups = PlanParameterGroups( schema );
+
+        for ( const ParameterGroup& group : groups )
         {
-            EditableProperty entry;
-            entry.Name       = p.Name;
-            entry.Label      = p.DisplayName.empty() ? p.Name : p.DisplayName;
-            entry.Type       = TypeNameOf( p );
-            entry.Components = ComponentsOf( p.Type );
-            entry.Min        = p.Min;
-            entry.Max        = p.Max;
-
-            // A row with its own entry in the child IS an override — the same test the window's star
-            // draws from, so the census and the panel mark the same rows.
-            entry.OverridesParent = isInstance && !p.IsTexture && data.FindParam( p.Name ) != nullptr;
-
-            entry.NotSettableReason = UnsettableReason( p, isInstance );
-            entry.Settable          = entry.NotSettableReason.empty();
-
-            if ( !p.IsTexture && !p.IsAssetRef() )
+            for ( const std::size_t index : group.Params )
             {
-                const glm::vec4 value = EffectiveParamValue( data, parentData, p );
-                for ( int i = 0; i < entry.Components; ++i )
-                    entry.Value[static_cast<std::size_t>( i )] = value[i];
-            }
-            else
-            {
-                // A texture's value is an asset handle, and the array carries floats. Reported as zero
-                // components rather than as a float that happens to hold a 64-bit id badly: a number a
-                // client cannot use is worse than an absence it can see.
-                entry.Components = 0;
-            }
+                const auto& p = schema.Params[index];
 
-            properties.push_back( std::move( entry ) );
+                EditableProperty entry;
+                entry.Group      = group.Category;
+                entry.Name       = p.Name;
+                entry.Label      = p.DisplayName.empty() ? p.Name : p.DisplayName;
+                entry.Type       = TypeNameOf( p );
+                entry.Components = ComponentsOf( p.Type );
+                entry.Min        = p.Min;
+                entry.Max        = p.Max;
+
+                // A row with its own entry in the child IS an override — the same test the window's star
+                // draws from, so the census and the panel mark the same rows.
+                entry.OverridesParent = isInstance && !p.IsTexture && data.FindParam( p.Name ) != nullptr;
+
+                entry.NotSettableReason = UnsettableReason( p, isInstance );
+                entry.Settable          = entry.NotSettableReason.empty();
+
+                if ( !p.IsTexture && !p.IsAssetRef() )
+                {
+                    const glm::vec4 value = EffectiveParamValue( data, parentData, p );
+                    for ( int i = 0; i < entry.Components; ++i )
+                        entry.Value[static_cast<std::size_t>( i )] = value[i];
+                }
+                else
+                {
+                    // A texture's value is an asset handle, and the array carries floats. Reported as zero
+                    // components rather than as a float that happens to hold a 64-bit id badly: a number a
+                    // client cannot use is worse than an absence it can see.
+                    entry.Components = 0;
+                }
+
+                properties.push_back( std::move( entry ) );
+            }
         }
 
         return properties;

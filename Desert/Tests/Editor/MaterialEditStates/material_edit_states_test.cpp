@@ -38,6 +38,8 @@
 
 #include <Editor/Panels/MaterialEditor/MaterialEditStates.hpp>
 
+#include <algorithm>
+#include <cstddef>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -877,6 +879,183 @@ TEST( MaterialEditStates, TheSlotAcceptsThePayloadTheBrowserActuallyEmitsAndPass
     // includes — which means the panel could hand it anything. It must hand it the real constants.
     EXPECT_NE( row.find( "Assets::kCloudTypeExtension" ), std::string::npos );
     EXPECT_NE( row.find( "Assets::kCloudLayoutExtension" ), std::string::npos );
+}
+
+// ── 5. THE PARAMETER TABLE'S GROUPS ────────────────────────────────────────────────────────────────────
+//
+// `ShaderParam::Category` was filled in by shader authors and read by nothing: fifty-two params across the
+// shipped shaders carry one of nine values, and the Material Editor drew all of them in one flat table, so
+// the cloud material's thirty-four arrived as a single undivided list. Desert/Tests/Engine/
+// CloudMaterialSchema meanwhile asserted every cloud param HAS a category "so it does not land in an
+// unnamed group" -- a claim about a value with no consumer, which is a claim about nothing.
+//
+// The claims worth holding here are all about RELATIONS rather than about the plan's return value:
+//
+//   - the plan is a PERMUTATION of the schema: nothing added, nothing lost, nothing drawn twice. A grouping
+//     that silently dropped a parameter would remove a knob from the window and from the channel at once,
+//     and both would look like the shader simply not declaring it;
+//   - the plan's order IS the census's order, because the window and `properties` consume the same plan.
+//     Two orders that agree by inspection is precisely what this codebase keeps paying for;
+//   - "no categories in this shader" and "one group called nothing" stay distinguishable, because six
+//     shipped shaders are in the first state and must keep the flat table they have always drawn.
+
+TEST( MaterialEditStates, GroupsAreTheShadersOwnCategoriesInTheOrderTheFileDeclaresThem )
+{
+    Formats::ShaderParam coverage = Ranged( "Coverage", 0.0f, 1.0f, 0.45f );
+    coverage.Category             = "Weather";
+    Formats::ShaderParam seed     = Value( "Seed", Formats::ShaderValueType::Float );
+    seed.Category                 = "Weather";
+    Formats::ShaderParam albedo   = Ranged( "ScatteringAlbedo", 0.0f, 1.0f, 0.98f );
+    albedo.Category               = "Lighting";
+    Formats::ShaderParam type1    = AssetRef( "CloudType1", "CloudTypeAsset" );
+    type1.Category                = "Cloud Types";
+
+    // Declared Weather, Weather, Lighting, Cloud Types -- so the GROUPS come out in that order of first
+    // appearance, and their numbers with them. No table of preferred category names exists anywhere for
+    // this to disagree with, which is the whole design: a second list is what falls behind.
+    const auto groups = MaterialEdit::PlanParameterGroups( SchemaOf( { coverage, seed, albedo, type1 } ) );
+
+    ASSERT_EQ( groups.size(), 3u );
+    EXPECT_EQ( groups[0].Category, "Weather" );
+    EXPECT_EQ( groups[1].Category, "Lighting" );
+    EXPECT_EQ( groups[2].Category, "Cloud Types" );
+
+    ASSERT_TRUE( groups[0].Ordinal.has_value() );
+    EXPECT_EQ( *groups[0].Ordinal, 0u );
+    EXPECT_EQ( *groups[1].Ordinal, 1u );
+    EXPECT_EQ( *groups[2].Ordinal, 2u );
+
+    EXPECT_EQ( groups[0].Params, ( std::vector<std::size_t>{ 0u, 1u } ) );
+    EXPECT_TRUE( MaterialEdit::HasNamedGroups( groups ) );
+}
+
+TEST( MaterialEditStates, MembersOfOneCategoryMeetInOneGroupEvenWhenTheFileScattersThem )
+{
+    // No shipped shader interleaves its categories today. That is exactly the condition under which a plan
+    // built by watching for the category to CHANGE looks correct forever and then opens "Weather" twice --
+    // numbering the second copy as a new stage -- the first time somebody moves a line.
+    Formats::ShaderParam first  = Value( "Coverage", Formats::ShaderValueType::Float );
+    first.Category              = "Weather";
+    Formats::ShaderParam middle = Value( "ScatteringAlbedo", Formats::ShaderValueType::Float );
+    middle.Category             = "Lighting";
+    Formats::ShaderParam last   = Value( "Seed", Formats::ShaderValueType::Float );
+    last.Category               = "Weather";
+
+    const auto groups = MaterialEdit::PlanParameterGroups( SchemaOf( { first, middle, last } ) );
+
+    ASSERT_EQ( groups.size(), 2u ) << "one category is one group, however far apart its members were written";
+    EXPECT_EQ( groups[0].Category, "Weather" );
+    EXPECT_EQ( groups[0].Params, ( std::vector<std::size_t>{ 0u, 2u } ) )
+         << "and the members keep their declaration order inside it";
+    EXPECT_EQ( groups[1].Category, "Lighting" );
+    EXPECT_EQ( *groups[1].Ordinal, 1u ) << "the number follows FIRST appearance, not the last one";
+}
+
+TEST( MaterialEditStates, AShaderThatCategorisedNothingHasOneUnnamedGroupAndIsDrawnFlat )
+{
+    // Terrain, Skybox, Unlit, TextSDF and the two MatProbes are all in this state. The window must keep
+    // drawing them exactly as it did before groups existed -- an undivided table IS what "this shader has
+    // no categories" looks like, and putting them under a heading would be this code inventing a fact.
+    const auto groups =
+         MaterialEdit::PlanParameterGroups( SchemaOf( { Value( "DetailTiling", Formats::ShaderValueType::Float ),
+                                                        Texture( "u_GrassTex" ), Texture( "u_RockTex" ) } ) );
+
+    ASSERT_EQ( groups.size(), 1u );
+    EXPECT_TRUE( groups[0].Category.empty() );
+    EXPECT_FALSE( groups[0].Ordinal.has_value() ) << "an unnamed group is not a stage of anybody's order";
+    EXPECT_FALSE( MaterialEdit::HasNamedGroups( groups ) )
+         << "which is the flag the window reads to draw the old flat table";
+}
+
+TEST( MaterialEditStates, UncategorisedParamsGetTheirOwnGroupAtTheEndRatherThanJoiningTheOneAboveThem )
+{
+    Formats::ShaderParam weather  = Value( "Coverage", Formats::ShaderValueType::Float );
+    weather.Category              = "Weather";
+    Formats::ShaderParam lighting = Value( "ScatteringAlbedo", Formats::ShaderValueType::Float );
+    lighting.Category             = "Lighting";
+
+    // The stray is declared FIRST, in the middle of nothing, and must still come out last: it is not a
+    // stage of the author's work order and must not take a number inside it.
+    const auto groups = MaterialEdit::PlanParameterGroups(
+         SchemaOf( { Value( "Stray", Formats::ShaderValueType::Float ), weather, lighting } ) );
+
+    ASSERT_EQ( groups.size(), 3u );
+    EXPECT_EQ( groups[0].Category, "Weather" );
+    EXPECT_EQ( groups[1].Category, "Lighting" );
+    EXPECT_TRUE( groups[2].Category.empty() ) << "the leftovers go last, wherever they were written";
+    EXPECT_FALSE( groups[2].Ordinal.has_value() );
+
+    // And the numbers belong to the named groups only, with no hole where the stray sat.
+    EXPECT_EQ( *groups[0].Ordinal, 0u );
+    EXPECT_EQ( *groups[1].Ordinal, 1u );
+}
+
+TEST( MaterialEditStates, ThePlanIsAPermutationOfTheSchemaAndLosesNothing )
+{
+    Formats::ShaderParam a = Value( "A", Formats::ShaderValueType::Float );
+    a.Category             = "Layout";
+    Formats::ShaderParam b = Value( "B", Formats::ShaderValueType::Float );
+    Formats::ShaderParam c = Value( "C", Formats::ShaderValueType::Float );
+    c.Category             = "Layout";
+    Formats::ShaderParam d = Value( "D", Formats::ShaderValueType::Float );
+    d.Category             = "Detail";
+
+    const auto schema = SchemaOf( { a, b, c, d } );
+    const auto groups = MaterialEdit::PlanParameterGroups( schema );
+
+    // THE BOUND WORTH ASSERTING, because it catches a whole class rather than an instance: every parameter
+    // is drawn exactly once. A grouping that dropped one would take a knob out of the window AND out of the
+    // channel's census at the same time, and both would read as the shader never declaring it.
+    std::vector<std::size_t> flattened;
+    for ( const auto& group : groups )
+        flattened.insert( flattened.end(), group.Params.begin(), group.Params.end() );
+
+    EXPECT_EQ( flattened.size(), schema.Params.size() ) << "nothing added, nothing lost";
+
+    std::vector<std::size_t> sorted = flattened;
+    std::sort( sorted.begin(), sorted.end() );
+    EXPECT_TRUE( std::unique( sorted.begin(), sorted.end() ) == sorted.end() ) << "and nothing drawn twice";
+    for ( std::size_t i = 0; i < sorted.size(); ++i )
+        EXPECT_EQ( sorted[i], i ) << "every index of the schema appears";
+}
+
+TEST( MaterialEditStates, TheCensusWalksTheGroupsInTheSameOrderTheWindowDrawsThem )
+{
+    Formats::ShaderParam weather     = Value( "Coverage", Formats::ShaderValueType::Float );
+    weather.Category                 = "Weather";
+    Formats::ShaderParam lighting    = Value( "ScatteringAlbedo", Formats::ShaderValueType::Float );
+    lighting.Category                = "Lighting";
+    Formats::ShaderParam alsoWeather = Value( "Seed", Formats::ShaderValueType::Float );
+    alsoWeather.Category             = "Weather";
+
+    const auto schema =
+         SchemaOf( { weather, lighting, alsoWeather, Value( "Stray", Formats::ShaderValueType::Float ) } );
+    const auto census = MaterialEdit::DescribeProperties( schema, MaterialData{}, nullptr, /*isInstance=*/false );
+    const auto groups = MaterialEdit::PlanParameterGroups( schema );
+
+    // THE RELATION, ASSERTED RATHER THAN COMMENTED. A client reads `properties`, counts to the third entry
+    // and speaks to a person about "the third row". Those are the same parameter only while the census and
+    // the panel walk one order -- and since the panel now draws groups, declaration order is no longer it.
+    std::vector<std::string> drawn;
+    for ( const auto& group : groups )
+    {
+        for ( const std::size_t index : group.Params )
+            drawn.push_back( schema.Params[index].Name );
+    }
+
+    ASSERT_EQ( census.size(), drawn.size() );
+    for ( std::size_t i = 0; i < drawn.size(); ++i )
+        EXPECT_EQ( census[i].Name, drawn[i] ) << "row " << i;
+
+    EXPECT_EQ( drawn, ( std::vector<std::string>{ "Coverage", "Seed", "ScatteringAlbedo", "Stray" } ) )
+         << "the scattered Weather member is pulled up to its group, and the stray falls to the end";
+
+    // And every census row says which group it is under, so the position is readable and not inferred.
+    EXPECT_EQ( census[0].Group, "Weather" );
+    EXPECT_EQ( census[1].Group, "Weather" );
+    EXPECT_EQ( census[2].Group, "Lighting" );
+    EXPECT_TRUE( census[3].Group.empty() )
+         << "empty is the shader declaring no category, which the window shows under a heading that says so";
 }
 
 int main( int argc, char** argv )
