@@ -194,12 +194,6 @@ namespace Desert::Platform::Windows
         m_Data.Specification = specification;
     }
 
-    void WindowsWindow::SetWindowSize( uint32_t width, uint32_t height )
-    {
-        m_Data.Specification.Width  = width;
-        m_Data.Specification.Height = height;
-    }
-
     uint32_t WindowsWindow::GetWidth() const
     {
         return m_Data.Specification.Width;
@@ -215,27 +209,6 @@ namespace Desert::Platform::Windows
         return m_GLFWWindow;
     }
 
-    bool WindowsWindow::IsWindowMaximized() const
-    {
-        return glfwGetWindowMonitor( m_GLFWWindow ) != nullptr;
-    }
-
-    bool WindowsWindow::IsWindowMinimized() const
-    {
-        return false;
-    }
-
-    void WindowsWindow::Maximize()
-    {
-        GLFWmonitor*       monitor = glfwGetPrimaryMonitor();
-        const GLFWvidmode* mode    = glfwGetVideoMode( monitor );
-
-        m_Data.Specification.Width  = mode->width;
-        m_Data.Specification.Height = mode->height;
-
-        glfwSetWindowMonitor( m_GLFWWindow, monitor, 0, 0, mode->width, mode->height, mode->refreshRate );
-    }
-
     void WindowsWindow::ProcessEvents()
     {
         glfwPollEvents();
@@ -249,12 +222,6 @@ namespace Desert::Platform::Windows
     Common::BoolResultStr WindowsWindow::PrepareNextFrame() const
     {
         return EngineContext::GetInstance().GetRendererContext()->BeginFrame();
-    }
-
-    void WindowsWindow::SetTitle( const std::string& title )
-    {
-        m_Data.Specification.Title = title;
-        glfwSetWindowTitle( m_GLFWWindow, title.c_str() );
     }
 
     void WindowsWindow::OnEvent( Common::Event& e )

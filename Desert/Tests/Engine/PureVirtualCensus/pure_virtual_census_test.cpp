@@ -29,6 +29,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -524,7 +525,11 @@ namespace
     //
     // This test is what forced the row out: it asserts every row is STILL dead, so writing the caller
     // turned it red. That is the difference between closing a question and deleting it.
-    constexpr CensusRow k_Census[] = {
+    // std::array, NOT a C array, because the register is EMPTY and a zero-length C array does not
+    // exist in C++. That is worth a line rather than a workaround note: the type had to change for the
+    // register to be able to say "none", and a register that cannot express its own success would have
+    // quietly kept one row forever to stay compilable.
+    constexpr std::array<CensusRow, 0> k_Census = {
          // ---- THE VULKAN BACKEND'S DEAD ACCESSORS ---------------------------------------------------
          // THE BIND VOCABULARY IS GONE. `Use`/`RT_Use` — eight pure virtuals across five bases, with
          // seventeen implementations under them and an EMPTY BODY in every one of the seventeen — was
@@ -564,39 +569,26 @@ namespace
          //     pointers became write-only the moment the getter went, so both were deleted with it.
          //     What these classes keep of an image is the VkDescriptorImageInfo, copied at SetImage time.
 
-         // ---- THE PLATFORM WINDOW'S TITLE AND SIZE SURFACE -------------------------------------------
-         // Six methods, implemented twice each (MacOSWindow, WindowsWindow), called nowhere. They read
-         // like the API a custom title bar would need, and whether that is coming is the owner's call.
-         { "Window", "GetTitle", "Desert/Desert/Source/Engine/Core/Window.hpp",
-           "OWNER DECIDES: the custom-title-bar surface, implemented on both platforms, called nowhere." },
-         { "Window", "SetTitle", "Desert/Desert/Source/Engine/Core/Window.hpp", "OWNER DECIDES: same surface." },
-         { "Window", "SetWindowSize", "Desert/Desert/Source/Engine/Core/Window.hpp",
-           "OWNER DECIDES: same surface." },
-         { "Window", "Maximize", "Desert/Desert/Source/Engine/Core/Window.hpp", "OWNER DECIDES: same surface." },
-         { "Window", "IsWindowMaximized", "Desert/Desert/Source/Engine/Core/Window.hpp",
-           "OWNER DECIDES: same surface." },
-         { "Window", "IsWindowMinimized", "Desert/Desert/Source/Engine/Core/Window.hpp",
-           "OWNER DECIDES: same surface." },
-
-         // ---- FOUR MORE WENT WITH Г12, AND BOTH REASONS ARE WORTH KEEPING ---------------------------
+         // ---- AND THE LAST SIX WENT TOO: THE PLATFORM WINDOW'S TITLE AND SIZE SURFACE ---------------
          //
-         // IProperty::{GetTypeTag, GetEditorMeta, SetEditorMeta} left together with the enum and the
-         // struct they served, because they were never an unbuilt capability — they were a SECOND
-         // DESIGN for editor hints the engine already has and uses. The live mechanism is the
-         // reflection macro `PROPERTY( DisplayName(...), Category(...), Range(lo,hi) )`, authored
-         // beside the field it describes; colour is decided by the parameter's TYPE at the draw site,
-         // not by an `isColor` flag; and the material editor groups by the Category written in the
-         // shader's own Properties block. Keeping the struct was maintaining a competing source of
-         // truth for a value that already has one — a DEAD competing source, which is the worse kind,
-         // because it reads as the intended mechanism to whoever finds it first.
+         // GetTitle, SetTitle, SetWindowSize, Maximize, IsWindowMaximized, IsWindowMinimized —
+         // implemented on BOTH platforms, called from nowhere. They carried "OWNER DECIDES" for a while,
+         // and that framing was wrong: checking the tree showed they are not six loose ends but the
+         // platform half of ONE unfinished feature. `WindowSpecification::Decorated` sat beside them
+         // with ZERO readers — the only glfwWindowHint( GLFW_DECORATED, ... ) calls live inside each
+         // platform's FULLSCREEN branch and answer a different question. Somebody laid the whole
+         // platform side of a custom title bar, twice, and no caller was ever written.
          //
-         // MeshAsset::GetMaterialHandle — the SINGULAR of a pair — went with the two helpers that
-         // existed only to serve it: a shared bounds check and a NullMaterialHandle() constant.
-         // Deleting a guard deserves an argument rather than a shrug, so: all five callers of the
-         // plural accessor iterate it or take its size and NONE indexes with a bare `[i]`, and the
-         // loaders build exactly one handle per submesh from the same parsed data, so the two sizes
-         // agree BY CONSTRUCTION after any successful load. A guard against a state the constructor
-         // cannot produce, reached through a function nobody calls, is the appearance of safety.
+         // Deleted by Г12 under §0 rather than kept as a reserve, because a pure virtual with no caller
+         // is a standing instruction to write a body nothing runs, and this one issued it TWELVE times.
+         // The intent is filed as У9; restoring this side is one `git revert`, which is cheaper than
+         // the standing cost. What У9 needs beyond the revert is written at the site in Window.hpp.
+         //
+         // THE REGISTER IS NOW EMPTY, and that is the point of the whole task: every row was a question
+         // nobody had answered, and a register of unanswered questions is not a finding, it is a
+         // to-do list that looks like one. The scan below still runs on every build — if a pure virtual
+         // implemented by everybody and called by nobody appears again, the count moves off zero and
+         // somebody has to say what it is for.
     };
 
     std::string Key( const std::string& cls, const std::string& method )
@@ -757,7 +749,7 @@ TEST( PureVirtualCensus, TheNumberIsStatedSoAShrinkageIsVisible )
     // that was a design question is allowed to leave. Up is a regression; down is welcome, and this
     // line moves with it. The count is quoted because a per-row diff never says "there are four more
     // of these now".
-    EXPECT_EQ( std::size( k_Census ), 6u )
+    EXPECT_EQ( std::size( k_Census ), 0u )
          << "the number of pure virtuals implemented by everybody and called by nobody has changed";
 }
 

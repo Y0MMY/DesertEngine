@@ -20,13 +20,6 @@ namespace Desert::Platform::Windows
 
         virtual void ProcessEvents() override;
 
-        [[nodiscard]] virtual const std::string& GetTitle() const override
-        {
-            return m_Data.Specification.Title;
-        }
-        virtual void SetTitle( const std::string& title ) override;
-
-        virtual void                   SetWindowSize( uint32_t width, uint32_t height ) override;
         [[nodiscard]] virtual uint32_t GetWidth() const override;
         [[nodiscard]] virtual uint32_t GetHeight() const override;
         // Runtime toggle: the swapchain picks its present mode at creation, so the new pacing only takes
@@ -42,10 +35,6 @@ namespace Desert::Platform::Windows
             }
         }
         [[nodiscard]] virtual const void* GetNativeWindow() const override;
-
-        virtual bool IsWindowMaximized() const override;
-        virtual bool IsWindowMinimized() const override;
-        virtual void Maximize() override;
 
         [[nodiscard]] virtual Common::BoolResultStr PrepareNextFrame() const override;
         [[nodiscard]] virtual Common::BoolResultStr PresentFinalImage() const override;

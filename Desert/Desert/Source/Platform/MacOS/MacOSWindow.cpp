@@ -207,12 +207,6 @@ namespace Desert::Platform::MacOS
         m_Data.Specification = specification;
     }
 
-    void MacOSWindow::SetWindowSize( uint32_t width, uint32_t height )
-    {
-        m_Data.Specification.Width  = width;
-        m_Data.Specification.Height = height;
-    }
-
     uint32_t MacOSWindow::GetWidth() const
     {
         return m_Data.Specification.Width;
@@ -228,27 +222,6 @@ namespace Desert::Platform::MacOS
         return m_GLFWWindow;
     }
 
-    bool MacOSWindow::IsWindowMaximized() const
-    {
-        return glfwGetWindowMonitor( m_GLFWWindow ) != nullptr;
-    }
-
-    bool MacOSWindow::IsWindowMinimized() const
-    {
-        return false;
-    }
-
-    void MacOSWindow::Maximize()
-    {
-        GLFWmonitor*       monitor = glfwGetPrimaryMonitor();
-        const GLFWvidmode* mode    = glfwGetVideoMode( monitor );
-
-        m_Data.Specification.Width  = mode->width;
-        m_Data.Specification.Height = mode->height;
-
-        glfwSetWindowMonitor( m_GLFWWindow, monitor, 0, 0, mode->width, mode->height, mode->refreshRate );
-    }
-
     void MacOSWindow::ProcessEvents()
     {
         glfwPollEvents();
@@ -262,12 +235,6 @@ namespace Desert::Platform::MacOS
     Common::BoolResultStr MacOSWindow::PrepareNextFrame() const
     {
         return EngineContext::GetInstance().GetRendererContext()->BeginFrame();
-    }
-
-    void MacOSWindow::SetTitle( const std::string& title )
-    {
-        m_Data.Specification.Title = title;
-        glfwSetWindowTitle( m_GLFWWindow, title.c_str() );
     }
 
     void MacOSWindow::OnEvent( Common::Event& e )
