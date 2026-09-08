@@ -92,9 +92,24 @@ Shader "DeferredLighting"
         }
 
         // One-bounce screen-space GI: gather nearby G-buffer texels, work out how much of the SUN each of
-        // them reflects TOWARD this surface, and accumulate it. This is the colour-bleed term (a red wall tints
-        // the floor red). Screen-space only (no extra passes / no lit-colour feedback); misses off-screen and
-        // point-lit bounces.
+        // them reflects TOWARD this surface, and accumulate it. Screen-space only (no extra passes / no
+        // lit-colour feedback); misses off-screen and point-lit bounces.
+        //
+        // HOW LITTLE THIS DELIVERS IN A ROOM, measured on CornellDemo (the scene that existed to show
+        // colour bleed) at --camera 0,300,1400, 715x764, noise floor 0 pixels:
+        //   * the whole feature on vs off:  mean 0.11/255, max 16/255, 13.4 % of pixels;
+        //   * the isolated indirect buffer: 0.000 in every statistic on the floor, near the walls and at
+        //     the centre alike, with a faint band only where a SUNLIT wall meets the floor;
+        //   * aiming the sun at the unlit wall: no change whatsoever.
+        // Three divisors stack. A neighbour the sun does not reach returns exactly vec3(0) from the
+        // shared BRDF; BounceFalloff is 1 + d²/(1 m)², which is 9.4 across a 290 cm room; and the sum is
+        // divided by SAMPLES whether or not a sample found an emitter, so WIDENING the radius makes the
+        // bleed weaker rather than longer-ranged — measured at 0.45 instead of 0.12, the one non-zero
+        // floor reading fell from 0.001 to 0.000. RADIUS is therefore not the knob it looks like.
+        //
+        // What would change the answer is bouncing the point and spot lights as well as the sun, at a
+        // price of SAMPLES × lights BRDF evaluations per pixel inside the pass that produces the lit
+        // colour. That is a design decision for the owner, not a constant for whoever is passing.
         //
         // The per-sample estimate is Mesh/IndirectBounce.glslh, which shades the bouncing neighbour through the
         // SAME Mesh/DirectLighting.glslh the sun below is shaded with. It used to shade it here, inline, as
@@ -112,7 +127,12 @@ Shader "DeferredLighting"
         vec3 GatherIndirectGI(vec2 uv, vec3 worldPos, vec3 N, vec3 sunL, vec3 sunRadiance)
         {
         	const int   SAMPLES = 12;     // GI sample count (perf/quality knob)
-        	const float RADIUS  = 0.12;   // screen-space gather radius (UV) — wider = longer-range bleed, but noisier
+        	// NOT a range knob, measured: because the sum below is divided by SAMPLES whether or not a
+        	// sample found an emitter, and BounceFalloff grows with distance, a WIDER radius spreads the
+        	// same fixed budget over dimmer contributions. At 0.45 instead of 0.12 the only non-zero
+        	// reading on CornellDemo's floor fell from 0.001 to 0.000. The line used to say "wider =
+        	// longer-range bleed, but noisier"; the first half of that is false.
+        	const float RADIUS  = 0.12;   // screen-space gather radius (UV)
         	const float GOLDEN  = 2.3999632; // golden angle for an even spiral
 
         	float ang      = ssgiHash(uv * 2048.0) * 6.2831853;

@@ -284,6 +284,11 @@ namespace Desert::Core
 
         std::vector<std::unique_ptr<ECS::System>> m_Systems;
 
+        // The last "these directional lights emit nothing" complaint this scene printed, kept so the
+        // per-frame collector reports each distinct state ONCE instead of sixty times a second. Empty
+        // means "nothing to complain about", which is also the state whose arrival is worth a line.
+        std::string m_DegenerateDirLightsReported;
+
         std::vector<ECS::Entity>                 m_Entitys;
         std::unordered_map<Common::UUID, size_t> m_EntitysMap;
 
