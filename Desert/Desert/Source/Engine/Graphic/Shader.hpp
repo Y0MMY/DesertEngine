@@ -3,6 +3,7 @@
 #include <Engine/Graphic/RendererTypes.hpp>
 #include <Engine/Core/Formats/Shader.hpp>
 #include <Engine/Core/Formats/ShaderProgramMeta.hpp>
+#include <Engine/Core/ShaderCompiler/ShaderVariant.hpp>
 
 #include <Engine/ShaderResources/ShaderReflectionTypes.hpp>
 
@@ -11,7 +12,15 @@
 
 namespace Desert::Graphic
 {
-    using ShaderDefines = std::vector<std::pair<std::string, std::string>>;
+    // THE COMPILE-TIME AXIS OF A PROGRAM, and it used to be `ShaderDefines` — a vector of name/value
+    // pairs that Shader::Create accepted, VulkanShader stored, and NOTHING ever gave to the compiler.
+    // Every caller passed `{}`, so the knob could not be observed to do nothing; its own header said so
+    // in a comment ("these defines still do not reach CompileProgram"). It is deleted rather than
+    // wired up, because the axis O1 needs is not a preprocessor symbol: the cloud medium is a BODY OF
+    // CODE, and four shipped programs have to receive it through one include whose name never changes
+    // (Docs/Clouds/O1_DESIGN.md §10.3). Core::ShaderVariant is that axis, and it reaches the compiler
+    // AND the cache key.
+    using ShaderVariant = Core::ShaderVariant;
 
     class Shader
     {
@@ -37,7 +46,9 @@ namespace Desert::Graphic
         GetUniformImageCubeModels() const = 0;
         virtual const std::vector<ShaderResources::ShaderLayout::Image2DSampler>
                                         GetUniformImage2DModels() const = 0;
-        virtual const ShaderDefines&    GetDefines() const              = 0;
+        // The substitution this program was COMPILED under — the one thing about a Shader object that
+        // its name and its file do not say, and the thing two objects of the same name differ by.
+        virtual const ShaderVariant&    GetVariant() const              = 0;
         virtual const Common::Filepath& GetFilepath() const             = 0;
 
         // Data-driven material metadata parsed from the .shader's `#pragma param` / `#pragma state`.
@@ -80,7 +91,7 @@ namespace Desert::Graphic
         // passName selects a `Pass "Name"` block of a DSL multi-pass shader; empty = the default
         // program. Pass shaders are named "<Shader>/<Pass>".
         static std::shared_ptr<Shader> Create( const Assets::Asset<Assets::ShaderAsset>& asset,
-                                               const ShaderDefines&                      defines  = {},
+                                               const ShaderVariant&                      variant  = {},
                                                const std::string&                        passName = {} );
 
     private:

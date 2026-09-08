@@ -30,8 +30,8 @@ namespace Desert::Core
         // traversal, so a header pulled in by two different files is listed (and hashed) once — which
         // is also what stops a cycle from recursing forever.
         void WalkIncludes( const std::string& source, const std::filesystem::path& requestingFile,
-                           std::unordered_set<std::string>& visited, std::vector<std::filesystem::path>& out,
-                           int depth )
+                           const ShaderVariant& variant, std::unordered_set<std::string>& visited,
+                           std::vector<std::filesystem::path>& out, int depth )
         {
             if ( depth > 32 )
                 return;
@@ -53,29 +53,49 @@ namespace Desert::Core
                     continue;
                 const std::string name = line.substr( qa + 1, qb - qa - 1 );
 
-                const std::filesystem::path full =
-                     ( line[qa] == '"' ? requestingFile.parent_path() / name
-                                       : Common::Constants::Path::SHADERDIR_PATH / name )
-                          .lexically_normal();
+                const bool                  angled = line[qa] != '"';
+                const std::filesystem::path full   = ( angled ? Common::Constants::Path::SHADERDIR_PATH / name
+                                                              : requestingFile.parent_path() / name )
+                                                        .lexically_normal();
 
                 if ( !visited.insert( full.generic_string() ).second )
                     continue;
+
+                // SUBSTITUTED BODIES ARE WALKED TOO, and this is not a nicety. A generated cloud medium
+                // may include a header of its own; if the walk followed the file on disk instead, that
+                // header would be absent from the key and from the hot-reload watch list, and editing it
+                // would change nothing until a restart — the exact staleness this file exists to prevent,
+                // reached through the new door instead of the old one. The path recorded is still the
+                // include's own, because that is what a watcher can watch.
+                if ( angled )
+                {
+                    const std::string requested =
+                         std::filesystem::path( name ).lexically_normal().generic_string();
+                    if ( const std::string* substituted = variant.Find( requested ) )
+                    {
+                        out.push_back( full );
+                        WalkIncludes( *substituted, full, variant, visited, out, depth + 1 );
+                        continue;
+                    }
+                }
+
                 if ( !Common::Utils::FileSystem::Exists( full ) )
                     continue;
 
                 out.push_back( full );
                 if ( const auto text = Common::Utils::FileSystem::ReadFileContent( full ); text )
-                    WalkIncludes( text.GetValue(), full, visited, out, depth + 1 );
+                    WalkIncludes( text.GetValue(), full, variant, visited, out, depth + 1 );
             }
         }
     } // namespace
 
     std::vector<std::filesystem::path> CollectShaderIncludes( const std::string&           source,
-                                                              const std::filesystem::path& requestingFile )
+                                                              const std::filesystem::path& requestingFile,
+                                                              const ShaderVariant&         variant )
     {
         std::unordered_set<std::string>    visited;
         std::vector<std::filesystem::path> includes;
-        WalkIncludes( source, requestingFile, visited, includes, 0 );
+        WalkIncludes( source, requestingFile, variant, visited, includes, 0 );
         return includes;
     }
 
@@ -100,13 +120,15 @@ namespace Desert::Core
     }
 
     uint64_t ComputeShaderCacheKey( Formats::ShaderStage stage, const std::string& source,
-                                    const std::filesystem::path& requestingFile )
+                                    const std::filesystem::path& requestingFile, const ShaderVariant& variant )
     {
-        return ComputeShaderCacheKeyForProfile( stage, source, requestingFile, SpirvDebugInfoThisBuild() );
+        return ComputeShaderCacheKeyForProfile( stage, source, requestingFile, SpirvDebugInfoThisBuild(),
+                                                variant );
     }
 
     uint64_t ComputeShaderCacheKeyForProfile( Formats::ShaderStage stage, const std::string& source,
-                                              const std::filesystem::path& requestingFile, bool spirvDebugInfo )
+                                              const std::filesystem::path& requestingFile, bool spirvDebugInfo,
+                                              const ShaderVariant& variant )
     {
         uint64_t key = kFnvOffset;
         FnvMix( key, kOptionsFingerprint );
@@ -116,9 +138,19 @@ namespace Desert::Core
         key *= kFnvPrime;
         FnvMix( key, source );
 
+        // THE SUBSTITUTED BYTES, and nothing when there are none. The loop below hashes what is on DISK
+        // at each included path — which for a substituted include is not what was compiled — so the
+        // variant's own hash is the only thing that separates two materials whose media differ. Mixing
+        // nothing for the default variant is what leaves every key already on disk unchanged.
+        if ( const uint64_t variantHash = variant.Hash(); variantHash != 0 )
+        {
+            key ^= variantHash;
+            key *= kFnvPrime;
+        }
+
         // Path AND content of every include: the path so that moving a header to a different directory
         // is a change even when the bytes are identical, the content so that editing it is one too.
-        for ( const auto& include : CollectShaderIncludes( source, requestingFile ) )
+        for ( const auto& include : CollectShaderIncludes( source, requestingFile, variant ) )
         {
             FnvMix( key, include.generic_string() );
             // A read that fails mixes nothing — byte-identical to the empty string the old untyped

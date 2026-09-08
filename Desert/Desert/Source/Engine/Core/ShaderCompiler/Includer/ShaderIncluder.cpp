@@ -8,6 +8,7 @@
 #include <format>
 #include <memory>
 #include <string>
+#include <utility>
 
 namespace Desert::Core
 {
@@ -29,7 +30,8 @@ namespace Desert::Core
         };
     } // namespace
 
-    ShaderIncluder::ShaderIncluder( const Common::Filepath& basePath ) : m_BasePath( basePath )
+    ShaderIncluder::ShaderIncluder( const Common::Filepath& basePath, ShaderVariant variant )
+         : m_BasePath( basePath ), m_Variant( std::move( variant ) )
     {
     }
 
@@ -88,6 +90,18 @@ namespace Desert::Core
             std::filesystem::path shaderRoot = Common::Constants::Path::SHADERDIR_PATH;
 
             fullPath = ( shaderRoot / requested_source ).lexically_normal();
+
+            // THE VARIANT IS ASKED BEFORE THE FILE SYSTEM, and only for an angle include: an angle path
+            // is written against the shader root and is therefore the same string for every file that
+            // includes it, which is what makes it addressable by a caller. A quoted include is relative
+            // to whoever wrote it and names nothing stable, so it is never substituted.
+            //
+            // Line-preserving translation still applies, because a substituted body is Desert shader
+            // text like any other and generated code uses the same layout sugar.
+            const std::string requested =
+                 std::filesystem::path( requested_source ).lexically_normal().generic_string();
+            if ( const std::string* substituted = m_Variant.Find( requested ) )
+                return MakeResult( fullPath.string(), Preprocess::DShaderParser::TranslateSugar( *substituted ) );
         }
 
         // FileSystem is VFS-aware: shader includes resolve from disk in dev and from the mounted

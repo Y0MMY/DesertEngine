@@ -267,6 +267,16 @@ namespace Desert::Core::Preprocess
                 param.AssetKind = "CloudLayoutAsset";
                 param.Type      = VT::Unknown;
             }
+            // A reference to another SHADER — today only ever a Volume-domain `Medium` fragment, which is
+            // the authored cloud medium a material substitutes into the four programs that sample the
+            // field. It is an asset reference like the two above and travels the same name->handle map;
+            // what makes it worth its own keyword rather than a texture slot is that a `.shader` is what
+            // the graph editor already produces and already gives an identity to.
+            else if ( s == "shaderprogram" )
+            {
+                param.AssetKind = "ShaderAsset";
+                param.Type      = VT::Unknown;
+            }
             else
                 return false;
             return true;
@@ -1358,6 +1368,36 @@ namespace Desert::Core::Preprocess
                 if ( !ReadBlock( c, includeBlock.Content, includeBlock.StartLine, err ) )
                     return fail();
             }
+            // A PROGRAM FRAGMENT, not a stage: the authored cloud medium, compiled INTO the four programs
+            // that sample the cloud field rather than into a program of its own. See
+            // ShaderProgramMeta::MediumSource for why it is a `.shader` and not a loose header.
+            else if ( lower == "medium" )
+            {
+                if ( !result.Meta.MediumSource.empty() )
+                {
+                    err = { line, "duplicate Medium block" };
+                    return fail();
+                }
+                RawBlock medium;
+                if ( !ReadBlock( c, medium.Content, medium.StartLine, err ) )
+                    return fail();
+                if ( medium.Content.find( "#version" ) != std::string::npos )
+                {
+                    err = { medium.StartLine, "a Medium block must not declare #version — it is compiled "
+                                              "INTO another program, which has already emitted one" };
+                    return fail();
+                }
+                // Empty is refused rather than accepted: an empty Medium is indistinguishable from no
+                // Medium at all in the metadata, so a material pointing at it would silently get the
+                // default and the author would be told nothing.
+                if ( medium.Content.find_first_not_of( " \t\r\n" ) == std::string::npos )
+                {
+                    err = { medium.StartLine, "a Medium block must not be empty — a material pointing at "
+                                              "it would silently draw the default medium" };
+                    return fail();
+                }
+                result.Meta.MediumSource = std::move( medium.Content );
+            }
             else if ( lower == "pass" )
             {
                 PendingPass pass;
@@ -1434,7 +1474,10 @@ namespace Desert::Core::Preprocess
             }
         }
 
-        if ( defaultPass.Blocks.empty() && namedPasses.empty() )
+        // A MEDIUM-ONLY SHADER IS LEGAL AND IS THE ONE EXCEPTION. It has no stages because it is not a
+        // program: it is the body compiled into four other programs. Every other file without a stage
+        // block is still the error it always was — a shader that draws nothing.
+        if ( defaultPass.Blocks.empty() && namedPasses.empty() && !result.Meta.IsMediumProgram() )
         {
             err = { c.Line, "shader defines no stage blocks (Vertex/Fragment/Compute...)" };
             return fail();
@@ -1463,8 +1506,13 @@ namespace Desert::Core::Preprocess
             result.Meta.PassNames.push_back( pass.Name );
         }
 
-        result.Meta.State = result.Passes.front().State;
-        result.Stages     = result.Passes.front().Stages;
+        // Guarded, because a medium-only shader has no passes at all and `front()` on an empty vector is
+        // the kind of crash that reads as a corrupt file rather than as a missing branch.
+        if ( !result.Passes.empty() )
+        {
+            result.Meta.State = result.Passes.front().State;
+            result.Stages     = result.Passes.front().Stages;
+        }
 
         return Common::MakeSuccess( std::move( result ) );
     }

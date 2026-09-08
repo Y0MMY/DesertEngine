@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/Core/Formats/Shader.hpp>
+#include <Engine/Core/ShaderCompiler/ShaderVariant.hpp>
 
 #include <Common/Core/Core.hpp> // Common::Filepath — this header leaned on the engine PCH for it,
                                 // which broke every PCH-less consumer (the offline cook's tests)
@@ -41,7 +42,18 @@ namespace Desert::Core
     class ShaderIncluder final : public shaderc::CompileOptions::IncluderInterface
     {
     public:
-        explicit ShaderIncluder( const Common::Filepath& basePath );
+        /**
+         * @param basePath the file being compiled; the anchor for quoted includes.
+         * @param variant  include targets whose bytes come from the CALLER rather than from disk — see
+         *                 ShaderVariant.hpp. Asked before the file system and only for ANGLE includes,
+         *                 whose path is written against the shader root and is therefore the same
+         *                 string wherever it appears; a quoted include is relative to whoever wrote it
+         *                 and names nothing a caller could address. A substituted name need not exist
+         *                 on disk; when it does — the shipped default of Generated/CloudMedium.glslh
+         *                 does — the substitution wins and the file is not read. Per-compile state,
+         *                 because this object is per-compile.
+         */
+        explicit ShaderIncluder( const Common::Filepath& basePath, ShaderVariant variant = {} );
         ~ShaderIncluder() override;
 
         shaderc_include_result* GetInclude( const char* requested_source, shaderc_include_type type,
@@ -71,6 +83,7 @@ namespace Desert::Core
 
     private:
         Common::Filepath m_BasePath;
+        ShaderVariant    m_Variant;
         std::size_t      m_LiveResults = 0;
     };
 } // namespace Desert::Core

@@ -402,7 +402,10 @@ Shader "BakeProceduralSky"
 
                     if (density > 0.0f)
                     {
-                        float sigmaT = density * extinction * field.ExtinctionFactor;
+                        // Through the MEDIUM, exactly as the screen march does it — the panorama the
+                        // scene is lit by must not judge the same sky by a second field.
+                        float sigmaT = density * extinction *
+                                       CloudSampleExtinctionFactor(params, field, fieldPos);
 
                         float opticalDepth = CloudLightOpticalDepth(layer, params, samplePos, sunDir,
                                                                     lightMarchKm, lightSamples, extinction);
@@ -428,11 +431,20 @@ Shader "BakeProceduralSky"
                         // The sun THIS sample sees, on the screen march's own terms — see the note at
                         // CloudSunColourAtForBake for why the bake owes this and cannot take the block's
                         // colour verbatim.
+                        // The medium's per-sample occlusion and albedo, on the screen march's own terms.
+                        ambientOcclusion = CloudSampleOcclusion(params, field, fieldPos, ambientOcclusion);
+                        vec3 sampleAlbedo = CloudSampleAlbedo(params, field, fieldPos, albedo);
+
                         luminance += transmittance *
                                      CloudMultiScatterStep(series,
                                                            CloudSunColourAtForBake(atm, layer, samplePos, sunDir),
                                                            ambientRadiance * ambientOcclusion, opticalDepth,
-                                                           phase, sigmaT, albedo, stepKm);
+                                                           phase, sigmaT, sampleAlbedo, stepKm);
+
+                        // Emission, attenuated by the ray's history only — see the note at the same line
+                        // of the screen march. A layer that glows has to glow in the panorama the scene is
+                        // LIT by, or the light in the world would come from a sky nobody can see.
+                        luminance += transmittance * CloudSampleEmissive(params, field, fieldPos) * stepKm;
 
                         aerialWeightedT += t * transmittance;
                         aerialWeightSum += transmittance;

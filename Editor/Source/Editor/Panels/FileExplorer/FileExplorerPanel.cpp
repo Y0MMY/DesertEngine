@@ -1392,6 +1392,12 @@ namespace Desert::Editor
                                     createGraph( ShaderGraph::Domain::Surface );
                                 if ( ImGui::MenuItem( "Post Process" ) )
                                     createGraph( ShaderGraph::Domain::PostProcess );
+                                // The cloud medium. Named for what an artist is authoring rather than
+                                // for the engine's domain token: "Volume" is the word in the `.shader`
+                                // and in ShaderDomain, and it means nothing beside "Surface" and "Post
+                                // Process" until you already know what it is.
+                                if ( ImGui::MenuItem( "Cloud Medium" ) )
+                                    createGraph( ShaderGraph::Domain::Volume );
                                 ImGui::EndMenu();
                             }
 

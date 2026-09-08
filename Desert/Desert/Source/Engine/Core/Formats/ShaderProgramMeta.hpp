@@ -257,6 +257,28 @@ namespace Desert::Core::Formats
         // empty for legacy single-program shaders.
         std::vector<std::string> PassNames;
 
+        // THE BODY OF A `Medium { ... }` BLOCK — a PROGRAM FRAGMENT, not a stage.
+        //
+        // A Volume-domain shader may declare no stages at all and carry only this: the authored cloud
+        // medium, which is compiled INTO four other programs as the substitution for one of their includes
+        // (Engine/Core/ShaderCompiler/ShaderVariant.hpp). It is a `.shader` rather than a loose `.glslh`
+        // for one reason and it is the deciding one: a `.shader` is an ASSET with a handle, so a material
+        // can point at it, the content browser can show it, and hot reload already watches it. A `.dgraph`
+        // could not — it has no identity at all — and inventing an asset type for the fragment would have
+        // meant a second document editor for something the graph already produces.
+        //
+        // Empty for every ordinary program, which is what makes IsMediumProgram() a fact about the file
+        // rather than a convention.
+        std::string MediumSource;
+
+        // A program fragment and nothing else: no stages of its own, so it compiles to no modules and is
+        // never used to build a pipeline. ShaderService registers it by name without complaining that it
+        // has no compiled stages — the complaint is right for every other shader and wrong for this one.
+        bool IsMediumProgram() const
+        {
+            return !MediumSource.empty();
+        }
+
         bool HasParams() const
         {
             return !Params.empty();

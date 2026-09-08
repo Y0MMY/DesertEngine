@@ -38,7 +38,31 @@ namespace Desert::Graphic
                                                                     Image2D*                multiScatterLut,
                                                                     const CloudBakeBinding& clouds )
     {
-        const auto shader = GetComputeShader( "BakeProceduralSky" );
+        // THE FOURTH CONSUMER OF THE CLOUD MEDIUM, and the reason the medium is a compile-time include
+        // rather than a generated program: this is the SKY's program — atmosphere and clouds in one
+        // panorama, needed by scenes with no cloud layer — so it can never become a pass of a cloud
+        // material, and yet the light it puts into the world has to come from the same clouds the camera
+        // sees. Compiling the same file under the layer's variant is what makes those two the same
+        // clouds; a second analytic dome beside them is the shape that produced the grey-clouds defect.
+        //
+        // The variant program is held only for the duration of this bake, which is what its lifetime
+        // should be: the bake is a submit-and-wait, and nothing after it needs the modules.
+        std::shared_ptr<Shader> shader;
+        if ( clouds.Medium && !clouds.Medium->IsDefault() )
+        {
+            shader = Runtime::ResourceRegistry::GetShaderService()->AcquireVariant( "BakeProceduralSky",
+                                                                                    *clouds.Medium );
+            if ( !shader )
+            {
+                // Named, then the shipped program: an authored medium that will not compile must not take
+                // the scene's lighting away with it.
+                LOG_ERROR( "[Sky] the authored cloud medium could not be compiled into BakeProceduralSky "
+                           "— the panorama that lights this scene falls back to the shipped medium, so "
+                           "the world is lit by a different sky than the one on screen." );
+            }
+        }
+        if ( !shader )
+            shader = GetComputeShader( "BakeProceduralSky" );
         if ( !shader || !skyParams )
             return nullptr;
 

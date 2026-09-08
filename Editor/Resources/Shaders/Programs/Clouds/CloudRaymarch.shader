@@ -77,6 +77,8 @@ Shader "CloudRaymarch"
         Float MultiScatterContribution ("Multiple Scattering Contribution", Range(0.0, 1.0), Category("Lighting"), Timing(Immediate), Tooltip("How much each successive scattering order contributes. The factor is SQUARED at every octave, so the series falls away quickly and the third order is already a small correction.")) = 0.667
         Float MultiScatterOcclusion ("Multiple Scattering Occlusion", Range(0.0, 1.0), Category("Lighting"), Timing(Immediate), Tooltip("How much less each successive order is absorbed. This is what lets light that has already scattered reach the core of a cloud that the direct beam never gets into - the reason a thick cumulus glows rather than going black. 0.4847 (the cube root of the similarity factor) puts the third octave exactly on the medium's diffusion length; 0.25 is the shipped calibration at 8/km (D-32).")) = 0.25
         Float MultiScatterEccentricity ("Multiple Scattering Eccentricity", Range(0.0, 1.0), Category("Lighting"), Timing(Immediate), Tooltip("How much directionality each successive order keeps. Light that has bounced many times has forgotten where it came from, so the higher orders blend toward an isotropic phase.")) = 0.18
+        ShaderProgram Medium ("Cloud Medium", Category("Medium"), Timing(Immediate), Tooltip("WHAT A CLOUD IS at a point in space - the density, the extinction, the albedo, the emission and the sky occlusion of the medium itself, authored as a node graph. Create one with New Shader Graph > Cloud Medium in the Content Browser, then drop it here. EMPTY IS THE NORMAL STATE and means the engine's own medium, which is what every scene drew before this slot existed and costs exactly the same. A graph with nothing wired into its Volume Output is that same medium again, so authoring starts from the sky you already have rather than from nothing. Note what the graph CANNOT reach: about half of the values in this window are inputs to a CPU bake that has already run by the time the march samples anything, and they are marked as such - a graph reads the three that are still in scope, and the palette offers no way to name the others."))
+
         Color3 AmbientScale ("Ambient Scale", Category("Lighting"), Timing(Immediate), Tooltip("Scales the sky's ambient contribution to the clouds. White is the full contribution; black lights them by the sun alone and leaves their shadowed sides black. Lowering it is NOT how the clouds get their form back: deleting it is the largest single knockout in the subsystem (D-25, D-32), and the contrast that appears when it goes is the sun's, uncovered - the frame loses half its light and goes warm.")) = (1.0, 1.0, 1.0)
     }
 
@@ -627,9 +629,12 @@ Shader "CloudRaymarch"
                         if (cloudFrontKm < 0.0f)
                             cloudFrontKm = t;
 
-                        // The winning species' own opacity, per sample. See the note in
+                        // The winning species' own opacity, per sample — through the MEDIUM, so a
+                        // material that authors its own extinction is obeyed here and, identically, on
+                        // the shadow ray, the shadow map and the occlusion volume. See the note in
                         // CloudLightOpticalDepth.
-                        float sigmaT = density * extinction * field.ExtinctionFactor;
+                        float sigmaT = density * extinction *
+                                       CloudSampleExtinctionFactor(params, field, fieldPos);
 
                         // ONE shadow ray serves every scattering order. That is the whole economy of the
                         // octave approximation: the expensive part is finding how much material lies
@@ -690,10 +695,26 @@ Shader "CloudRaymarch"
                         // its source, because the atmosphere between this point and the sun is the same
                         // atmosphere whether the light arriving is first-order or third — the octave loop
                         // inside CloudMultiScatterStep would otherwise repeat the fetch per order.
+                        // THE MEDIUM'S LAST TWO OUTPUTS, taken here because both are per-SAMPLE in the
+                        // Volume domain's contract even though the shipped material authors them per
+                        // layer. Each default hands its argument straight back, so the two calls fold
+                        // away and the loop is the loop it was.
+                        ambientOcclusion = CloudSampleOcclusion(params, field, fieldPos, ambientOcclusion);
+                        vec3 sampleAlbedo = CloudSampleAlbedo(params, field, fieldPos, albedo);
+
                         luminance += transmittance *
                                      CloudMultiScatterStep(series, CloudSunColourAt(layer, samplePos, toSun),
                                                            ambientRadiance * ambientOcclusion, opticalDepth,
-                                                           phase, sigmaT, albedo, stepKm);
+                                                           phase, sigmaT, sampleAlbedo, stepKm);
+
+                        // EMISSION: radiance the medium ADDS, per kilometre of march, attenuated by the
+                        // ray's own history and by nothing else. It is deliberately NOT multiplied by the
+                        // absorption coefficient — Unreal makes the same choice for the same reason, that
+                        // an artist authoring a glow wants the glow they authored and not the glow times
+                        // however opaque the cloud happens to be there (VolumetricCloud.usf:1381-1384).
+                        // The default medium returns a literal zero, so this line costs nothing until a
+                        // graph writes the pin.
+                        luminance += transmittance * CloudSampleEmissive(params, field, fieldPos) * stepKm;
 
                         // Recorded BEFORE the ray is attenuated: the weight is how much this sample was
                         // able to contribute, not how much is left after it.

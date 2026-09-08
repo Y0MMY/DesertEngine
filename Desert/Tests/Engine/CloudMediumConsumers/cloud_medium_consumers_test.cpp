@@ -142,31 +142,91 @@ TEST( CloudMediumConsumers, EveryProgramThatSamplesTheCloudFieldIsOneOfTheFourKn
                  programs.size() );
 }
 
-// ── THE SEAM IS ONE TEXT ───────────────────────────────────────────────────────────────────────────────
+// ── THE SEAM IS ONE TEXT, AND IT IS THE SUBSTITUTABLE ONE ──────────────────────────────────────────────
 //
-// The four consumers above reach the medium through ONE definition, and the second march inside that same
-// header (the sun-transmittance quadrature) reaches it there too. Asserted because it is what makes an
-// authored medium a ONE-POINT injection rather than a four-point one: the day a copy of the density chain
-// appears in a second header, O1-C's cost quadruples and nothing else would say so.
-TEST( CloudMediumConsumers, TheDensityChainIsDefinedInExactlyOnePlace )
+// The four consumers above reach the medium through ONE definition, and the second march inside
+// CloudField.glslh (the sun-transmittance quadrature) reaches it there too. Since O1-E that definition
+// lives in Generated/CloudMedium.glslh, which is the file a cloud material SUBSTITUTES at compile time
+// (Engine/Core/ShaderCompiler/ShaderVariant.hpp). Both halves are asserted, because they fail
+// differently:
+//
+//   * a SECOND definition of any medium entry point is a mirror — the four programs would then judge the
+//     sky by whichever of them they happened to include, which is the grey-clouds shape;
+//   * a definition that is not in the substitutable file is a medium NO material can author, and the
+//     symptom is a graph that compiles, applies, and changes nothing.
+//
+// EVERY ENTRY POINT OF THE CONTRACT IS CHECKED, not just density. Extinction, albedo, emission and
+// occlusion are outputs of the Volume domain's contract (O1_DESIGN §3.3) and each is a place a mirror
+// could grow.
+TEST( CloudMediumConsumers, EveryMediumEntryPointIsDefinedOnceAndInTheSubstitutableFile )
 {
     const std::filesystem::path shaders = RepoRoot() / "Editor/Resources/Shaders";
-    const std::set<std::string> headers = ShaderFiles( shaders / "Common", ".glslh" );
+    const std::set<std::string> headers = ShaderFiles( shaders, ".glslh" );
     ASSERT_FALSE( headers.empty() ) << "the shared shader headers were not found";
 
-    std::set<std::string> definers;
-    for ( const std::string& relative : headers )
+    // The name the four programs' include closure resolves, and the name a material substitutes. One
+    // string, used for both, so the test cannot pass while the two have drifted apart.
+    const std::string kMediumInclude = "Generated/CloudMedium.glslh";
+
+    // The file that is NEVER substituted, and therefore the one an authored medium may still call.
+    const std::string kMediumDefaults = "Common/CloudMediumDefault.glslh";
+
+    const std::vector<std::pair<std::string, std::string>> entryPoints = {
+         { "float CloudSampleDensity(", kMediumInclude },
+         { "float CloudSampleExtinctionFactor(", kMediumInclude },
+         { "vec3 CloudSampleAlbedo(", kMediumInclude },
+         { "vec3 CloudSampleEmissive(", kMediumInclude },
+         { "float CloudSampleOcclusion(", kMediumInclude },
+         // The shipped bodies. They live in the un-substituted half on purpose: a graph that says "the
+         // same clouds, but…" calls them, and the whole mechanism's acceptance — a graph that changes
+         // nothing produces the frame that no graph produces — rests on them being reachable.
+         { "float CloudDefaultDensity(", kMediumDefaults },
+         { "float CloudDefaultExtinctionFactor(", kMediumDefaults },
+         { "vec3 CloudDefaultAlbedo(", kMediumDefaults },
+         { "vec3 CloudDefaultEmissive(", kMediumDefaults },
+         { "float CloudDefaultOcclusion(", kMediumDefaults },
+         // What the graph's Cloud Sample node compiles to. Its pin NAMES are this struct's member names,
+         // which is what saves the emitter a pin-to-expression table that would have to be kept level
+         // with the node catalogue by hand.
+         { "struct CloudGraphSample", kMediumDefaults },
+         { "CloudGraphSample CloudGraphSampleAt(", kMediumDefaults },
+    };
+
+    for ( const auto& [signature, home] : entryPoints )
     {
-        const std::string source = ReadAll( shaders / "Common" / relative );
-        if ( source.find( "float CloudSampleDensity(" ) != std::string::npos ||
-             source.find( "float CloudSampleDensity( " ) != std::string::npos )
-            definers.insert( relative );
+        std::set<std::string> definers;
+        for ( const std::string& relative : headers )
+        {
+            if ( ReadAll( shaders / relative ).find( signature ) != std::string::npos )
+                definers.insert( relative );
+        }
+
+        EXPECT_EQ( definers, ( std::set<std::string>{ home } ) )
+             << "'" << signature << "' is defined in " << definers.size()
+             << " header(s). Exactly one, and it has to be " << home << ". The five entry points belong in "
+             << kMediumInclude
+             << ", which is the file a material substitutes — a definition elsewhere is a medium no "
+                "material can author. The shipped bodies belong in "
+             << kMediumDefaults
+             << ", which is never substituted — a body in the substituted file is a body an authored "
+                "medium cannot call. Two definitions of either is a mirror that drifts.";
     }
 
-    EXPECT_EQ( definers, ( std::set<std::string>{ "CloudField.glslh" } ) )
-         << "the cloud density chain is defined in " << definers.size()
-         << " header(s). One is the seam; two are a mirror, and the four programs above would then be "
-            "judging the sky by whichever of them they happened to include.";
+    // AND IT IS INCLUDED FROM EXACTLY ONE PLACE. The substitution is by NAME: two headers including it
+    // would compile two copies under one name, and the include guard would silently give the second one
+    // nothing — a difference between two programs that no diagnostic would ever mention.
+    std::set<std::string> includers;
+    for ( const std::string& relative : headers )
+    {
+        if ( relative == kMediumInclude )
+            continue;
+        if ( ReadAll( shaders / relative ).find( "<" + kMediumInclude + ">" ) != std::string::npos )
+            includers.insert( relative );
+    }
+    EXPECT_EQ( includers, ( std::set<std::string>{ "Common/CloudField.glslh" } ) )
+         << kMediumInclude << " is included from " << includers.size()
+         << " header(s). One is the seam: every program that samples the field gets it through "
+            "Common/CloudField.glslh and none of them names it.";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════

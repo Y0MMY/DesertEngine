@@ -354,6 +354,124 @@ TEST_F( ShaderRootFixture, AnIncludeThatDoesNotResolveIsNotFatal )
     EXPECT_NO_THROW( (void)ComputeShaderCacheKey( ShaderStage::Compute, source, path ) );
 }
 
+// ---- The compile-time variant -----------------------------------------------------------------------
+//
+// A ShaderVariant substitutes the BYTES of an include without changing its NAME (Engine/Core/
+// ShaderCompiler/ShaderVariant.hpp). Everything on disk therefore stays identical between two variants of
+// one program, which is precisely why the key has to carry them: without it the first variant compiled
+// wins the cache entry and every other one is silently served its SPIR-V — across restarts, because the
+// cache is a directory. The symptom would be "my cloud graph does nothing", which names neither a cache
+// nor a key.
+
+TEST_F( ShaderRootFixture, TheVariantSeparatesTwoBodiesUnderOneIncludeName )
+{
+    // THE MUTATION THIS AXIS EXISTS FOR: same stage, same file, same headers on disk, same include NAME —
+    // only the substituted body differs.
+    const std::string source = "#version 450\n#include <Generated/CloudMedium.glslh>\nvoid main() {}\n";
+    const auto        path   = ShaderPath( "Fog/HeightFog.shader" );
+
+    Desert::Core::ShaderVariant a{ { { "Generated/CloudMedium.glslh", "// medium A\n" } } };
+    Desert::Core::ShaderVariant b{ { { "Generated/CloudMedium.glslh", "// medium B\n" } } };
+
+    EXPECT_NE( ComputeShaderCacheKey( ShaderStage::Compute, source, path, a ),
+               ComputeShaderCacheKey( ShaderStage::Compute, source, path, b ) )
+         << "two different media compiled under one include name produced ONE cache key, so the second "
+            "one would be served the first one's SPIR-V.";
+
+    // And it is a function of content, not of how many variants have been seen.
+    EXPECT_EQ( ComputeShaderCacheKey( ShaderStage::Compute, source, path, a ),
+               ComputeShaderCacheKey(
+                    ShaderStage::Compute, source, path,
+                    Desert::Core::ShaderVariant{ { { "Generated/CloudMedium.glslh", "// medium A\n" } } } ) );
+}
+
+TEST_F( ShaderRootFixture, MovingTextBetweenTwoSubstitutedNamesIsADifferentVariant )
+{
+    // The hash is order-independent, and the cheap way to get that is to XOR a hash per entry. Hashing
+    // the name and the body SEPARATELY would make these two variants equal — the bodies swapped between
+    // the names — and they compile to different programs.
+    const std::string source = "#version 450\nvoid main() {}\n";
+    const auto        path   = ShaderPath( "Fog/HeightFog.shader" );
+
+    const Desert::Core::ShaderVariant straight{
+         { { "Generated/A.glslh", "// one\n" }, { "Generated/B.glslh", "// two\n" } } };
+    const Desert::Core::ShaderVariant swapped{
+         { { "Generated/A.glslh", "// two\n" }, { "Generated/B.glslh", "// one\n" } } };
+    const Desert::Core::ShaderVariant reordered{
+         { { "Generated/B.glslh", "// two\n" }, { "Generated/A.glslh", "// one\n" } } };
+
+    EXPECT_NE( straight.Hash(), swapped.Hash() );
+    EXPECT_EQ( straight.Hash(), reordered.Hash() )
+         << "the same substitution assembled in a different order hashed differently, so it would compile "
+            "and cache twice and report a miss for ever.";
+    EXPECT_NE( ComputeShaderCacheKey( ShaderStage::Compute, source, path, straight ),
+               ComputeShaderCacheKey( ShaderStage::Compute, source, path, swapped ) );
+}
+
+TEST_F( ShaderRootFixture, TheDefaultVariantLeavesTheKeyExactlyWhereItWas )
+{
+    // Every SPIR-V artifact already on disk was keyed before this axis existed. A default variant that
+    // mixed anything at all would invalidate the whole cache — hundreds of cold compiles on the next
+    // launch — for a substitution nobody made.
+    const std::string source = "#version 450\nvoid main() {}\n";
+    const auto        path   = ShaderPath( "Fog/HeightFog.shader" );
+
+    EXPECT_EQ( Desert::Core::ShaderVariant{}.Hash(), 0u );
+    EXPECT_EQ( ComputeShaderCacheKey( ShaderStage::Compute, source, path ),
+               ComputeShaderCacheKey( ShaderStage::Compute, source, path, Desert::Core::ShaderVariant{} ) );
+}
+
+TEST_F( ShaderRootFixture, ASubstitutingVariantNeverHashesToTheDefaultsValue )
+{
+    // Zero means "no substitution" everywhere it is read. A variant that substituted something and
+    // reported zero would be invisible to the key and to every diagnostic that prints it.
+    const Desert::Core::ShaderVariant substituting{ { { "Generated/CloudMedium.glslh", "" } } };
+    EXPECT_NE( substituting.Hash(), 0u );
+    EXPECT_FALSE( substituting.IsDefault() );
+}
+
+TEST_F( ShaderRootFixture, TheClosureFollowsASubstitutedBodyRatherThanTheFileOnDisk )
+{
+    // A generated medium may include a header of its own. Walking the FILE instead would leave that
+    // header out of the key and out of the hot-reload watch list, so editing it would change nothing
+    // until a restart — the same staleness this file exists to prevent, arriving through the new door.
+    const std::string source = "#version 450\n#include <Generated/CloudMedium.glslh>\nvoid main() {}\n";
+    const auto        path   = ShaderPath( "Fog/HeightFog.shader" );
+
+    const Desert::Core::ShaderVariant variant{
+         { { "Generated/CloudMedium.glslh", "#include <Common/CameraUB.glslh>\n" } } };
+
+    const auto includes = CollectShaderIncludes( source, path, variant );
+
+    const auto contains = [&includes]( const char* name )
+    {
+        for ( const auto& include : includes )
+            if ( include.filename() == name )
+                return true;
+        return false;
+    };
+
+    EXPECT_TRUE( contains( "CloudMedium.glslh" ) );
+    EXPECT_TRUE( contains( "CameraUB.glslh" ) )
+         << "the walk read the medium file on disk instead of the bytes actually compiled, so a header "
+            "reachable only through the substitution is invisible to the key and to hot reload.";
+}
+
+TEST_F( ShaderRootFixture, SubstitutingTheShippedMediumMovesTheKeyOfTheRealCloudMarch )
+{
+    // Not a synthetic source: the compute stage of the program the camera actually marches, whose include
+    // closure reaches Generated/CloudMedium.glslh through Common/CloudField.glslh and names it nowhere.
+    const auto path   = ShaderPath( "Clouds/CloudRaymarch.shader" );
+    const auto source = StageSource( path, ShaderStage::Compute );
+    ASSERT_FALSE( source.empty() );
+
+    const uint64_t shipped = ComputeShaderCacheKey( ShaderStage::Compute, source, path );
+
+    const Desert::Core::ShaderVariant authored{ { { "Generated/CloudMedium.glslh", "// an authored medium\n" } } };
+
+    EXPECT_NE( shipped, ComputeShaderCacheKey( ShaderStage::Compute, source, path, authored ) );
+}
+
 // ---- The include closure ----------------------------------------------------------------------------
 
 TEST_F( ShaderRootFixture, TheClosureOfTheFogPassListsEveryHeaderItNames )

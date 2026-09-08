@@ -770,85 +770,16 @@ CloudFieldSample SampleCloudField( CloudFieldParams params, float heightFraction
 // disc used to be the p95. That is a different sky from the one the complaint was made about, and moving
 // the default re-authorises three dozen scenes, so it is the owner's call and not this task's.
 
-// The up-rez: turn the low-frequency profile into something with a cloud's edge.
+// THE MEDIUM IS AUTHORED, so it is not written here any more — it is INCLUDED, and a cloud material may
+// substitute its own bytes for that one file at compile time (Engine/Core/ShaderCompiler/
+// ShaderVariant.hpp, Docs/Clouds/O1_DESIGN.md §10.3). The density chain that stood in these lines moved
+// into the file below UNCHANGED and is still what every program gets when nothing authors anything.
 //
-// The erosion is a REMAP, not a subtraction (deck p.120, `ValueErosion`). The difference shows at the
-// core: subtracting noise thins a dense cloud as much as a wispy one, so a cumulus turns translucent in
-// the middle, while remapping leaves anything already deep inside the body at full density and only cuts
-// where the profile was already falling off.
-//
-// `DetailType` selects between the volume's two CHARACTERS — wispy and billowy — and each of them is
-// itself a frequency blend driven by the profile. That is the deck's composite on p.122 in full rather
-// than the two-channel half of it that stood here, and the difference is that the erosion's frequency now
-// follows how deep inside the body the sample is instead of being constant through the whole cloud.
-float CloudSampleDensity( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )
-{
-    if ( field.Profile <= 0.0f )
-        return 0.0f;
-
-    vec3 windPos = vec3( positionKm.x - params.WindOffsetKm.x, positionKm.y - params.WindOffsetKm.y,
-                         positionKm.z - params.WindOffsetKm.z );
-
-    // ANISOTROPIC, and it was not. The erosion was the one octave here still sampled as a cube, which
-    // gives a torn cloud edge the proportions of gravel; the graph has anisotropy on all three of its
-    // octaves. This one takes the INVERTED triple — vertical period longer than horizontal — so the wisps
-    // it cuts are taller than they are wide, which is what a shred of cloud being carried upward looks
-    // like.
-    float tile      = max( params.DetailTileKm, 1e-4f );
-    vec3  detailPos = vec3( windPos.x * CLOUD_DETAIL_FREQ_X / tile, windPos.y * CLOUD_DETAIL_FREQ_Y / tile,
-                            windPos.z * CLOUD_DETAIL_FREQ_Z / tile );
-
-    // THE VOLUME IS THE WINNING SPECIES', not the layer's. Until this argument existed there was one
-    // `sampler3D` on the march and a Cirrus standing beside a Cumulus was cut from the cumulus' volume —
-    // the last recorded debt of the cloud programme, and a dead setting in three of a layer's four slots.
-    vec4 noise = CLOUD_SAMPLE_NOISE( field.NoiseSlot, detailPos );
-
-    // THE DECK'S OWN COMPOSITE (p.122), and it uses all four channels rather than two of them.
-    //
-    // Each character of erosion is a blend of ITS OWN pair across frequency, and the blend is driven by the
-    // profile — deep inside the body the coarse octave, out at the edge the fine one, which is the
-    // frequency-follows-depth relation the deck states on p.101 and p.105. The wispy end blends linearly;
-    // the billowy end blends on the fourth root, so a billowy cloud reaches its fine octave much earlier
-    // and its edge breaks into lobes rather than fading into one smooth frequency.
-    //
-    // Only THEN do the two characters mix, on DetailType. Written the other way round — pick a channel by
-    // type and never blend by depth — the erosion has one frequency everywhere inside a cloud, which is
-    // what the two-channel version this replaces did.
-    float wispy   = mix( noise.x, noise.y, field.Profile );
-    float billowy = mix( noise.z, noise.w, pow( field.Profile, 0.25f ) );
-
-    float detailField = clamp( mix( wispy, billowy, clamp( field.DetailType, 0.0f, 1.0f ) ), 0.0f, 1.0f );
-
-    // THE EROSION IS WEIGHTED BY DEPTH, and this is the difference between clouds and fog.
-    //
-    // Applied uniformly, the erosion subtracts as much from the core of a cloud as from its edge — and
-    // since the profile is only high in a thin band anyway, a strength of 0.5 removes most of the layer
-    // and what survives is a translucent veil. That is not a tuning failure: a cut of fixed depth into a
-    // field whose typical value is small removes the field.
-    //
-    // Weighting by (1 - Profile) puts the whole cut where the cloud is already ending. The core, which is
-    // deep inside the body, keeps its density and stays solid; the edge, which is barely inside it, is
-    // eaten into billows and wisps. It is the same principle the deck states as a frequency blend driven
-    // by the dimensional profile (p.101, p.105) — the profile decides how much detail belongs here — and
-    // it is why that field means "depth inside the body" rather than "density".
-    // THE DEPTH OF THE CUT IS THE WINNING SPECIES', multiplied into the layer's own strength here rather
-    // than folded together on the CPU as it was while a layer had one kind of cloud in it. A lenticular
-    // has to stay a smooth lens and a cirrus has to stay shredded when the two are in the same sky, and a
-    // single product formed once could only describe one of them.
-    // THE FACTOR IS BOUNDED ON BOTH SIDES AND NOT ONLY BELOW. `max(x, 0)` leaves `+inf` intact, and this
-    // product's other operand is a slider whose zero position is the whole subject of the test below it —
-    // so the unbounded version turns "erosion off" into a NaN density for every sample in the body. See
-    // the note on CLOUD_MATERIAL_FACTOR_MAX: on every value either producer can legally carry, this bound
-    // is the identity.
-    float edgeWeight = 1.0f - clamp( field.Profile, 0.0f, 1.0f );
-    float erosion    = detailField *
-                    clamp( params.DetailStrength * CLOUD_MATERIAL_FACTOR( field.DetailFactor ), 0.0f, 1.0f ) *
-                    edgeWeight;
-
-    float density = CloudRemap( field.Profile, erosion, 1.0f, 0.0f, 1.0f );
-
-    return clamp( density * field.DensityScale, 0.0f, 1.0f );
-}
+// THE INCLUDE SITS HERE, INSIDE THE PRODUCER GUARDS, and that is load-bearing: the medium is written
+// against CloudFieldParams, CloudFieldSample and CLOUD_SAMPLE_NOISE, all of which exist only after the
+// block above. It is also why all FOUR programs that sample the field receive the same medium without
+// any of them naming it — they include this header, and this header includes the medium.
+#include <Generated/CloudMedium.glslh>
 
 // Optical depth from a sample toward the sun.
 //
@@ -905,7 +836,8 @@ float CloudLightOpticalDepth( CloudLayer layer, CloudFieldParams params, vec3 po
         // it: with one extinction for the whole shell the deck would shade the tower as if it were made of
         // the tower's own material, and the ice of a cirrus at a quarter of a cumulus' opacity would cast
         // a cumulus' shadow.
-        accumulated += density * extinctionPerKm * field.ExtinctionFactor * segment;
+        accumulated += density * extinctionPerKm * CloudSampleExtinctionFactor( params, field, fieldPos ) *
+                       segment;
         previous = current;
     }
 

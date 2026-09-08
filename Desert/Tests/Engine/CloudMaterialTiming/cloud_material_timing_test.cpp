@@ -241,6 +241,21 @@ namespace
         if ( p.Name == "LayoutMask" )
             return !Assets::CloudProceduralParamsEqual( before, Bake( base, layer, 0xA1u, 0xD4u ) );
 
+        // THE AUTHORED MEDIUM, and its perturbation is a handle rather than a number. It is measured the
+        // same way as everything else — the renderer's own bake-parameter application, then the
+        // renderer's own comparison — and the answer it gives is the interesting one: a medium is a body
+        // of GPU code compiled into the march, so no amount of authoring it can move a single input of a
+        // CPU bake that has already run. That is what makes Timing(Immediate) on this slot a measured
+        // fact rather than a hopeful label.
+        if ( p.Name == "Medium" )
+        {
+            CloudMaterialValues moved = base;
+            moved.Medium              = Assets::AssetHandle( 0xE5E5E5E5ull );
+            EXPECT_NE( 0, std::memcmp( &moved, &base, sizeof( CloudMaterialValues ) ) )
+                 << "the Medium perturbation changed nothing, so its answer means nothing";
+            return !Assets::CloudProceduralParamsEqual( before, Bake( moved, layer, 0xA1u, 0xB2u ) );
+        }
+
         CloudMaterialValues moved = base;
         Desert::Graphic::Detail::ApplyCloudOverride( moved, p.Name, Perturbed( p ) );
         EXPECT_NE( 0, std::memcmp( &moved, &base, sizeof( CloudMaterialValues ) ) )
@@ -304,7 +319,7 @@ TEST( CloudMaterialTiming, TheDeclaredTimingIsTheOneTheBakeActuallyHas )
                  "the same frame\n",
                  rebake, rebake + immediate, immediate );
     EXPECT_EQ( rebake, 20u );
-    EXPECT_EQ( immediate, 14u );
+    EXPECT_EQ( immediate, 15u );
 }
 
 // ── 3. THE HEADING MAY SPEAK FOR ITS GROUP ─────────────────────────────────────────────────────────────
@@ -339,7 +354,7 @@ TEST( CloudMaterialTiming, EveryCategoryIsWhollyBakeOrWhollyMarch )
     // NAMED rather than counted, because the claim is about WHICH categories: a count would pass on the
     // wrong six the day one is renamed.
     EXPECT_EQ( categories, ( std::set<std::string>{ "Cloud Types", "Weather", "Placement", "Layout", "Detail",
-                                                    "Lighting" } ) );
+                                                    "Lighting", "Medium" } ) );
 }
 
 int main( int argc, char** argv )

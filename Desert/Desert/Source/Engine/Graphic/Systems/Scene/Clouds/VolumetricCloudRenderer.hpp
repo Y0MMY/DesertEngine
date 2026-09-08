@@ -341,6 +341,28 @@ namespace Desert::Graphic::System
         void ResolveMaterial();
 
         /**
+         * @brief Turns m_Material.Medium into the compile-time substitution the three in-frame programs
+         *        are compiled under, and rebuilds their pipelines when it has changed.
+         *
+         * ONLY WHEN IT HAS CHANGED, and the comparison is the variant's own content hash rather than the
+         * material handle: editing the graph produces new bytes under the same handle, and swapping two
+         * materials whose media are the same text must NOT throw three pipelines away. Called once per
+         * frame from ResolveMaterial, and does nothing at all in the shipped case, where the hash is 0
+         * and stays 0.
+         *
+         * The FOURTH consumer — the sky panorama the scene is lit by — is not built here: it belongs to
+         * the sky renderer and is compiled under the same variant, carried out through
+         * CloudEnvironmentBake::Medium.
+         */
+        void ResolveMedium();
+
+        /// Creates the three pipelines whose programs carry the medium, from the variant currently held
+        /// (or from the registered programs when it is default). Split out of CreatePipelines because
+        /// ResolveMedium has to do exactly this again when the authored medium changes, and two
+        /// constructions of one pipeline set is how they come to disagree.
+        bool BuildMediumPipelines();
+
+        /**
          * Turns this frame's hero clouds into the instance buffer the two cloud passes read, and points
          * m_AuthoredAtlas at the image holding their bodies.
          *
@@ -355,6 +377,23 @@ namespace Desert::Graphic::System
          *                against.
          */
         void BuildAuthoredPayload( const CloudGpuPayload& payload );
+
+        // ---- The authored medium -------------------------------------------------------------------
+        //
+        // THE VARIANT THREE OF THE FOUR CONSUMERS ARE COMPILED UNDER. Default (empty) is the shipped
+        // state and means Generated/CloudMedium.glslh as it sits on disk.
+        Core::ShaderVariant m_MediumVariant;
+        /// m_MediumVariant.Hash(), kept beside it so the per-frame comparison is one integer and not a
+        /// re-hash of the whole body. 0 is the default medium.
+        uint64_t m_MediumVariantHash = 0;
+
+        // THE STRONG REFERENCES, and they are what keeps the variant programs alive: ShaderService holds
+        // variants only weakly, precisely so that a medium nobody uses any more releases its
+        // VkShaderModules instead of accumulating one program per edit of the graph for the whole
+        // session. Dropping these three IS the release.
+        std::shared_ptr<Shader> m_MarchMediumShader;
+        std::shared_ptr<Shader> m_ShadowMapMediumShader;
+        std::shared_ptr<Shader> m_SkyOcclusionMediumShader;
 
         std::shared_ptr<ComputePipeline>  m_MarchPipeline;
         std::shared_ptr<ComputePipeline>  m_ResolvePipeline;

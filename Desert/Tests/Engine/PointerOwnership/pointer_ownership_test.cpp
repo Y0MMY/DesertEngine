@@ -168,11 +168,29 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   types — the rig's SkinnedMeshComponent and a UI element's UIAnimComponent, which are two different
     //   kinds of thing and cannot share a key — so it carries two of those class constants instead of one,
     //   and its scene went shared -> weak with the other documents'.
-    EXPECT_EQ( CountOf( Form::Raw ), 328 );
-    EXPECT_EQ( CountOf( Form::Shared ), 315 );
+    //   789 -> 803 with O1-E, the authored cloud medium, and every one of the fourteen is accounted for
+    //   by what that mechanism IS.
+    //
+    //   NINE RAW, and all nine are string literals in static tables: the Volume domain's two registers
+    //   (which material properties a medium graph may read, and which it deliberately may not, with the
+    //   reason) and the emitter's table of the five functions a medium compiles to. Same easy answer as
+    //   every other table entry above them.
+    //
+    //   THREE SHARED, and they are the point of the design rather than a detail. A cloud material's
+    //   authored medium produces a NEW compiled program on every edit of its graph, and each one owns
+    //   VkShaderModules and descriptor set layouts. ShaderService therefore holds variants only WEAKLY,
+    //   and VolumetricCloudRenderer's three shared_ptrs are the strong references — dropping them is what
+    //   frees the modules. A service-owned cache would have grown by one program per edit for the life of
+    //   the session and released none.
+    //
+    //   TWO WEAK, which are the other half of that arrangement: ShaderService::m_ShaderAssets (the asset
+    //   manager owns the assets; this service must not extend their life to compile a variant later) and
+    //   VariantEntry::Program (the cache above).
+    EXPECT_EQ( CountOf( Form::Raw ), 337 );
+    EXPECT_EQ( CountOf( Form::Shared ), 318 );
     EXPECT_EQ( CountOf( Form::Unique ), 110 );
-    EXPECT_EQ( CountOf( Form::Weak ), 36 );
-    EXPECT_EQ( (int)Members().size(), 789 )
+    EXPECT_EQ( CountOf( Form::Weak ), 38 );
+    EXPECT_EQ( (int)Members().size(), 803 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }
@@ -383,7 +401,7 @@ TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
     // `shared_ptr` here is a false impression of shared ownership, and the register's job is to make
     // the true owner findable instead of mass-replacing them for uniformity -- churn that would hide
     // the seven real findings in a diff of two hundred files.
-    EXPECT_EQ( CountOf( Form::Shared ), 315 );
+    EXPECT_EQ( CountOf( Form::Shared ), 318 );
     EXPECT_GT( CountOf( Form::Shared ), CountOf( Form::Unique ) + CountOf( Form::Weak ) );
 }
 

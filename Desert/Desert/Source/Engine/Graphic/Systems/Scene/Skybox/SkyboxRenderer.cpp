@@ -755,6 +755,10 @@ namespace Desert::Graphic::System
         cloudBinding.AuthoredAtlas      = clouds.AuthoredAtlas;
         cloudBinding.SkyOcclusionVolume = clouds.SkyOcclusionVolume;
         cloudBinding.DistantSkyLight    = m_Atmosphere.DistantSkyLight;
+        // THE AUTHORED MEDIUM, so the panorama that LIGHTS the scene is compiled under the same
+        // substitution the three on-screen cloud programs are. It points at `clouds`, which outlives this
+        // call — the bake is a submit-and-wait below.
+        cloudBinding.Medium = &clouds.Medium;
 
         // WALL TIME AROUND THE WHOLE CHAIN, printed rather than assumed. Every dispatch below is the
         // immediate compute path — submit and wait on a fence — so this number is the GPU's, and it is the

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Engine/Core/ShaderCompiler/ShaderVariant.hpp>
 #include <Engine/Graphic/Clouds/CloudAuthoredPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 
@@ -94,6 +95,17 @@ namespace Desert::Graphic
         Image3D* AuthoredAtlas             = nullptr; // null in every scene with no hero cloud
         Image3D* SkyOcclusionVolume        = nullptr;
 
+        /// The compile-time substitution the three IN-FRAME cloud programs were compiled under, carried
+        /// so the panorama that LIGHTS the scene is compiled under the same one.
+        ///
+        /// IT CROSSES THIS SEAM BECAUSE THE FOURTH CONSUMER BELONGS TO ANOTHER RENDERER. The march, the
+        /// shadow map and the occlusion volume are the cloud renderer's and it compiles them itself;
+        /// BakeProceduralSky is the SKY's program — atmosphere and clouds in one panorama, needed by
+        /// scenes with no cloud layer at all — so it can never be a pass of a cloud material. Handing the
+        /// variant across is what stops the world's light coming from a sky judged by a different medium
+        /// than the one on screen: the same defect shape as the grey clouds, arriving through the IBL.
+        Core::ShaderVariant Medium;
+
         /// What the panorama on the device was baked from, on the cloud side. See
         /// CloudEnvironmentFingerprint.
         uint64_t Fingerprint = 0;
@@ -129,6 +141,11 @@ namespace Desert::Graphic
         Image3D* AuthoredAtlas             = nullptr;
         Image3D* SkyOcclusionVolume        = nullptr;
         Image2D* DistantSkyLight           = nullptr;
+
+        /// The authored medium the bake's own program has to be compiled under — see
+        /// CloudEnvironmentBake::Medium. Borrowed like every image here; null and default both mean the
+        /// shipped medium, which is the same thing and needs no branch of its own.
+        const Core::ShaderVariant* Medium = nullptr;
     };
 
     // ---------------------------------------------------------------------------------------------------
@@ -177,11 +194,20 @@ namespace Desert::Graphic
      *                          volume. It changes the baked radiance, so it changes the fingerprint.
      * @param shapeGeneration   how many times this view's modelling volume has been rebuilt from
      *                          genuinely different parameters.
+     * @param mediumVariant     Core::ShaderVariant::Hash() of the authored medium the march is compiled
+     *                          under; 0 is the shipped one. IT IS IN THE FINGERPRINT BECAUSE IT IS IN
+     *                          THE PICTURE and in nothing else here: the medium is CODE, so it changes
+     *                          what the panorama shows while leaving every byte of the packed block
+     *                          identical. Left out, authoring a medium would move the sky on screen and
+     *                          leave the light in the world coming from the previous one, indefinitely —
+     *                          the "middle link drops a property" shape, in the one link that costs
+     *                          three quarters of a second to re-run.
      * @return 0 exactly when @p marched is false; never 0 otherwise, so "no clouds" and "these clouds"
      *         cannot collide.
      */
     inline uint64_t CloudEnvironmentFingerprint( const CloudGpuPayload& payload, bool marched,
-                                                 bool skyOcclusionValid, uint32_t shapeGeneration )
+                                                 bool skyOcclusionValid, uint32_t shapeGeneration,
+                                                 uint64_t mediumVariant )
     {
         if ( !marched )
             return 0ull;
@@ -208,6 +234,9 @@ namespace Desert::Graphic
         hash ^= skyOcclusionValid ? 0x9E3779B97F4A7C15ull : 0ull;
 
         hash ^= static_cast<uint64_t>( shapeGeneration );
+        hash *= 1099511628211ull;
+
+        hash ^= mediumVariant;
         hash *= 1099511628211ull;
 
         // Never zero: zero is reserved for "this view has no clouds", and a collision between that and a

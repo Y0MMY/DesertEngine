@@ -44,19 +44,22 @@ namespace Desert::Core
 
     Common::ResultStr<std::vector<uint32_t>> ShaderCompiler::CompileGLSLToSPIRV( Formats::ShaderStage stage,
                                                                                  const std::string&   source,
-                                                                                 const std::string&   shaderPath )
+                                                                                 const std::string&   shaderPath,
+                                                                                 const ShaderVariant& variant )
     {
-        return CompileGLSLToSPIRVForProfile( stage, source, shaderPath, SpirvDebugInfoThisBuild() );
+        return CompileGLSLToSPIRVForProfile( stage, source, shaderPath, SpirvDebugInfoThisBuild(), variant );
     }
 
     Common::ResultStr<std::vector<uint32_t>>
     ShaderCompiler::CompileGLSLToSPIRVForProfile( Formats::ShaderStage stage, const std::string& source,
-                                                  const std::string& shaderPath, bool spirvDebugInfo )
+                                                  const std::string& shaderPath, bool spirvDebugInfo,
+                                                  const ShaderVariant& variant )
     {
         // Cache key: stage + compile-options fingerprint (incl. the debug-info profile) + assembled
-        // source + every included file's content (recursive). Content-addressed, so any edit produces
-        // a fresh key — no mtime races.
-        const uint64_t key = ComputeShaderCacheKeyForProfile( stage, source, shaderPath, spirvDebugInfo );
+        // source + every included file's content (recursive) + the VARIANT's substituted bytes.
+        // Content-addressed, so any edit produces a fresh key — no mtime races — and two materials
+        // substituting two different cloud media are two artifacts rather than one served twice.
+        const uint64_t key = ComputeShaderCacheKeyForProfile( stage, source, shaderPath, spirvDebugInfo, variant );
 
         if ( auto cached = TryLoadCachedSpirv( key ) )
             return Common::MakeSuccess( std::move( *cached ) );
@@ -64,7 +67,7 @@ namespace Desert::Core
         static shaderc::Compiler compiler;
         shaderc::CompileOptions  options;
 
-        options.SetIncluder( std::make_unique<ShaderIncluder>( shaderPath ) );
+        options.SetIncluder( std::make_unique<ShaderIncluder>( shaderPath, variant ) );
         options.SetTargetEnvironment( shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1 );
         options.SetWarningsAsErrors();
 

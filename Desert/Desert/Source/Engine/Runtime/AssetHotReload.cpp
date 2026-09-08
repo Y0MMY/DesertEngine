@@ -378,6 +378,15 @@ namespace Desert::Runtime
                 continue;
             }
 
+            // AND EVERY LIVE VARIANT OF THE SAME FILE. A cloud march compiled against an authored
+            // medium is a different Shader object built from these same bytes; reloading only the
+            // registered program would leave it on the code it was built with, and the symptom would be
+            // "editing the shader stopped working once I authored a medium" — a staleness that names
+            // the wrong cause.
+            if ( const int variants = shaderService->ReloadVariantsOf( handle ); variants > 0 )
+                LOG_INFO( "[HotReload] Shader '{}': {} variant(s) recompiled with it.", shader->GetName(),
+                          variants );
+
             // Renderer-owned pipelines (the batched PBR/shadow set, every compute pipeline, the
             // fog apply) are built once at init and keep the code they were built with until
             // a restart. That is now merely STALE and no longer unsafe: the pipeline holds strong

@@ -1,0 +1,189 @@
+// THE SHIPPED CLOUD MEDIUM — what a cloud IS at a point in space when nobody has authored anything.
+//
+// THIS FILE IS NEVER SUBSTITUTED, and that is the whole reason it is separate from
+// Generated/CloudMedium.glslh. That file is the SEAM: a cloud material replaces its bytes with an
+// authored graph's, so nothing in it survives into an authored sky. These functions have to survive,
+// because an authored medium is almost always a MODIFICATION of the shipped one — "the same clouds,
+// warmer at the edges", "the same clouds, half as dense over there" — and a graph that had to rebuild
+// the erosion chain by hand to say that would be a graph nobody could use. They are also what makes
+// the acceptance test of the whole mechanism expressible: a Volume Output node with nothing wired into
+// it compiles to five calls into this file, so "a graph that changes nothing" is a thing that can be
+// byte-for-byte identical to no graph at all, rather than a thing to argue about.
+//
+// EVERY DEFAULT IS EITHER THE CHAIN THAT ALWAYS STOOD HERE OR AN IDENTITY. The density chain below moved
+// out of Common/CloudField.glslh UNCHANGED; the other four hand back what the caller already had, which
+// is what lets the compiler fold them away entirely. That is why the shipped frame costs exactly what it
+// cost before this seam existed.
+//
+// UNITS: kilometres. The layer's own maths is kilometre-scaled even though the world is centimetres.
+
+#ifndef CLOUD_MEDIUM_DEFAULT_GLSLH
+#define CLOUD_MEDIUM_DEFAULT_GLSLH
+
+
+// The up-rez: turn the low-frequency profile into something with a cloud's edge.
+//
+// The erosion is a REMAP, not a subtraction (deck p.120, `ValueErosion`). The difference shows at the
+// core: subtracting noise thins a dense cloud as much as a wispy one, so a cumulus turns translucent in
+// the middle, while remapping leaves anything already deep inside the body at full density and only cuts
+// where the profile was already falling off.
+//
+// `DetailType` selects between the volume's two CHARACTERS — wispy and billowy — and each of them is
+// itself a frequency blend driven by the profile. That is the deck's composite on p.122 in full rather
+// than the two-channel half of it that stood here, and the difference is that the erosion's frequency now
+// follows how deep inside the body the sample is instead of being constant through the whole cloud.
+float CloudDefaultDensity( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )
+{
+    if ( field.Profile <= 0.0f )
+        return 0.0f;
+
+    vec3 windPos = vec3( positionKm.x - params.WindOffsetKm.x, positionKm.y - params.WindOffsetKm.y,
+                         positionKm.z - params.WindOffsetKm.z );
+
+    // ANISOTROPIC, and it was not. The erosion was the one octave here still sampled as a cube, which
+    // gives a torn cloud edge the proportions of gravel; the graph has anisotropy on all three of its
+    // octaves. This one takes the INVERTED triple — vertical period longer than horizontal — so the wisps
+    // it cuts are taller than they are wide, which is what a shred of cloud being carried upward looks
+    // like.
+    float tile      = max( params.DetailTileKm, 1e-4f );
+    vec3  detailPos = vec3( windPos.x * CLOUD_DETAIL_FREQ_X / tile, windPos.y * CLOUD_DETAIL_FREQ_Y / tile,
+                            windPos.z * CLOUD_DETAIL_FREQ_Z / tile );
+
+    // THE VOLUME IS THE WINNING SPECIES', not the layer's. Until this argument existed there was one
+    // `sampler3D` on the march and a Cirrus standing beside a Cumulus was cut from the cumulus' volume —
+    // the last recorded debt of the cloud programme, and a dead setting in three of a layer's four slots.
+    vec4 noise = CLOUD_SAMPLE_NOISE( field.NoiseSlot, detailPos );
+
+    // THE DECK'S OWN COMPOSITE (p.122), and it uses all four channels rather than two of them.
+    //
+    // Each character of erosion is a blend of ITS OWN pair across frequency, and the blend is driven by the
+    // profile — deep inside the body the coarse octave, out at the edge the fine one, which is the
+    // frequency-follows-depth relation the deck states on p.101 and p.105. The wispy end blends linearly;
+    // the billowy end blends on the fourth root, so a billowy cloud reaches its fine octave much earlier
+    // and its edge breaks into lobes rather than fading into one smooth frequency.
+    //
+    // Only THEN do the two characters mix, on DetailType. Written the other way round — pick a channel by
+    // type and never blend by depth — the erosion has one frequency everywhere inside a cloud, which is
+    // what the two-channel version this replaces did.
+    float wispy   = mix( noise.x, noise.y, field.Profile );
+    float billowy = mix( noise.z, noise.w, pow( field.Profile, 0.25f ) );
+
+    float detailField = clamp( mix( wispy, billowy, clamp( field.DetailType, 0.0f, 1.0f ) ), 0.0f, 1.0f );
+
+    // THE EROSION IS WEIGHTED BY DEPTH, and this is the difference between clouds and fog.
+    //
+    // Applied uniformly, the erosion subtracts as much from the core of a cloud as from its edge — and
+    // since the profile is only high in a thin band anyway, a strength of 0.5 removes most of the layer
+    // and what survives is a translucent veil. That is not a tuning failure: a cut of fixed depth into a
+    // field whose typical value is small removes the field.
+    //
+    // Weighting by (1 - Profile) puts the whole cut where the cloud is already ending. The core, which is
+    // deep inside the body, keeps its density and stays solid; the edge, which is barely inside it, is
+    // eaten into billows and wisps. It is the same principle the deck states as a frequency blend driven
+    // by the dimensional profile (p.101, p.105) — the profile decides how much detail belongs here — and
+    // it is why that field means "depth inside the body" rather than "density".
+    // THE DEPTH OF THE CUT IS THE WINNING SPECIES', multiplied into the layer's own strength here rather
+    // than folded together on the CPU as it was while a layer had one kind of cloud in it. A lenticular
+    // has to stay a smooth lens and a cirrus has to stay shredded when the two are in the same sky, and a
+    // single product formed once could only describe one of them.
+    // THE FACTOR IS BOUNDED ON BOTH SIDES AND NOT ONLY BELOW. `max(x, 0)` leaves `+inf` intact, and this
+    // product's other operand is a slider whose zero position is the whole subject of the test below it —
+    // so the unbounded version turns "erosion off" into a NaN density for every sample in the body. See
+    // the note on CLOUD_MATERIAL_FACTOR_MAX: on every value either producer can legally carry, this bound
+    // is the identity.
+    float edgeWeight = 1.0f - clamp( field.Profile, 0.0f, 1.0f );
+    float erosion    = detailField *
+                    clamp( params.DetailStrength * CLOUD_MATERIAL_FACTOR( field.DetailFactor ), 0.0f, 1.0f ) *
+                    edgeWeight;
+
+    float density = CloudRemap( field.Profile, erosion, 1.0f, 0.0f, 1.0f );
+
+    return clamp( density * field.DensityScale, 0.0f, 1.0f );
+}
+
+// How opaque the medium is, as a MULTIPLE of the layer's per-kilometre extinction.
+//
+// The winning species' own factor, which is where it has always come from: a shadow ray out of a
+// congestus tower crosses the stratocumulus deck below it, and one extinction for the whole shell would
+// shade the tower with the tower's own material. A graph replaces the MULTIPLE, never the layer's
+// number — the layer's is a material parameter and stays authored where it is.
+float CloudDefaultExtinctionFactor( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )
+{
+    return field.ExtinctionFactor;
+}
+
+// The fraction of extinguished light that is SCATTERED rather than absorbed, per colour.
+//
+// @p materialAlbedo is the layer's own Scattering Albedo, already clamped by the caller. Handing it back
+// unchanged is what makes the default free: the two programs that light clouds fold this call away
+// entirely, and the two that do not light them never call it.
+vec3 CloudDefaultAlbedo( CloudFieldParams params, CloudFieldSample field, vec3 positionKm, vec3 materialAlbedo )
+{
+    return materialAlbedo;
+}
+
+// Radiance the medium ADDS, per kilometre of march. Lightning inside a cell, a sodium-lit underside, a
+// pyrocumulus.
+//
+// ZERO, AND AS A LITERAL. There is no emissive material parameter to default to and there deliberately
+// is not one: a constant over a whole layer is the one thing a volume emission is least useful as, and it
+// would have cost two more unread slots in the parameter block (O1_DESIGN §11.5). Emission enters the
+// engine as a graph PIN or not at all, and until a graph supplies one this constant is removed by the
+// compiler along with the multiply-add that consumes it.
+vec3 CloudDefaultEmissive( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )
+{
+    return vec3( 0.0f, 0.0f, 0.0f );
+}
+
+// How much of the sky term reaches this sample, as a multiplier in [0,1].
+//
+// @p ambientOcclusion is what the layer already decided — the sky occlusion volume's answer when that
+// pass is on, the sample's own depth inside its body when it is off — scaled by the material's Ambient
+// Occlusion Strength. Returning it untouched leaves the choice of occluder with the component and the
+// strength with the material; a graph multiplies its own term into theirs rather than replacing a pass it
+// cannot see.
+float CloudDefaultOcclusion( CloudFieldParams params, CloudFieldSample field, vec3 positionKm,
+                             float ambientOcclusion )
+{
+    return ambientOcclusion;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// WHAT A GRAPH IS HANDED, as one struct.
+//
+// The four consumers call the medium with a CloudFieldParams, a CloudFieldSample and a position, and a
+// generated medium reads members off all three. Gathering them into ONE named struct is what lets the
+// graph's Cloud Sample node be a single emitted statement whose output pins are member reads — the pin
+// NAME is the member name, so the emitter has no table of pin-to-expression mappings to keep level with
+// the node catalogue. A pin renamed without renaming the member is then a GLSL error naming the member,
+// which is the loudest failure available here.
+struct CloudGraphSample
+{
+    vec3  PositionKm;
+    vec3  WindPositionKm;
+    float Profile;
+    float DetailType;
+    float DetailFactor;
+    float DensityScale;
+    float ExtinctionFactor;
+};
+
+CloudGraphSample CloudGraphSampleAt( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )
+{
+    CloudGraphSample s;
+    s.PositionKm = positionKm;
+    // THE WIND-SHIFTED POSITION, which is the frame the modelling volume was BAKED in — the same
+    // subtraction the density chain above makes on its own way into the noise. A graph that wants
+    // structure to travel with the weather uses this one; a graph that wants it nailed to the world uses
+    // PositionKm.
+    s.WindPositionKm = vec3( positionKm.x - params.WindOffsetKm.x, positionKm.y - params.WindOffsetKm.y,
+                             positionKm.z - params.WindOffsetKm.z );
+    s.Profile          = field.Profile;
+    s.DetailType       = field.DetailType;
+    s.DetailFactor     = field.DetailFactor;
+    s.DensityScale     = field.DensityScale;
+    s.ExtinctionFactor = field.ExtinctionFactor;
+    return s;
+}
+
+#endif // CLOUD_MEDIUM_DEFAULT_GLSLH

@@ -147,6 +147,13 @@ namespace
          // quietly lost the mask input.
          { "LayoutPattern", "CloudLayoutAsset" },
          { "LayoutMask", "CloudLayoutAsset" },
+         // THE AUTHORED MEDIUM, and it is an asset reference rather than a value because what it names is
+         // a body of CODE: a Volume-domain shader graph that replaces the density, extinction, albedo,
+         // emission and occlusion of the medium itself. It reaches the frame through the shader compiler
+         // — Core::ShaderVariant, substituted into the four programs that sample the cloud field — and
+         // never through the packed parameter block, which is why it costs the march nothing per sample.
+         // Null is the shipped medium.
+         { "Medium", "ShaderAsset" },
     };
 } // namespace
 
@@ -462,7 +469,10 @@ TEST( CloudMaterialSchema, EveryParameterDeclaresWhenItsEditBecomesVisible )
     std::printf( "[CloudMaterialSchema] %u of %u parameters declare Rebake; %u declare Immediate\n", rebake,
                  static_cast<uint32_t>( Schema().Params.size() ), immediate );
     EXPECT_EQ( rebake, 20u );
-    EXPECT_EQ( immediate, 14u );
+    // FIFTEEN SINCE THE MEDIUM SLOT, which is the fourteen march parameters plus the authored medium
+    // itself. It is Immediate and CloudMaterialTiming MEASURES that it is: a medium is GPU code compiled
+    // into the march, so no amount of authoring it can move an input of a bake that has already run.
+    EXPECT_EQ( immediate, 15u );
 }
 
 int main( int argc, char** argv )

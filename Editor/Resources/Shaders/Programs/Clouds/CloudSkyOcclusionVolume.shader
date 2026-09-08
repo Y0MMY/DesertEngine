@@ -139,7 +139,8 @@ Shader "CloudSkyOcclusionVolume"
                     if (field.Profile > 0.0f)
                     {
                         float density = CloudSampleDensity(params, field, fieldPos);
-                        tau += density * extinction * field.ExtinctionFactor * subKm;
+                        tau += density * extinction *
+                               CloudSampleExtinctionFactor(params, field, fieldPos) * subKm;
                     }
 
                     heightFraction -= subFraction;
@@ -158,7 +159,8 @@ Shader "CloudSkyOcclusionVolume"
                     if (field.Profile > 0.0f)
                     {
                         float density = CloudSampleDensity(params, field, fieldPos);
-                        tau += density * extinction * field.ExtinctionFactor * subKm;
+                        tau += density * extinction *
+                               CloudSampleExtinctionFactor(params, field, fieldPos) * subKm;
                     }
 
                     heightFraction -= subFraction;
