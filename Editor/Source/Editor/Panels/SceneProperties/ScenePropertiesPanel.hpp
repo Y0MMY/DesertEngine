@@ -48,7 +48,20 @@ namespace Desert::Editor
         // one action that ends the state (create an entity and select it).
         void DrawNoSelectionState();
 
-        void EnsurePreview();  // create the viewport (its renderer, and the slot, come on first Update)
+        /**
+         * @brief Build the viewport if there is a renderer slot to give it. FALSE means there is not.
+         *
+         * IT ANSWERS, and the answer is not decoration. Every line after the call used to dereference
+         * m_Preview unconditionally, correctly, because this function could not fail. Teaching it to
+         * decline when all six slots are taken (Editor/Widgets/PreviewSlotBudget.hpp) put a null back into
+         * a place three callers assumed could not hold one — and the Update() at the end of OnPreUpdate is
+         * driven by a flag raised on the PREVIOUS UI frame, so it outlives the renderer by exactly one
+         * frame. Measured: five open material documents plus one click on a mesh entity killed the editor
+         * on the frame after the refusal was logged. A bool nobody can ignore is the difference.
+         *
+         * The renderer, and with it the slot, are still claimed lazily on the first Update().
+         */
+        [[nodiscard]] bool EnsurePreview();
         void ReleasePreview(); // destroy it, which is what returns the slot
 
     private:

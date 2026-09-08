@@ -109,10 +109,10 @@ namespace Desert::Editor
         }
     } // namespace
 
-    void ScenePropertiesPanel::EnsurePreview()
+    bool ScenePropertiesPanel::EnsurePreview()
     {
         if ( m_Preview )
-            return;
+            return true;
 
         // NOT WHEN THERE IS NO SLOT LEFT TO GIVE IT.
         //
@@ -145,10 +145,11 @@ namespace Desert::Editor
                           "window to get the live one back.",
                           EngineContext::kMaxRendererSlots );
             }
-            return;
+            return false;
         }
         m_PreviewSlotRefused = false;
         m_Preview            = std::make_unique<PreviewViewport>();
+        return true;
     }
 
     void ScenePropertiesPanel::ReleasePreview()
@@ -203,7 +204,21 @@ namespace Desert::Editor
             return;
         }
 
-        EnsurePreview();
+        // THE ANSWER IS CHECKED, and this line is the whole reason the refusal had to be made reachable
+        // before it was believed. EnsurePreview used to be infallible, so every line below it dereferenced
+        // m_Preview without a thought — correctly, because there was no state in which it was null here.
+        // Teaching it to decline quietly re-created that state and left both dereferences standing: the
+        // SetMesh below, and the Update() at the end of this function, which fires whenever a component
+        // drew the row on the PREVIOUS frame (so the flag outlives the renderer by exactly one frame).
+        // Measured, not reasoned: five material documents open plus a click on a mesh killed the editor on
+        // the frame after the refusal was logged.
+        //
+        // Returning without touching m_PreviewKey is deliberate. The key records what the preview is
+        // POINTING AT, and a preview that does not exist points at nothing; writing the key here would
+        // make the next frame — the one where a slot has come free — believe it was already framed, and
+        // the row would show an empty pane until the selection changed.
+        if ( !EnsurePreview() )
+            return;
 
         if ( key != m_PreviewKey )
         {
@@ -508,8 +523,13 @@ namespace Desert::Editor
         // so a freshly selected mesh shows the live preview on the same frame instead of falling back to
         // the PNG thumbnail for one frame and jumping the row's layout. Keyed off the SAME function
         // OnPreUpdate uses, so the two can never disagree about what is previewable.
+        //
+        // The answer is DISCARDED here, and only here: what follows hands `m_Preview.get()` to the
+        // component pass, and a null there is already a supported value — the 3D Model row falls back to
+        // the thumbnail it asked the service for. OnPreUpdate is the caller that must not ignore it,
+        // because everything after its call dereferences the pointer.
         if ( PreviewKeyOf( selectedEntity, static_cast<uint64_t>( *selectedOpt ) ) != 0 )
-            EnsurePreview();
+            (void)EnsurePreview();
         m_ComponentEditor->SetPreview( m_Preview.get(), m_ThumbnailUI.get(), &m_PreviewActive );
         m_ComponentEditor->Render( const_cast<ECS::Entity&>( selectedEntity ), m_Scene.get(),
                                    m_FieldSearch.c_str() );
