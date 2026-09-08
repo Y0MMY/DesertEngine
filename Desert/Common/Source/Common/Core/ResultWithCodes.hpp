@@ -8,6 +8,11 @@
 
 #include <spdlog/fmt/fmt.h>
 
+// ReportFailedUnwrap lives with the other result type: both unwrap the same way and must report the
+// same way, or a reader would have to know which of the two they are holding to know whether a
+// failed unwrap says anything.
+#include <Common/Core/ResultStr.hpp>
+
 #include <utility>
 
 namespace Common
@@ -126,25 +131,30 @@ namespace Common
             return m_IsSuccess;
         }
 
-        const T& GetValue() const
+        // Same contract as ResultStr::GetValue — see the long WHY there. Two differences are specific
+        // to this type and both were defects rather than choices:
+        //
+        // THE NON-CONST OVERLOAD IS GONE. It returned `static T default_value{}` by MUTABLE reference
+        // on the failure path: one process-wide object per T, handed to every failed unwrap anywhere
+        // in the binary, writable by any of them and read by all the others, with no synchronisation.
+        // A caller that wrote through it (which the signature invited) silently changed what every
+        // other failed unwrap of that T would see afterwards, across threads. Nothing in the engine
+        // needed to mutate a result's value in place, so the overload is removed rather than fixed —
+        // a const answer cannot grow this defect back.
+        //
+        // THE RVALUE OVERLOAD IS DELETED, so unwrapping a temporary does not compile.
+        const T& GetValue() const&
         {
             if ( !m_IsSuccess )
             {
-                static T default_value{};
+                ReportFailedUnwrap( GetError() );
+                static const T default_value{};
                 return default_value;
             }
             return std::get<T>( m_Outcome );
         }
 
-        T& GetValue()
-        {
-            if ( !m_IsSuccess )
-            {
-                static T default_value{};
-                return default_value;
-            }
-            return std::get<T>( m_Outcome );
-        }
+        const T& GetValue() const&& = delete;
 
         std::string GetError() const
         {

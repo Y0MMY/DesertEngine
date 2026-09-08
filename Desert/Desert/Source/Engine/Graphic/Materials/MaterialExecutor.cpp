@@ -29,37 +29,55 @@ namespace Desert::Graphic
         auto uniformManager =
              ShaderResources::ShaderResourcesManager::Create( "Material_" + m_Shader->GetName(), m_Shader );
 
-        for ( auto [name, index] : uniformManager->GetUniformBufferTotal().Names )
+        // THE NAME AND THE ANSWER COME FROM THE SAME MANAGER, so a miss here is a broken invariant
+        // rather than an ordinary failure — and that is precisely why these four unwraps went
+        // unchecked for so long. They stopped being safe the day the registrars learned to REFUSE:
+        // a resource that could not be created is no longer registered under its name, so the name
+        // list and the lookup can now disagree by design. Skipping the entry keeps the two property
+        // vectors and their lookup maps consistent with each other, which is what the draw path
+        // indexes; building a property around nothing would have put a null in the vector and moved
+        // the crash to the first frame that drew with this material.
+        const auto addProperties = [&]( const auto& names, auto&& fetch, auto&& make, auto& storage,
+                                        auto& lookup, const char* kind )
         {
-            auto prop =
-                 std::make_shared<UniformBufferProperty>( uniformManager->GetUniformBuffer( name ).GetValue() );
-            m_UniformBufferPropertiesStorage.push_back( prop );
-            m_UniformBufferPropertiesLookup[name] = m_UniformBufferPropertiesStorage.size() - 1;
-        }
+            for ( auto [name, index] : names )
+            {
+                auto resource = fetch( name );
+                if ( !resource )
+                {
+                    LOG_ERROR( "[MaterialExecutor] shader '{}' declares {} '{}', but it is not "
+                               "registered: {}. The material is built WITHOUT it.",
+                               m_Shader->GetName(), kind, name, resource.GetError() );
+                    continue;
+                }
+                storage.push_back( make( resource.GetValue() ) );
+                lookup[name] = storage.size() - 1;
+            }
+        };
 
-        for ( auto [name, index] : uniformManager->GetStorageBufferTotal().Names )
-        {
-            auto prop =
-                 std::make_shared<StorageBufferProperty>( uniformManager->GetStorageBuffer( name ).GetValue() );
-            m_StorageBufferPropertiesStorage.push_back( prop );
-            m_StorageBufferPropertiesLookup[name] = m_StorageBufferPropertiesStorage.size() - 1;
-        }
+        addProperties(
+             uniformManager->GetUniformBufferTotal().Names,
+             [&]( const std::string& n ) { return uniformManager->GetUniformBuffer( n ); },
+             []( const auto& r ) { return std::make_shared<UniformBufferProperty>( r ); },
+             m_UniformBufferPropertiesStorage, m_UniformBufferPropertiesLookup, "uniform buffer" );
 
-        for ( auto [name, index] : uniformManager->GetUniformImageCubeTotal().Names )
-        {
-            auto prop =
-                 std::make_shared<TextureCubeProperty>( uniformManager->GetUniformImageCube( name ).GetValue() );
-            m_TextureCubePropertiesStorage.push_back( prop );
-            m_TextureCubePropertiesLookup[name] = m_TextureCubePropertiesStorage.size() - 1;
-        }
+        addProperties(
+             uniformManager->GetStorageBufferTotal().Names,
+             [&]( const std::string& n ) { return uniformManager->GetStorageBuffer( n ); },
+             []( const auto& r ) { return std::make_shared<StorageBufferProperty>( r ); },
+             m_StorageBufferPropertiesStorage, m_StorageBufferPropertiesLookup, "storage buffer" );
 
-        for ( auto [name, index] : uniformManager->GetUniformImage2DTotal().Names )
-        {
-            auto prop =
-                 std::make_shared<Texture2DProperty>( uniformManager->GetUniformImage2D( name ).GetValue() );
-            m_Texture2DPropertiesStorage.push_back( prop );
-            m_Texture2DPropertiesLookup[name] = m_Texture2DPropertiesStorage.size() - 1;
-        }
+        addProperties(
+             uniformManager->GetUniformImageCubeTotal().Names,
+             [&]( const std::string& n ) { return uniformManager->GetUniformImageCube( n ); },
+             []( const auto& r ) { return std::make_shared<TextureCubeProperty>( r ); },
+             m_TextureCubePropertiesStorage, m_TextureCubePropertiesLookup, "image cube" );
+
+        addProperties(
+             uniformManager->GetUniformImage2DTotal().Names,
+             [&]( const std::string& n ) { return uniformManager->GetUniformImage2D( n ); },
+             []( const auto& r ) { return std::make_shared<Texture2DProperty>( r ); },
+             m_Texture2DPropertiesStorage, m_Texture2DPropertiesLookup, "image2D" );
     }
 
     void MaterialExecutor::Apply() const

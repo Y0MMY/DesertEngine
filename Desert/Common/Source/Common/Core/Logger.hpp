@@ -5,6 +5,8 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include <Common/Core/ResultStr.hpp>
+
 #include <utility>
 
 namespace Common::Logger
@@ -20,6 +22,14 @@ namespace Common::Logger
         spdlog::set_pattern( "%^[%T.%e][%l][Desert]: %v%$" );
         spdlog::set_level( spdlog::level::trace );
         spdlog::flush_on( spdlog::level::trace );
+
+        // THE RESULT TYPE LIVES IN A REPOSITORY WITH NO LOGGER, ON PURPOSE — the shared-format library
+        // must build without the engine, so it reports a failed unwrap through a function the HOST
+        // installs. This is that host. Without this line the message still appears, on stderr; with it
+        // the message lands in engine_log.txt beside the error that caused it, which is the only place
+        // a reader will look. Installed here rather than in a target's main() so that every executable
+        // that initialises the logger gets it — the editor, the runtime, and every tool.
+        Common::SetResultUnwrapReporter( []( const char* message ) { spdlog::error( "{}", message ); } );
     }
 
     // THE FORMAT STRING IS CHECKED BY THE COMPILER, and that is the whole point of this signature.
