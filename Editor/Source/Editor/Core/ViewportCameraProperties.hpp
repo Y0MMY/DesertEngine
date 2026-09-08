@@ -64,9 +64,12 @@ namespace Desert::Editor
     inline constexpr const char* kViewportCameraPosition  = "Camera.Position";
     inline constexpr const char* kViewportCameraDirection = "Camera.Direction";
 
-    /// The subject name a request selects with, and the only alternative to the focused document.
-    inline constexpr const char* kViewportSubjectName = "viewport";
-    inline constexpr const char* kDocumentSubjectName = "document";
+    // THE SUBJECT'S WIRE NAME IS NOT SPELLED HERE, deliberately. It lives once, in the protocol's own
+    // kSubjects table (Control/ControlProtocol.hpp), which is what the parser matches against and what a
+    // refusal lists. A copy here would be a second spelling of one string — and the refusals below would
+    // have gone on quoting it after somebody renamed the real one, telling a client to send a subject the
+    // parser no longer accepts. This header does not need to know how it was addressed; the client that
+    // reached it does.
 
     /// Where to aim so the camera ends up AT @p position looking along @p forward.
     ///
@@ -142,9 +145,9 @@ namespace Desert::Editor
         if ( !isPosition && !isDirection )
         {
             return Common::MakeFormattedError<ViewportCameraWrite>(
-                 "'{}' is not a property of the viewport. It offers '{}' and '{}'; ask 'properties' with "
-                 "subject '{}' for their current values.",
-                 property, kViewportCameraPosition, kViewportCameraDirection, kViewportSubjectName );
+                 "'{}' is not a property of the viewport. It offers '{}' and '{}'; ask 'properties' for the "
+                 "same subject to see their current values.",
+                 property, kViewportCameraPosition, kViewportCameraDirection );
         }
 
         if ( value.size() != 3 )
