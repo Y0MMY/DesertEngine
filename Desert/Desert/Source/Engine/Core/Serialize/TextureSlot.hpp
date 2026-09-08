@@ -41,9 +41,17 @@ namespace Desert::Core::Serialize
     //
     // Accepts every spelling: the tagged key above, a plain relative path, and an absolute path to a file
     // outside the project (`PathForStableKey` returns an untagged string unchanged). Creates the asset
-    // when the manager does not already have it — which is also the spelling-independent lookup, because
-    // AssetManager::CreateAsset deduplicates on the same stable key while FindByPath compares filepaths
-    // verbatim. A miss is logged with the name, its expansion and the roots searched, never returned as a
-    // bare 0.
+    // when the manager does not already have it. A miss is logged with the name, its expansion and the
+    // roots searched, never returned as a bare 0.
+    //
+    // THE CREATE-ON-MISS IS CREATE-ON-MISS AGAIN, and that sentence is a correction. It used to double as
+    // the real lookup — `AssetManager::CreateAsset` deduplicated on the spelling-independent stable key
+    // while `FindByPath` compared filepaths verbatim, so routing through the create was how this function
+    // resolved a texture registered under another spelling. That was one of three hand-written detours
+    // around one defect, and the registry now answers both questions the same way
+    // (Desert/Tests/Engine/AssetPathIdentity), so the lookup below is the lookup and the create below is
+    // a create. The behaviour that changed here: a stored reference whose expansion does not exist ON
+    // DISK but whose texture IS registered under a different spelling used to return 0 and log a miss;
+    // it now resolves.
     uint64_t TextureSlotFromPath( Assets::AssetManager& manager, const std::string& stored );
 } // namespace Desert::Core::Serialize

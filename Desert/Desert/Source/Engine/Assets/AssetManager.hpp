@@ -4,7 +4,9 @@
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
 
 #include <algorithm>
+#include <string>
 #include <typeinfo>
+#include <unordered_map>
 #include <vector>
 
 namespace Desert::Assets
@@ -59,7 +61,10 @@ namespace Desert::Assets
         AssetManager( AssetManager&& )                 = delete;
         AssetManager& operator=( AssetManager&& )      = delete;
 
-        using KeyHandle      = Common::Filepath;
+        // `using KeyHandle = Common::Filepath;` stood here with ZERO users anywhere in the repository. It
+        // was the old spelling of "what this registry is keyed on", and leaving a name that says a path
+        // is the key next to a class that has just stopped keying on paths is how the next reader gets
+        // the wrong answer for free. `AssetKey` is that name now.
         using AssetContainer = std::vector<std::pair<AssetMetadata, Asset<AssetBase>>>;
         using AssetIndex     = uint32_t;
 
@@ -78,15 +83,11 @@ namespace Desert::Assets
             // 56.9 s against 207 ms for the raw-path scan. Asking the question once and hashing it makes
             // the same preload 30 ms, i.e. faster than the version this replaces, because a string
             // compare beats a std::filesystem::path compare.
-            AssetMetadata lookUpMetadata;
-            lookUpMetadata.Filepath  = filepath;
-            lookUpMetadata.AssetType = AssetType::GetTypeID();
+            const AssetKey key( filepath, AssetType::GetTypeID() );
 
-            const std::string cacheKey = RegistryKey( lookUpMetadata );
-
-            if ( const auto it = m_PathLookup.find( cacheKey ); it != m_PathLookup.end() )
+            if ( const Asset<AssetBase>* record = FindRecord( key ) )
             {
-                return AsRequestedType<AssetType>( m_AssetsCache[it->second].second, "CreateAsset", cacheKey );
+                return AsRequestedType<AssetType>( *record, "CreateAsset", key.Value() );
             }
 
             // NOTE:Perhaps the creation of an asset via the Create() method should be defined for each type
@@ -109,7 +110,7 @@ namespace Desert::Assets
             // their handle from an id inside the file during Load above, but their PATH is unchanged, so
             // both spellings resolve here either way. Using the record's own key would be the same
             // string; using the lookup's says plainly which question this map answers.
-            m_PathLookup[cacheKey] = m_AssetsCache.size() - 1;
+            m_PathLookup.emplace( key, m_AssetsCache.size() - 1 );
 
             if constexpr ( std::is_base_of_v<AssetBase, AssetType> )
             {
@@ -183,20 +184,35 @@ namespace Desert::Assets
             return nullptr;
         }
 
+        // "DOES THE REGISTRY ALREADY HOLD THIS FILE, AS THIS TYPE?" — the SAME question CreateAsset asks
+        // before it decides to build one, answered by the same key through the same map.
+        //
+        // That sentence is the whole of this change. It used to be a linear scan comparing
+        // `AssetMetadata::Filepath` VERBATIM, so the registry gave two answers to one question and the
+        // 44 call sites of this function were reading the weaker one. The census taken before the fix
+        // (commit "Ф5, перепись до правки") found that not one of those 44 wanted spelling sensitivity:
+        // every one of them means "is there such an asset", 36 recover from a wrong "no" by calling
+        // CreateAsset — which is how the disagreement stayed survivable for so long — and 8 have no
+        // recovery at all and silently drop the reference or log an error about a file that is loaded.
+        //
+        // What a wrong "no" cost when it was finally paid: a scene naming `Cooked/Meshes/base.stmesh`
+        // missed here, called CreateAsset, was handed AssetPreloader's UNPARSED shell for the absolute
+        // spelling of that same file, and registered it as if it were fresh — an empty mesh cached under
+        // a live handle, `Get` answering zero submeshes 91 times in a 90-frame run.
+        //
+        // Also strictly faster, which is worth saying because the shape looks like it should be slower:
+        // this was O(assets) `std::filesystem::path` comparisons per question and is now one
+        // StableKeyForPath plus one hash. On the numbers already measured for this registry (2 M path
+        // compares in 207 ms, i.e. ~0.1 us each) a single question over a 2000-asset project cost ~200 us
+        // and now costs ~15-30 us — and MeshDnD asks it once per file of a recursive directory scan.
         template <typename TypeAsset>
         Asset<TypeAsset> FindByPath( const Common::Filepath& path ) const
         {
-            const auto typeId = TypeAsset::GetTypeID();
-            auto       it     = std::find_if( m_AssetsCache.begin(), m_AssetsCache.end(),
-                                              [&]( const auto& assetCache )
-                                              {
-                                                  return assetCache.first.AssetType == typeId &&
-                                                         assetCache.first.Filepath == path;
-                                              } );
+            const AssetKey key( path, TypeAsset::GetTypeID() );
 
-            if ( it != m_AssetsCache.end() )
+            if ( const Asset<AssetBase>* record = FindRecord( key ) )
             {
-                return AsRequestedType<TypeAsset>( it->second, "FindByPath", path.generic_string() );
+                return AsRequestedType<TypeAsset>( *record, "FindByPath", key.Value() );
             }
             return nullptr;
         }
@@ -362,17 +378,27 @@ namespace Desert::Assets
         }
 
     private:
-        // "Which file is this, and as what type?" — the asset's identity key with its type appended,
-        // because two asset classes are allowed to sit on one path (the handle derivation deliberately
-        // gives them the same number) and they are still two records.
-        static std::string RegistryKey( const AssetMetadata& metadata )
+        // THE ONLY ROUTE FROM A FILE TO A RECORD, and that is the invariant rather than a tidiness.
+        //
+        // `CreateAsset` and `FindByPath` are the two entry points that ask "which record is this file?",
+        // and for as long as each computed its own answer they were free to disagree — one on the
+        // identity key, one on a verbatim path compare. They now share this, so a disagreement is not
+        // something a test has to catch: there is one comparison and both callers make it.
+        //
+        // It also closes the door behind itself. `m_AssetsCache` is private and the one public window on
+        // it (`RegisteredAssets()`) hands out metadata for listing, not for lookup; `m_PathLookup` is
+        // keyed on `AssetKey`, which has no constructor from a string and no implicit conversion from a
+        // path, so a third lookup written next year cannot quietly ask the older question — it either
+        // calls this or it does not compile.
+        [[nodiscard]] const Asset<AssetBase>* FindRecord( const AssetKey& key ) const
         {
-            return metadata.StableKey() + '#' + std::to_string( static_cast<int>( metadata.AssetType ) );
+            const auto it = m_PathLookup.find( key );
+            return it == m_PathLookup.end() ? nullptr : &m_AssetsCache[it->second].second;
         }
 
         AssetContainer                              m_AssetsCache;
         std::unordered_map<AssetHandle, AssetIndex> m_HandleLookup;
-        std::unordered_map<std::string, AssetIndex> m_PathLookup;
+        std::unordered_map<AssetKey, AssetIndex>    m_PathLookup;
     };
 
     template <typename T>
