@@ -5,11 +5,13 @@
 #include <Engine/ECS/Components.hpp>
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
+#include <Engine/ECS/System/VolumetricCloudECSSystem.hpp>
 #include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
 #include <Common/Core/Logger.hpp>
+#include <Common/Core/Units.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -21,6 +23,40 @@
 
 namespace Desert::Editor
 {
+    namespace
+    {
+        // ── THE DOME, and every number here is O5's, taken rather than re-derived ──────────────────────
+        //
+        // The Material Editor already shows a Volume-domain material as the sky it authors
+        // (PreviewViewport::SetVolumeMaterial), and the framing it uses was argued and measured there.
+        // Two independent statements of "where the observer stands to look at a cloud material" is how a
+        // thumbnail comes to disagree with the pane it is a thumbnail OF, so these are the same values and
+        // PreviewViewport.cpp is where the argument for each of them lives.
+        //
+        // 96 degrees of vertical field puts the horizon, the mid angle and very nearly the zenith in ONE
+        // frame — which matters more here than there: nobody can turn a thumbnail, so an empty zenith or
+        // mid-elevation streaking would be outside every picture this ever writes.
+        constexpr float kDomeFov       = 96.0f;
+        constexpr float kDomeNearPlane = 10.0f;                             // 10 cm
+        constexpr float kDomeFarPlane  = Common::Units::Metres( 60000.0f ); // 60 km — the layer's own reach
+        // Not eye height: from 1.7 m the visible near ground fits inside a fraction of one cloud-shadow
+        // texel and renders uniform. The observer stands on a rise.
+        constexpr float kDomeEyeHeight = Common::Units::Metres( 150.0f );
+        // 30 degrees of elevation: the frame spans -18 to +78, so a fifth of it is horizon and the rest
+        // climbs to just under the zenith.
+        constexpr float kDomePitch = 0.5236f;
+        constexpr float kDomeYaw   = -0.6f;
+
+        // The march's budget for a 512-pixel tile. PreviewViewport's own defaults, for the same reason it
+        // has them: a preview pane has no use for the viewport's sample ceiling.
+        constexpr int32_t kDomeMaxSteps          = 96;
+        constexpr float   kDomeStopTransmittance = 0.03f;
+        // 128 and not 256: measured at 229 ms against 961 ms for a bake whose difference from the shipped
+        // grid is softer edges (mean 1.1 to 6.2 of 255). It is also the floor
+        // Assets::kCloudProceduralVolumeSideMin states, so this sits ON the cheapest grid measured honest.
+        constexpr int32_t kDomeVolumeResolution = 128;
+    } // namespace
+
     AssetThumbnailRenderer::~AssetThumbnailRenderer()
     {
         if ( !m_Inited )
@@ -121,8 +157,16 @@ namespace Desert::Editor
         m_Target = m_Scene->CreateNewEntity( "ThumbTarget" );
         m_Target.AddComponent<ECS::StaticMeshComponent>();
 
+        // THE CAMERA Scene::Init MADE, held by name. An object capture is framed against it, and after a
+        // dome capture has pinned its own it can no longer be found by asking the scene.
+        m_ObjectCamera = m_Scene->GetActiveCamera();
+
         m_Scene->AddSystem<ECS::MeshECSSystem>();
         m_Scene->AddSystem<ECS::SkyboxECSSystem>();
+        // The Volume domain's system. Added unconditionally and costing nothing until an entity carries a
+        // VolumetricCloudComponent: with none in the registry it emits one "no clouds present" command a
+        // frame, which is also what takes the dome down again after a cloud capture.
+        m_Scene->AddSystem<ECS::VolumetricCloudECSSystem>();
 
         // Procedural sky entity (drawn by SkyboxECSSystem) — gives a real backdrop gradient. ALSO call the
         // direct SceneRenderer::SetProceduralSky below so the sky is enabled from frame 0 (the ECS command
@@ -152,7 +196,23 @@ namespace Desert::Editor
         skyC.Data.SunGlow        = 0.8f;
         skyC.Data.StarIntensity  = 0.0f;
         skyC.Data.SunIntensity   = 16.0f;
-        skyC.RequestBake         = true;
+        // 512x256 rather than the 1024x512 default, exactly as PreviewViewport's pane already does and for
+        // the same reason: the panorama's only consumer here is the ambient term on one sphere or one
+        // dome, in a picture that ends up 512 pixels wide. Four times the texels buys nothing it can show.
+        //
+        // AND IT IS NOW PAID OFTEN, which is what moved this line from "would be nice" to part of this
+        // change: the dome capture puts a cloud layer in and out of this one scene between captures, and
+        // SkyboxRenderer re-bakes whenever the cloud fingerprint changes, so a cold sweep of this
+        // repository runs about 125 of these.
+        //
+        // THE SAVING IS 13 %, NOT 75 %, AND THE NUMBER IS MEASURED RATHER THAN COUNTED FROM THE TEXELS.
+        // Two cold sweeps on this machine, one at each resolution, 123 and 125 bakes: median 419.3 ms ->
+        // 365.9 ms, minimum 386.2 -> 338.8. Quartering the panorama did NOT quarter the bake, so whatever
+        // dominates it is not the pixels — the line stays because 6 s off a cold sweep for a picture
+        // nothing can tell apart is still worth having, and the next person to reach for a bigger win here
+        // should go looking somewhere other than the resolution.
+        skyC.Data.EnvironmentResolution = ECS::SkyEnvironmentResolution::Low;
+        skyC.RequestBake                = true;
 
         // The SAME values via the direct call (enabled from frame 0) — through the one packing helper, so
         // this route and the ECS route cannot describe two different skies. The eight literals above used
@@ -216,7 +276,8 @@ namespace Desert::Editor
     }
 
     Common::BoolResultStr AssetThumbnailRenderer::RequestMaterial( const Assets::AssetHandle& materialHandle,
-                                                                   const std::string& outPng, bool flatPreview )
+                                                                   const std::string&         outPng,
+                                                                   ThumbnailSubject::Preview  how )
     {
         if ( static_cast<uint64_t>( materialHandle ) == 0 )
             return Common::MakeFormattedError( "no material handle for '{}'", outPng );
@@ -244,15 +305,18 @@ namespace Desert::Editor
         // WHAT WOULD CHANGE THE ANSWER: a measured case of a material capture producing a wrong picture, or
         // a service question that can be asked in the capture's own terms — not the availability of some
         // check that compiles.
-        m_PendingHandle      = materialHandle;
-        m_PendingPng         = outPng;
-        m_PendingIsMesh      = false;
-        m_PendingFlatPreview = flatPreview;
+        m_PendingHandle  = materialHandle;
+        m_PendingPng     = outPng;
+        m_PendingIsMesh  = false;
+        m_PendingPreview = how;
         // Render for several frames before reading back: the first renders after init aren't "warm" yet
         // (GPU mesh buffers + per-frame uniform-buffer ring slots need a few frames to fully populate), so an
         // early readback returns an empty frame. Capture happens on the last count (reads the prior, warm
         // frame's already-submitted render).
         m_Phase = kRenderFrames;
+        // The dome needs its own, much longer window on top of that warm-up — see DomeIsStillSettling.
+        m_DomeSettle = ( how == ThumbnailSubject::Preview::SkyDome ) ? kDomeSettleFrames : 0;
+        m_DomeFrames = 0;
         return Common::MakeSuccess( true );
     }
 
@@ -289,24 +353,80 @@ namespace Desert::Editor
         m_PendingPng      = outPng;
         m_PendingIsMesh   = true;
         m_Phase           = kRenderFrames;
+        m_DomeSettle      = 0;
+        m_DomeFrames      = 0;
         return Common::MakeSuccess( true );
     }
 
-    void AssetThumbnailRenderer::Tick()
+    void AssetThumbnailRenderer::StageSubject()
     {
-        if ( m_Phase == 0 )
-            return;
-        EnsureInit();
-
         auto& smc = m_Target.GetComponent<ECS::StaticMeshComponent>();
 
-        // NOTE ON WHAT IS NOT HERE. This used to add an ECS::MaterialComponent to the preview target and
-        // write MaterialComponent::ShaderName into it, to serve a RequestShader() entry point that nothing
-        // in the editor ever called. That is the shader-OVERRIDE route, and it is the exact route behind
-        // the Stage-1 defect where a thumbnail showed a correct material while the scene showed black —
-        // the two paths resolve a material differently, so a preview taken on one proves nothing about the
-        // other (Docs/MaterialEditor/STAGE1_END_TO_END.md). Every capture below now goes through
-        // MaterialSlots, the per-slot route the scene itself uses.
+        // ── THE DOME: A MEDIUM, NOT A SURFACE ─────────────────────────────────────────────────────────
+        //
+        // Nothing rides the mesh path here — a cloud material has no surface to put on a ball, and the
+        // mesh path would refuse it by name anyway (MeshRenderer::DrawGenericMeshes). What is photographed
+        // is the SKY it authors, from a camera standing on a rise and looking up.
+        if ( !m_PendingIsMesh && m_PendingPreview == ThumbnailSubject::Preview::SkyDome )
+        {
+            smc.MeshHandle = Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
+            smc.Primitive.reset();
+            smc.MaterialSlots.clear();
+            smc.RuntimeMaterialInstances.clear();
+            smc.RuntimeMesh.reset();
+
+            if ( !m_CloudLayer )
+            {
+                m_CloudLayer = m_Scene->CreateNewEntity( "ThumbCloudLayer" );
+                m_CloudLayer.AddComponent<ECS::VolumetricCloudComponent>();
+            }
+
+            auto& cloud        = m_CloudLayer.GetComponent<ECS::VolumetricCloudComponent>();
+            cloud.Data.Enabled = true;
+            // A STILL SKY. Measured in the interactive pane at 90.5 ms of a 105.8 ms frame: wind changes
+            // the cloud fingerprint every frame, and SkyboxRenderer re-bakes its 485 ms environment
+            // panorama whenever that changes. It also shows nothing in a still photograph.
+            cloud.Data.WindSpeed         = 0.0f;
+            cloud.Data.Material          = m_PendingHandle;
+            cloud.Data.MaxSteps          = kDomeMaxSteps;
+            cloud.Data.StopTransmittance = kDomeStopTransmittance;
+            cloud.Data.VolumeResolution  = kDomeVolumeResolution;
+
+            if ( !m_DomeCamera )
+                m_DomeCamera = std::make_shared<::Desert::Core::GameplayCamera>();
+
+            // PINNED, not merely set active: Scene::OnUpdate re-picks the camera from the play state every
+            // frame, so a plain SetActiveCamera survives exactly one frame before the scene's own
+            // EditorCamera takes the view back.
+            //
+            // AND THE PIN IS WHY THE OBJECT CAMERA STOPS MOVING AFTERWARDS. PinActiveCamera also mutes the
+            // scene's EditorCamera, which until now polled the global mouse from inside this offscreen
+            // scene — so an object capture's subject was framed against wherever the person happened to be
+            // flying the real viewport. FitTarget reads the pose from the camera's own matrices, so the
+            // picture was right either way; from here it is also REPRODUCIBLE.
+            m_DomeCamera->SetFromTransform( glm::vec3( 0.0f, kDomeEyeHeight, 0.0f ),
+                                            glm::vec3( kDomePitch, kDomeYaw, 0.0f ), kDomeFov, kDomeNearPlane,
+                                            kDomeFarPlane, kRenderSize, kRenderSize );
+            m_Scene->PinActiveCamera( m_DomeCamera );
+            return;
+        }
+
+        // ── NOT THE DOME: TAKE IT DOWN ────────────────────────────────────────────────────────────────
+        //
+        // The scene is shared between the three pictures, so the layer has to be switched off rather than
+        // merely not switched on: a live deck would otherwise sit over every material and mesh captured
+        // after the first cloud one. Off rather than destroyed, because destroying it would give back the
+        // 10 MiB and then pay for it again on the next cloud material, of which this project has 52.
+        if ( m_CloudLayer && m_CloudLayer.HasComponent<ECS::VolumetricCloudComponent>() )
+            m_CloudLayer.GetComponent<ECS::VolumetricCloudComponent>().Data.Enabled = false;
+
+        // The camera Scene::Init made, by name. Unpinning alone would leave the DOME camera active until
+        // the scene's next OnUpdate — which is after FitTarget has already framed against it.
+        if ( m_DomeCamera && m_ObjectCamera )
+        {
+            m_Scene->PinActiveCamera( nullptr );
+            m_Scene->SetActiveCamera( m_ObjectCamera );
+        }
 
         if ( m_PendingIsMesh )
         {
@@ -348,8 +468,8 @@ namespace Desert::Editor
             // rebuild against the current material handle. Foliage/cutout materials (a grass-card atlas) wrap
             // and garble on a sphere, so those preview on a flat PLANE turned to face the fixed camera.
             smc.MeshHandle    = Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
-            smc.Primitive     = m_PendingFlatPreview ? Geometry::PrimitiveType::Plane
-                                                     : Geometry::PrimitiveType::Sphere;
+            const bool flat   = m_PendingPreview == ThumbnailSubject::Preview::Card;
+            smc.Primitive     = flat ? Geometry::PrimitiveType::Plane : Geometry::PrimitiveType::Sphere;
             smc.MaterialSlots = { m_PendingHandle };
             smc.RuntimeMaterialInstances.clear();
             smc.RuntimeMesh.reset(); // drop any previously-built primitive so the type change rebuilds
@@ -375,7 +495,7 @@ namespace Desert::Editor
             }
             FitTarget( matCenter, matExtent );
 
-            if ( m_PendingFlatPreview )
+            if ( flat )
             {
                 // Turn the card to face the camera. Through ThumbnailFraming::FacingYaw, which takes BOTH
                 // points as arguments — the card is no longer at the world origin, and the eye is no longer
@@ -386,9 +506,72 @@ namespace Desert::Editor
                          0.0f, ThumbnailFraming::FacingYaw( cam->GetPosition(), tc.Translation ), 0.0f );
             }
         }
+    }
+
+    bool AssetThumbnailRenderer::DomeIsStillSettling()
+    {
+        if ( m_PendingIsMesh || m_PendingPreview != ThumbnailSubject::Preview::SkyDome )
+            return false;
+
+        if ( m_DomeFrames >= kDomeMaxSettleFrames )
+        {
+            // SAID ONCE, AND THE CAPTURE STILL HAPPENS. A dome that is photographed early is a soft or
+            // dithered cloud; a capture abandoned here would hold the editor's one slot until the process
+            // ended. The first is a worse picture, the second is no pictures at all.
+            if ( m_DomeSettle > 0 )
+            {
+                LOG_WARN( "[AssetThumbnailRenderer] the cloud volume for '{}' was still baking after {} "
+                          "frames — capturing anyway, so the tile may show a march that has not converged.",
+                          m_PendingPng, kDomeMaxSettleFrames );
+                m_DomeSettle = 0;
+            }
+            return false;
+        }
+        ++m_DomeFrames;
+
+        // COUNTED FROM THE END OF THE BAKE. The modelling volume is built on a worker while these frames
+        // run, and a march through a volume that is not there yet converges on nothing — so seeing a bake
+        // in flight restarts the window rather than merely extending it.
+        if ( m_Renderer->IsCloudVolumeBaking() )
+            m_DomeSettle = kDomeSettleFrames;
+
+        if ( m_DomeSettle <= 0 )
+            return false;
+
+        --m_DomeSettle;
+        return true;
+    }
+
+    void AssetThumbnailRenderer::Tick()
+    {
+        if ( m_Phase == 0 )
+            return;
+        EnsureInit();
+        if ( !m_Inited )
+        {
+            // The scene refused to initialise and EnsureInit has already said why. ABANDON the capture
+            // rather than returning with the phase intact: every line below dereferences entities that do
+            // not exist, and a phase that never reaches zero holds the editor's one capture slot for the
+            // rest of the session. The service sees no PNG appear and reports the failure in its own terms.
+            m_Phase = 0;
+            return;
+        }
+
+        // NOTE ON WHAT IS NOT HERE. This used to add an ECS::MaterialComponent to the preview target and
+        // write MaterialComponent::ShaderName into it, to serve a RequestShader() entry point that nothing
+        // in the editor ever called. That is the shader-OVERRIDE route, and it is the exact route behind
+        // the Stage-1 defect where a thumbnail showed a correct material while the scene showed black —
+        // the two paths resolve a material differently, so a preview taken on one proves nothing about the
+        // other (Docs/MaterialEditor/STAGE1_END_TO_END.md). Every capture below now goes through
+        // MaterialSlots, the per-slot route the scene itself uses.
+        StageSubject();
 
         // Render this frame (recorded into the editor's in-flight frame, submitted at frame end).
         RecordRender();
+
+        // The dome's frames do not count as warm-up until the volume is there and the march has settled.
+        if ( DomeIsStillSettling() )
+            return;
 
         if ( m_Phase > 1 )
         {

@@ -296,9 +296,14 @@ TEST( SceneRetiredKeysMigration, NoRetiredKeyIsStillAReflectedSceneSetting )
 
 // Every row has to say WHY, because the sentence is what reaches the person whose value disappeared. An
 // empty reason is a removal nobody can account for a month later.
+//
+// NO NON-EMPTY GUARD, AND ITS ABSENCE IS THE POINT. This test used to open with
+// `ASSERT_GT( std::size( kRetiredKeys ), 0u )`, which made the table's own terminal state - zero rows, every
+// retirement written back to every file - a RED test. A table designed to empty cannot be guarded against
+// emptying: that is the same defect as declaring it `RetiredKey k[]`, one level up. Zero rows here means
+// zero rows to check, and this test is then vacuously true, which is the correct answer.
 TEST( SceneRetiredKeysMigration, EveryRetiredRowNamesABlockAKeyAndAReason )
 {
-    ASSERT_GT( std::size( Migration::kRetiredKeys ), 0u );
     for ( const Migration::RetiredKey& row : Migration::kRetiredKeys )
     {
         EXPECT_TRUE( row.Block != nullptr && row.Block[0] != '\0' );

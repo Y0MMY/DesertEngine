@@ -74,7 +74,7 @@ namespace Desert::Editor
     }
 
     std::string ThumbnailService::RequestMaterial( const Assets::AssetHandle& material,
-                                                   const std::string& assetPath, bool flatPreview )
+                                                   const std::string& assetPath, ThumbnailSubject::Preview how )
     {
         // The deduplication sets are keyed on the asset's IDENTITY, for the same reason the PNG is
         // (ThumbnailKey): panels do not agree on how to spell a path, and a set that remembered spellings
@@ -85,7 +85,7 @@ namespace Desert::Editor
         if ( ShouldQueue( identity, png, assetPath ) )
         {
             m_Queue.push_back( { Kind::Material, material, Assets::AssetHandle( static_cast<uint64_t>( 0 ) ),
-                                 identity, assetPath, png, flatPreview } );
+                                 identity, assetPath, png, how } );
             m_Queued.insert( identity );
         }
         return png;
@@ -98,7 +98,8 @@ namespace Desert::Editor
         const std::string png      = ThumbnailKey::DiskPath( assetPath );
         if ( ShouldQueue( identity, png, assetPath ) )
         {
-            m_Queue.push_back( { Kind::Mesh, mesh, material, identity, assetPath, png, false } );
+            m_Queue.push_back(
+                 { Kind::Mesh, mesh, material, identity, assetPath, png, ThumbnailSubject::Preview::Sphere } );
             m_Queued.insert( identity );
         }
         return png;
@@ -402,7 +403,7 @@ namespace Desert::Editor
         // most common reason is one no amount of waiting fixes: a mesh whose geometry is not built, whose
         // capture would have written a photograph of empty sky and called it the asset.
         const auto queued = req.Type == Kind::Material
-                                 ? m_Renderer->RequestMaterial( req.Handle, req.Png, req.Flat )
+                                 ? m_Renderer->RequestMaterial( req.Handle, req.Png, req.How )
                                  : m_Renderer->RequestMesh( req.Handle, req.Png, req.Material );
         if ( !queued.IsSuccess() )
         {

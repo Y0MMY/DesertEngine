@@ -78,9 +78,14 @@ namespace Desert::Editor
 
         // Queue a material preview if it is not already cached, queued or known-bad. Returns the PNG path
         // to read (which may not exist yet — draw a placeholder until it does).
-        // `flatPreview` renders on a camera-facing card instead of a sphere (right for foliage/cutout).
+        //
+        // @p how is the material's shader DOMAIN made into a picture — a ball, a camera-facing card for a
+        // cutout, or the sky a Volume-domain material authors. It has NO DEFAULT on purpose: the parameter
+        // it replaces (`bool flatPreview = false`) let every caller that had not thought about the
+        // question queue a cloud material as a mesh draw, which is what put a Volume-domain refusal in the
+        // startup log. `ThumbnailSubject::PreviewRouteFor` is the one place that answers it.
         std::string RequestMaterial( const Assets::AssetHandle& material, const std::string& assetPath,
-                                     bool flatPreview = false );
+                                     ThumbnailSubject::Preview how );
 
         // Queue a mesh preview, optionally with the material to apply to every slot.
         std::string RequestMesh( const Assets::AssetHandle& mesh, const std::string& assetPath,
@@ -170,7 +175,8 @@ namespace Desert::Editor
             // already have been done (two panels showing one asset) or made unnecessary.
             std::string Source;
             std::string Png;
-            bool        Flat = false;
+            // Materials only: which of the three pictures this is. See ThumbnailSubject::Preview.
+            ThumbnailSubject::Preview How = ThumbnailSubject::Preview::Sphere;
         };
 
         // Shared by both Request* entry points: decides whether the work is needed at all. Takes the

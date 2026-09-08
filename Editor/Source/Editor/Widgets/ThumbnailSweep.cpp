@@ -82,7 +82,7 @@ namespace Desert::Editor
                                  return;
                              }
                              ThumbnailService::Get().RequestMaterial(
-                                  subject.GetValue().Handle, candidate.AssetPath, subject.GetValue().Flat );
+                                  subject.GetValue().Handle, candidate.AssetPath, subject.GetValue().How );
                              return;
                          }
 
