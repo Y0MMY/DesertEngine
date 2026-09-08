@@ -72,11 +72,13 @@ jobs:
       # If this ever needs to move, move it deliberately and in ONE change: this line, the skill
       # (`desert-engine-verify` §6), the contract (§3.3), and a re-format of the tree under the new
       # version. Do not let the two ends drift apart again.
+      # The package is versioned; CheckFormat.sh looks for `clang-format-18` by name and passes it to
+      # git-clang-format with --binary, so no PATH alias is needed. The first attempt at this pin used
+      # update-alternatives and left NO plain `clang-format` on PATH at all — git then printed "not a
+      # git command", which the old script reported as formatting violations. That is why the script
+      # now distinguishes "could not run" (exit 2) from "found violations" (exit 1).
       - name: Install clang-format
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18
-          sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
-          clang-format --version
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18
 
       - name: Check formatting of changed lines
         run: ./scripts/CI/CheckFormat.sh "${{ github.event.pull_request.base.sha || github.event.before }}"
