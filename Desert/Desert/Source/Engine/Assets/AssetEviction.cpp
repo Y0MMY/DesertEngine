@@ -49,7 +49,7 @@ namespace Desert::Assets
 
             for ( const Common::AssetHandle& handle : closure.Handles() )
             {
-                if ( const auto mesh = manager.FindByHandle<MeshAsset>( handle ) )
+                if ( const auto mesh = manager.ProbeByHandle<MeshAsset>( handle ) )
                 {
                     if ( mesh->IsReadyForUse() )
                     {
@@ -60,7 +60,7 @@ namespace Desert::Assets
                     // The skinned mesh's rig. Held as a resolved dependency rather than as a plain field,
                     // so it is read through the dependency's handle and not through the signature it was
                     // matched by — the signature names a shape, the handle names the file.
-                    if ( const auto skinned = manager.FindByHandle<SkinnedMeshAsset>( handle ) )
+                    if ( const auto skinned = manager.ProbeByHandle<SkinnedMeshAsset>( handle ) )
                     {
                         if ( skinned->IsReadyForUse() )
                             closure.Mark( skinned->GetSkeletonDependency().Handle,
@@ -68,7 +68,7 @@ namespace Desert::Assets
                     }
                 }
 
-                if ( const auto material = manager.FindByHandle<SurfaceMaterialAsset>( handle ) )
+                if ( const auto material = manager.ProbeByHandle<SurfaceMaterialAsset>( handle ) )
                 {
                     if ( material->IsReadyForUse() )
                     {
@@ -84,7 +84,7 @@ namespace Desert::Assets
                     }
                 }
 
-                if ( const auto cloudType = manager.FindByHandle<CloudTypeAsset>( handle ) )
+                if ( const auto cloudType = manager.ProbeByHandle<CloudTypeAsset>( handle ) )
                 {
                     if ( cloudType->IsReadyForUse() )
                         closure.Mark( cloudType->GetNoiseVolume(),

@@ -119,6 +119,13 @@ namespace Desert::Assets
             return asset;
         }
 
+        // WHAT A MISS MEANS — and only the caller knows. See ProbeByHandle below for the whole story.
+        enum class LookupReport
+        {
+            Named,   ///< a mismatch is a symptom: somebody holds the wrong handle. Reported.
+            Probing, ///< a mismatch is the expected answer to "is it one of these?". Trace only.
+        };
+
         template <typename TypeAsset>
         Asset<TypeAsset> FindByHandle( const AssetHandle& handle ) const
         {
@@ -126,6 +133,33 @@ namespace Desert::Assets
             {
                 return AsRequestedType<TypeAsset>( m_AssetsCache[it->second].second, "FindByHandle",
                                                    std::to_string( static_cast<uint64_t>( handle ) ) );
+            }
+            return nullptr;
+        }
+
+        // "IS THIS HANDLE A TypeAsset? I EXPECT MOST ANSWERS TO BE NO."
+        //
+        // Same lookup as FindByHandle and the same refusal to reinterpret — the ONLY difference is that
+        // the caller has declared, in the name it wrote, that a mismatch is the expected answer rather
+        // than a symptom. A walk over mixed handles asking each of them several typed questions in turn
+        // (Engine/Assets/AssetEviction.cpp does exactly this, once per reachable handle per round)
+        // produces one refusal per question that does not apply, and every one of those used to be an
+        // ERROR line about work going exactly right: four per scene load in this tree.
+        //
+        // The severity could not be derived down in AsRequestedType, and that is the point worth keeping.
+        // Its discriminator — does the registry's recorded type id agree with the one asked for — cannot
+        // tell a probe from a confusion, because in BOTH the ids disagree. The difference is not in the
+        // data at all; it is in what the caller meant, so the caller is the only place it can be said.
+        // Use FindByHandle when a miss means something is wrong, and this when a miss means "not that
+        // one, next question".
+        template <typename TypeAsset>
+        Asset<TypeAsset> ProbeByHandle( const AssetHandle& handle ) const
+        {
+            if ( auto it = m_HandleLookup.find( handle ); it != m_HandleLookup.end() )
+            {
+                return AsRequestedType<TypeAsset>( m_AssetsCache[it->second].second, "ProbeByHandle",
+                                                   std::to_string( static_cast<uint64_t>( handle ) ),
+                                                   LookupReport::Probing );
             }
             return nullptr;
         }
@@ -236,7 +270,8 @@ namespace Desert::Assets
         // discriminator is whether the registry's recorded type id agrees with the requested one.
         template <typename TypeAsset>
         static Asset<TypeAsset> AsRequestedType( const Asset<AssetBase>& stored, const char* who,
-                                                 const std::string& subject )
+                                                 const std::string& subject,
+                                                 LookupReport       report = LookupReport::Named )
         {
             static_assert( std::is_base_of_v<AssetBase, TypeAsset>, "TypeAsset must inherit from AssetBase" );
 
@@ -267,6 +302,23 @@ namespace Desert::Assets
                 // like a typo. Real ERROR lines are only worth reading if they are all real; a routine
                 // subtype probe is not one, so it goes to trace and NAMES BOTH CLASSES rather than the
                 // shared type name that made the pair indistinguishable.
+                // AND THERE IS A THIRD CASE THAT ONLY THE CALLER CAN DECLARE. The two branches below
+                // guess at intent from the type ids, which is all this function can see. A caller that
+                // asks "is this handle a Mesh? a Material? a CloudType?" about EVERY handle it holds —
+                // the eviction root walk does exactly that — expects a mismatch on nearly every question
+                // and a DISAGREEING type id on most of them, so the ERROR branch fires four times per
+                // scene load about work that is going exactly right. No discriminator computed here can
+                // separate that from a real confusion, because the difference is not in the data: it is
+                // in what the caller meant. So the caller says so, with ProbeByHandle, and this stays
+                // quiet for it. See LookupReport above the entry points.
+                if ( report == LookupReport::Probing )
+                {
+                    LOG_TRACE( "AssetManager::{}: '{}' is a '{}', not the '{}' being probed for. The caller "
+                               "declared this a probe over mixed handles, so a miss is the expected answer.",
+                               who, subject, typeid( storedRef ).name(), typeid( TypeAsset ).name() );
+                    return nullptr;
+                }
+
                 const bool typeIdAgrees = stored->GetMetadata().AssetType == TypeAsset::GetTypeID();
                 if ( typeIdAgrees )
                 {
