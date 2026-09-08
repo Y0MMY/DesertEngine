@@ -55,6 +55,28 @@ namespace Desert
     // branch has always done, and the reason nobody noticed the other one was dead.
     void DynamicMesh::Update( const std::vector<Vertex>& vertices, const std::vector<Index>& indices )
     {
+        // A MESH THAT CARRIES A LOD CHAIN IS NOT EDITABLE THROUGH Update, AND NOW IT SAYS SO. Such a
+        // mesh's GPU index buffer is the base indices PLUS an appended chain, with every submesh's
+        // `LODs` range pointing into it (Geometry::BuildLODIndexBuffer, called from Invalidate above).
+        // Update rebuilds the BASE list only — it always has — so re-uploading leaves each of those
+        // ranges pointing past the end of the new buffer, which is an out-of-range indexed draw.
+        //
+        // It cannot happen today: every DynamicMesh in the engine, the editor and the runtime is
+        // constructed with the default `generateLODs = false`, which also makes the LOD branch in
+        // Invalidate dead code (named for the LOD task, not fixed here). The check exists so the first
+        // `true` finds out from this line instead of from a driver. Regenerating the chain here is not
+        // the alternative it looks like: Update runs once per mouse-move during a vertex drag, and the
+        // chain is a meshopt simplification pass over the whole mesh.
+        //
+        // REFUSED BEFORE THE CPU DATA IS TOUCHED, so the two sides stay in agreement — a half-applied
+        // edit that is on the CPU and not the GPU is the exact silence this task exists to remove.
+        if ( m_GenerateLODs )
+        {
+            LOG_ERROR( "[DynamicMesh] Update was called on a mesh that carries a LOD chain; the edit was "
+                       "NOT applied. Rebuild the mesh through Invalidate instead." );
+            return;
+        }
+
         m_Vertices = vertices;
         m_Indices  = indices;
 
