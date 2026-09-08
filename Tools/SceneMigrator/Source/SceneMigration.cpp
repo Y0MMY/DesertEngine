@@ -1695,7 +1695,6 @@ namespace Desert::Migration
 
                 if ( !text.has_value() )
                 {
-                    unplaceable = true;
                     LOG_WARN( "[SceneMigration] entity '{0}': {1}.{2} is {3}, not a string - it names "
                               "nothing and is left exactly as it is",
                               tag, site.Component, site.OldKey, Describe( named.value() ) );
@@ -1724,7 +1723,6 @@ namespace Desert::Migration
                         // PathForStableKey hands an untagged string back verbatim, so the slot keeps
                         // exactly the behaviour it had - and NAMED, because "exactly the behaviour it
                         // had" includes not resolving in a packaged game (DC 1.4).
-                        unplaceable = true;
                         LOG_WARN( "[SceneMigration] entity '{0}': '{1}' lies under neither the assets root "
                                   "nor the engine resource tree, so there is no content root to tag it "
                                   "with - it is carried over unchanged and will not resolve in a packaged "
@@ -1752,7 +1750,6 @@ namespace Desert::Migration
                     }
                 }
 
-                (void)unplaceable; // reported above; it never changes the tree
                 if ( !renames && !respelled.has_value() )
                     continue; // nothing to write - leave the payload byte-identical
 
