@@ -37,6 +37,15 @@ namespace Desert::Editor
      *     reason a capture fails is a shader, a service registration or a device that was not ready yet,
      *     and persisting "this asset is bad" would turn a transient failure into one only a cache wipe
      *     could clear. The thing worth persisting is the picture, and that is what the PNG is.
+     *
+     * AND IT NEVER TAKES THE LAST RENDERER SLOT. A capture owns a full SceneRenderer, which is one of six
+     * (Engine/Core/RendererSlotPool.hpp), and a renderer that finds none free does not fail — it records
+     * into slot 0 and shares the main viewport's per-frame state. This queue is background work: nobody
+     * clicked for it, and what it produces is the picture a row shows precisely WHILE the person cannot
+     * have a live preview. Taking the sixth slot would therefore starve the surface they are opening in
+     * order to render its consolation prize. The entitlement is stated once, for both consumers of it, in
+     * Editor/Widgets/PreviewSlotBudget.hpp; when it says no, the queue is kept and the refusal is LOGGED,
+     * because a queue that quietly stops draining reads exactly like a queue with nothing in it.
      */
     class ThumbnailService
     {
