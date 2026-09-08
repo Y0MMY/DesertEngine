@@ -102,7 +102,6 @@ namespace Desert::Graphic
         }
 
         virtual const FramebufferSpecification GetSpecification() const                 = 0;
-        virtual void                           Use( BindUsage = BindUsage::Bind ) const = 0;
 
         // NO `forceRecreate`. The parameter was here with a default of `false`, every one of the ten call
         // sites but one took the default (the one that did not asked for `true`), and the only

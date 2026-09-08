@@ -150,9 +150,6 @@ namespace Desert::Graphic::API::Vulkan
 
     VulkanImage2D::VulkanImage2D( const Core::Formats::Image2DSpecification& spec ) : m_Specification( spec ) {}
     VulkanImage2D::~VulkanImage2D() { Release(); }
-    void VulkanImage2D::Use( uint32_t /*slot*/ ) const
-    {
-    }
     Common::BoolResultStr VulkanImage2D::Invalidate() { return RT_Invalidate(); }
     Common::BoolResultStr VulkanImage2D::RT_Invalidate() { Release(); return CreateResource(); }
 
@@ -579,9 +576,6 @@ namespace Desert::Graphic::API::Vulkan
 
     VulkanImageCube::VulkanImageCube( const Core::Formats::ImageCubeSpecification& spec ) : m_Specification( spec ) {}
     VulkanImageCube::~VulkanImageCube() { Release(); }
-    void VulkanImageCube::Use( uint32_t /*slot*/ ) const
-    {
-    }
     Common::BoolResultStr VulkanImageCube::Invalidate() { return RT_Invalidate(); }
     Common::BoolResultStr VulkanImageCube::RT_Invalidate() { Release(); return CreateResource(); }
 
@@ -700,9 +694,6 @@ namespace Desert::Graphic::API::Vulkan
     VulkanImage3D::~VulkanImage3D()
     {
         Release();
-    }
-    void VulkanImage3D::Use( uint32_t /*slot*/ ) const
-    {
     }
     Common::BoolResultStr VulkanImage3D::Invalidate()
     {

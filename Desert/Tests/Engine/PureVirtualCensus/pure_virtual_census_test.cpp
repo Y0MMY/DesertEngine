@@ -525,30 +525,21 @@ namespace
     // This test is what forced the row out: it asserts every row is STILL dead, so writing the caller
     // turned it red. That is the difference between closing a question and deleting it.
     constexpr CensusRow k_Census[] = {
-         // ---- THE VULKAN BACKEND'S BIND VOCABULARY AND DEAD ACCESSORS --------------------------------
-         // `Use`/`RT_Use` is the OpenGL "bind this object" idiom; a Vulkan backend binds through
-         // descriptor sets and never calls it. Eight declarations across five bases, all with live
-         // implementations underneath them. The accessors below are the same shape: written to complete
-         // an interface, read by nobody.
+         // ---- THE VULKAN BACKEND'S DEAD ACCESSORS ---------------------------------------------------
+         // THE BIND VOCABULARY IS GONE. `Use`/`RT_Use` — eight pure virtuals across five bases, with
+         // seventeen implementations under them and an EMPTY BODY in every one of the seventeen — was
+         // the OpenGL "bind this object, now unbind it" idiom, and so was the `BindUsage` enum that
+         // existed only to be its parameter. Г8 left them here because Engine/Graphic/API/Vulkan was
+         // fenced for the device-loss rebuild; that fence came down when Г7, Г7-C and Г13 landed, and
+         // Г12 took the decision the row was waiting for: DELETED, because a Vulkan backend binds a
+         // descriptor SET per draw and names its vertex/index buffers in the draw command, and there is
+         // no second backend for the seam to serve (`RendererAPIType` has exactly `None` and `Vulkan`;
+         // `lightweightvk` is a vendored utility inside our own Vulkan folder and `NVRHI` is referenced
+         // by no engine file). The reasoning is kept at the site, in Graphic/RendererTypes.hpp.
          //
-         // THEY ARE NOT REMOVED HERE BECAUSE Engine/Graphic/API/Vulkan WAS FENCED FOR THIS TASK — it had
-         // just been rebuilt for device loss — and every implementation lives inside that fence.
-         { "Image", "Use", "Desert/Desert/Source/Engine/Graphic/Image.hpp",
-           "FENCED (API/Vulkan): the OpenGL bind idiom, unused by a descriptor-set backend." },
-         { "Shader", "Use", "Desert/Desert/Source/Engine/Graphic/Shader.hpp",
-           "FENCED (API/Vulkan): same bind idiom." },
-         { "Shader", "RT_Use", "Desert/Desert/Source/Engine/Graphic/Shader.hpp",
-           "FENCED (API/Vulkan): same bind idiom, render-thread spelling." },
-         { "VertexBuffer", "Use", "Desert/Desert/Source/Engine/Graphic/VertexBuffer.hpp",
-           "FENCED (API/Vulkan): same bind idiom." },
-         { "VertexBuffer", "RT_Use", "Desert/Desert/Source/Engine/Graphic/VertexBuffer.hpp",
-           "FENCED (API/Vulkan): same bind idiom, render-thread spelling." },
-         { "IndexBuffer", "Use", "Desert/Desert/Source/Engine/Graphic/IndexBuffer.hpp",
-           "FENCED (API/Vulkan): same bind idiom." },
-         { "IndexBuffer", "RT_Use", "Desert/Desert/Source/Engine/Graphic/IndexBuffer.hpp",
-           "FENCED (API/Vulkan): same bind idiom, render-thread spelling." },
-         { "Framebuffer", "Use", "Desert/Desert/Source/Engine/Graphic/Framebuffer.hpp",
-           "FENCED (API/Vulkan): same bind idiom." },
+         // A dead pure virtual is not inert: it is a standing instruction to every future implementer to
+         // write a body that does nothing. That is what these eight cost, and what the ones below still
+         // cost. They remain because each is a separate question about a separate capability.
          { "Image", "GetImageFormat", "Desert/Desert/Source/Engine/Graphic/Image.hpp",
            "FENCED (API/Vulkan): the format is read off the specification instead." },
          { "Image", "IsLoaded", "Desert/Desert/Source/Engine/Graphic/Image.hpp",
@@ -763,13 +754,14 @@ TEST( PureVirtualCensus, NoAbstractBaseIsLeftWithoutASingleImplementation )
 
 TEST( PureVirtualCensus, TheNumberIsStatedSoAShrinkageIsVisible )
 {
-    // 31, and it was 35 when Г8 counted: `RenderSystem::Shutdown` and the orphan duplicate of
+    // 23, and it was 31 before Г12 deleted the eight-row bind vocabulary in one decision rather than
+    // eight; it was 35 when Г8 counted: `RenderSystem::Shutdown` and the orphan duplicate of
     // ImGuiLayer.hpp went with that task, `MaterialProperty::Clone` with М9, and `AssetBase::Unload`
     // with А7 — the last of those by being ANSWERED rather than deleted, which is the only way a row
     // that was a design question is allowed to leave. Up is a regression; down is welcome, and this
     // line moves with it. The count is quoted because a per-row diff never says "there are four more
     // of these now".
-    EXPECT_EQ( std::size( k_Census ), 31u )
+    EXPECT_EQ( std::size( k_Census ), 23u )
          << "the number of pure virtuals implemented by everybody and called by nobody has changed";
 }
 

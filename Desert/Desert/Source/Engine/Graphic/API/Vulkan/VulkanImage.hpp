@@ -143,7 +143,6 @@ namespace Desert::Graphic::API::Vulkan
         [[nodiscard]] Core::Formats::ImagePixelData GetImagePixels() override;
         NO_DISCARD Common::ResultStr<std::vector<uint8_t>> ReadPixelsRGBA8() override;
 
-        void Use( uint32_t slot = 0 ) const override;
         Common::BoolResultStr Invalidate() override;
         Common::BoolResultStr Release() override;
         NO_DISCARD Common::BoolResultStr SetData( const Core::Formats::ImagePixelData& data ) override;
@@ -201,7 +200,6 @@ namespace Desert::Graphic::API::Vulkan
         [[nodiscard]] Core::Formats::ImageCubeSpecification& GetImageSpecification() override { return m_Specification; }
         [[nodiscard]] Core::Formats::ImagePixelData GetImagePixels() override;
 
-        void Use( uint32_t slot = 0 ) const override;
         Common::BoolResultStr Invalidate() override;
         Common::BoolResultStr Release() override;
 
@@ -273,7 +271,6 @@ namespace Desert::Graphic::API::Vulkan
         }
         [[nodiscard]] Core::Formats::ImagePixelData GetImagePixels() override;
 
-        void                  Use( uint32_t slot = 0 ) const override;
         Common::BoolResultStr Invalidate() override;
         Common::BoolResultStr Release() override;
 
