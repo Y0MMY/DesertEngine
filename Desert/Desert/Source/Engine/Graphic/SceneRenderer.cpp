@@ -456,10 +456,20 @@ namespace Desert::Graphic
         const Common::Settings::MachineSettings& quality = m_Quality;
 
         m_AAMode = quality.AA;
-        // Wireframe is a FORWARD-only debug view (the deferred G-buffer pipeline has no wireframe
-        // variant — that's why turning it on in the default Deferred path did nothing). Force forward
-        // while it's active so the wireframe pipeline is actually used and the grid composites over it.
-        m_RenderPath = m_DebugView.WireframeMode ? Core::RenderPath::Forward : sceneSettings.RenderingPath;
+        // TWO FORWARD-ONLY DEBUG VIEWS, and they force the path for the same reason.
+        //
+        // Wireframe has no deferred variant: the G-buffer pipeline has no wireframe polygon mode, which is
+        // why turning it on in the default Deferred path did nothing at all.
+        //
+        // LightingDebug is the per-light attribution view, and it is a BRANCH IN THE PBR MESH SHADERS
+        // (u_DebugParams.y, StaticMeshPBR / StaticMeshPBR_Instanced / SkinnedMeshPBR). The deferred
+        // lighting pass writes `DebugParams = vec4(0)` unconditionally — MaterialDeferredLighting's
+        // UploadShadow — so the flag reaches no shader on that path. Forty-six of this repository's
+        // forty-nine scenes state Deferred and the struct's default is Deferred, so WITHOUT this line the
+        // View Mode entry К7 added would be a control that does nothing in almost every scene: the §1.3
+        // dead setting, reintroduced by the fix for one.
+        m_RenderPath = ( m_DebugView.WireframeMode || m_DebugView.LightingDebug ) ? Core::RenderPath::Forward
+                                                                                  : sceneSettings.RenderingPath;
         m_EnableSSAO = sceneSettings.EnableSSAO;
         // The cloud layer's cost ceiling, refreshed here with every other cost-versus-quality choice
         // rather than read from a global at the point of use: several SceneRenderers are live at once

@@ -244,7 +244,7 @@ Shader "StaticMeshPBR_Instanced"
         	// Without a normal map the TBN transform is intentionally skipped:
         	// inVertex.Normal is already in world space and needs no further transformation.
 
-        	// Debug: visualize the final world-space normal as RGB (Scene Settings -> Debug -> Show Normals).
+        	// Debug: visualize the final world-space normal as RGB (viewport View Mode -> Normals).
         	if (u_DebugParams.x > 0.5)
         	{
         		oColor = vec4(m_Params.Normal * 0.5 + 0.5, 1.0);
@@ -288,7 +288,7 @@ Shader "StaticMeshPBR_Instanced"
             // TWO OCCLUDERS OF ONE SUN, multiplied — exactly as the deferred composite assembles it.
             shadow *= CloudShadowFactor(inVertex.WorldPosition);
 
-            // Lighting debug (Scene Settings -> Debug -> Light Debug): each source gets a distinct color, the
+            // Lighting debug (viewport View Mode -> Lighting): each source gets a distinct color, the
             // surface is tinted by the sources reaching it (weighted by attenuation * NdotL), brightness = light
             // strength, fully-unlit areas read black. Albedo/IBL/emission are ignored.
             if (u_DebugParams.y > 0.5)
