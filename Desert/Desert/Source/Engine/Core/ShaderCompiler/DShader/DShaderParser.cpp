@@ -1,11 +1,13 @@
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
 
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <functional>
 #include <regex>
 #include <set>
 #include <sstream>
+#include <string_view>
 #include <vector>
 
 namespace Desert::Core::Preprocess
@@ -908,10 +910,20 @@ namespace Desert::Core::Preprocess
         // STAGE" until 2026-09-08 and the code has never done that. AssembleStage translates the DSL `Include`
         // block and the stage body in TWO separate calls, and ShaderIncluder hands every `#include`d `.glslh`
         // its own call as well. So each of those texts starts counting from zero, and two auto declarations in
-        // two of them collide. Nothing in the tree does it today (no shipped shader uses an `Include` block and
-        // no `.glslh` declares an auto form), which is why it has never been seen — but the guarantee the old
-        // wording offered was not one this function can make. Anything SHARED — a resource an include declares,
-        // one a second stage also names, or one a C++ site binds by a fixed number — must keep its EXPLICIT (n).
+        // two of them collide. Nothing in the tree does it today (measured 2026-09-08: NO shipped `.shader` or
+        // `.glslh` uses ANY paren-less form, for a location or for a binding), which is why it has never been
+        // seen — but the guarantee the old wording offered was not one this function can make. Anything SHARED —
+        // a resource an include declares, one a second stage also names, or one a C++ site binds by a fixed
+        // number — must keep its EXPLICIT (n).
+        //
+        // AND THE SEED IS DIGITS, SO A MACRO IS INVISIBLE TOO. The occupancy scan below reads `binding = (\d+)`,
+        // and three shipped headers spell the number as a macro instead — Common/CloudAuthored.glslh,
+        // Common/CloudParams.glslh, Common/FogParams.glslh. An auto declaration added to one of those files
+        // would be handed a number that file has already spent. Widening the pattern does not fix it: the
+        // file-scope blindness above defeats any pattern, because the number an auto form collides with usually
+        // lives in a text this call never sees. It is caught after compilation instead, where a number is a
+        // number whatever spelled it — ShaderReflection::ReflectStage refuses a descriptor slot claimed twice
+        // and names both resources, and Tests/Engine/ShaderCacheKey asserts it over every shipped shader.
         //
         // Storage-image format qualifiers (`layout(binding=n, rgba32f) uniform imageCube`) and tessellation
         // layout (`layout(vertices=n) out`, `layout(quads,...) in`) are inherently GLSL-structural and stay
@@ -978,34 +990,111 @@ namespace Desert::Core::Preprocess
             return runs;
         }
 
+        // WHICH capitalized keywords stand as whole words in the CODE of this text.
+        //
+        // Every rule below can only fire where its own keyword appears, so this one hand-written scan
+        // answers all fifteen regex questions at once — and the shipped tree answers "no" to most of them.
+        // Asking std::regex instead costs a full scan of the text PER PATTERN, at every startup, for every
+        // shader and every included header: measured over the 76 `.shader` + 33 `.glslh` of the shipped
+        // tree in Debug, the fifteen unconditional passes were 4.7 s and 2.3 s respectively (Г17).
+        //
+        // Whole-word is the right test because every pattern anchors its keyword with `\b` on the left and
+        // is followed either by `\b` or by `\s*\(`, and `(` is not an identifier character either way. So a
+        // keyword absent as a whole word cannot be matched by any of them, and skipping is exact rather
+        // than approximate — the translated text is byte-identical with and without this gate.
+        enum SugarKeyword : uint8_t
+        {
+            KwIn,
+            KwOut,
+            KwUniform,
+            KwReadBuffer,
+            KwWriteBuffer,
+            KwBuffer,
+            KwLocalSize,
+            KwPushConstant,
+            KwCount
+        };
+
+        using KeywordSet = std::array<bool, KwCount>;
+
+        KeywordSet PresentSugarKeywords( const std::vector<SourceRun>& runs )
+        {
+            static constexpr std::string_view kNames[KwCount] = {
+                 "In", "Out", "Uniform", "ReadBuffer", "WriteBuffer", "Buffer", "LocalSize", "PushConstant" };
+            KeywordSet present{};
+            for ( const auto& run : runs )
+            {
+                if ( !run.IsCode )
+                    continue;
+
+                const std::string& text = run.Text;
+                for ( size_t i = 0; i < text.size(); )
+                {
+                    if ( !IsIdentChar( text[i] ) )
+                    {
+                        ++i;
+                        continue;
+                    }
+                    const size_t begin = i;
+                    while ( i < text.size() && IsIdentChar( text[i] ) )
+                        ++i;
+
+                    const std::string_view word( text.data() + begin, i - begin );
+                    for ( uint8_t k = 0; k < KwCount; ++k )
+                        present[k] = present[k] || word == kNames[k];
+                }
+            }
+            return present;
+        }
+
         std::string TranslateLayoutSugar( const std::string& src )
         {
             std::vector<SourceRun> runs = SplitCodeAndComments( src );
 
             // (1) EXPLICIT forms first — a numbered declaration always wins and is left untouched by the
             // auto pass below (the capitalized keyword is consumed here).
-            static const std::pair<std::regex, std::string> kRules[] = {
-                 { std::regex( R"(\bIn\s*\(\s*(\d+)\s*\))" ), "layout(location = $1) in" },
-                 { std::regex( R"(\bOut\s*\(\s*(\d+)\s*\))" ), "layout(location = $1) out" },
-                 { std::regex( R"(\bUniform\s*\(\s*(\d+)\s*,\s*(\d+)\s*\))" ),
-                   "layout(set = $1, binding = $2) uniform" },
-                 { std::regex( R"(\bUniform\s*\(\s*(\d+)\s*\))" ), "layout(binding = $1) uniform" },
-                 { std::regex( R"(\bReadBuffer\s*\(\s*(\d+)\s*\))" ),
-                   "layout(std430, binding = $1) readonly buffer" },
-                 { std::regex( R"(\bWriteBuffer\s*\(\s*(\d+)\s*\))" ),
-                   "layout(std430, binding = $1) writeonly buffer" },
-                 { std::regex( R"(\bBuffer\s*\(\s*(\d+)\s*\))" ), "layout(std430, binding = $1) buffer" },
-                 { std::regex( R"(\bLocalSize\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\))" ),
-                   "layout(local_size_x = $1, local_size_y = $2, local_size_z = $3) in" },
-                 { std::regex( R"(\bPushConstant\b)" ), "layout(push_constant) uniform" },
+            struct Rule
+            {
+                SugarKeyword Keyword;
+                std::regex   Pattern;
+                const char*  Replacement;
             };
+            static const Rule kRules[] = {
+                 { KwIn, std::regex( R"(\bIn\s*\(\s*(\d+)\s*\))" ), "layout(location = $1) in" },
+                 { KwOut, std::regex( R"(\bOut\s*\(\s*(\d+)\s*\))" ), "layout(location = $1) out" },
+                 { KwUniform, std::regex( R"(\bUniform\s*\(\s*(\d+)\s*,\s*(\d+)\s*\))" ),
+                   "layout(set = $1, binding = $2) uniform" },
+                 { KwUniform, std::regex( R"(\bUniform\s*\(\s*(\d+)\s*\))" ), "layout(binding = $1) uniform" },
+                 { KwReadBuffer, std::regex( R"(\bReadBuffer\s*\(\s*(\d+)\s*\))" ),
+                   "layout(std430, binding = $1) readonly buffer" },
+                 { KwWriteBuffer, std::regex( R"(\bWriteBuffer\s*\(\s*(\d+)\s*\))" ),
+                   "layout(std430, binding = $1) writeonly buffer" },
+                 { KwBuffer, std::regex( R"(\bBuffer\s*\(\s*(\d+)\s*\))" ),
+                   "layout(std430, binding = $1) buffer" },
+                 { KwLocalSize, std::regex( R"(\bLocalSize\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\))" ),
+                   "layout(local_size_x = $1, local_size_y = $2, local_size_z = $3) in" },
+                 { KwPushConstant, std::regex( R"(\bPushConstant\b)" ), "layout(push_constant) uniform" },
+            };
+
+            const KeywordSet explicitForms = PresentSugarKeywords( runs );
             for ( auto& run : runs )
             {
                 if ( !run.IsCode )
                     continue;
-                for ( const auto& [re, rep] : kRules )
-                    run.Text = std::regex_replace( run.Text, re, rep );
+                for ( const auto& rule : kRules )
+                    if ( explicitForms[rule.Keyword] )
+                        run.Text = std::regex_replace( run.Text, rule.Pattern, rule.Replacement );
             }
+
+            // The keywords that SURVIVED the explicit pass are the paren-less ones — `Uniform(0)` has
+            // become `layout(binding = 0) uniform` and no longer reads as a keyword at all. A text with
+            // none left needs neither the occupancy scan nor the allocation pass, which is every shipped
+            // shader today: not one uses an automatic form.
+            const KeywordSet autoForms = PresentSugarKeywords( runs );
+            const bool       autoIn    = autoForms[KwIn];
+            const bool       autoOut   = autoForms[KwOut];
+            const bool autoBind = autoForms[KwUniform] || autoForms[KwReadBuffer] || autoForms[KwWriteBuffer] ||
+                                  autoForms[KwBuffer];
 
             // (2) Seed each auto-allocator with the EXPLICIT numbers already present so auto never collides.
             // Over the CODE runs only: a number quoted in a comment is documentation, not an occupancy.
@@ -1020,9 +1109,12 @@ namespace Desert::Core::Preprocess
                 }
             };
             std::set<int> usedIn, usedOut, usedBind;
-            collect( std::regex( R"(location\s*=\s*(\d+)\s*\)\s*in\b)" ), usedIn );
-            collect( std::regex( R"(location\s*=\s*(\d+)\s*\)\s*out\b)" ), usedOut );
-            collect( std::regex( R"(binding\s*=\s*(\d+))" ), usedBind );
+            if ( autoIn )
+                collect( std::regex( R"(location\s*=\s*(\d+)\s*\)\s*in\b)" ), usedIn );
+            if ( autoOut )
+                collect( std::regex( R"(location\s*=\s*(\d+)\s*\)\s*out\b)" ), usedOut );
+            if ( autoBind )
+                collect( std::regex( R"(binding\s*=\s*(\d+))" ), usedBind );
 
             const auto alloc = []( std::set<int>& used )
             {
@@ -1058,26 +1150,31 @@ namespace Desert::Core::Preprocess
             {
                 if ( run.IsCode )
                 {
-                    replaceFirst( run.Text, kAutoIn, [&]( const std::smatch& )
-                                  { return "layout(location = " + std::to_string( alloc( usedIn ) ) + ") in"; } );
-                    replaceFirst( run.Text, kAutoOut,
-                                  [&]( const std::smatch& ) {
-                                      return "layout(location = " + std::to_string( alloc( usedOut ) ) + ") out";
-                                  } );
-                    replaceFirst(
-                         run.Text, kAutoBinding,
-                         [&]( const std::smatch& m )
-                         {
-                             const int         n  = alloc( usedBind );
-                             const std::string kw = m[1].str();
-                             if ( kw == "Uniform" )
-                                 return "layout(binding = " + std::to_string( n ) + ") uniform";
-                             if ( kw == "ReadBuffer" )
-                                 return "layout(std430, binding = " + std::to_string( n ) + ") readonly buffer";
-                             if ( kw == "WriteBuffer" )
-                                 return "layout(std430, binding = " + std::to_string( n ) + ") writeonly buffer";
-                             return "layout(std430, binding = " + std::to_string( n ) + ") buffer";
-                         } );
+                    if ( autoIn )
+                        replaceFirst( run.Text, kAutoIn,
+                                      [&]( const std::smatch& ) {
+                                          return "layout(location = " + std::to_string( alloc( usedIn ) ) + ") in";
+                                      } );
+                    if ( autoOut )
+                        replaceFirst(
+                             run.Text, kAutoOut, [&]( const std::smatch& )
+                             { return "layout(location = " + std::to_string( alloc( usedOut ) ) + ") out"; } );
+                    if ( autoBind )
+                        replaceFirst( run.Text, kAutoBinding,
+                                      [&]( const std::smatch& m )
+                                      {
+                                          const int         n  = alloc( usedBind );
+                                          const std::string kw = m[1].str();
+                                          if ( kw == "Uniform" )
+                                              return "layout(binding = " + std::to_string( n ) + ") uniform";
+                                          if ( kw == "ReadBuffer" )
+                                              return "layout(std430, binding = " + std::to_string( n ) +
+                                                     ") readonly buffer";
+                                          if ( kw == "WriteBuffer" )
+                                              return "layout(std430, binding = " + std::to_string( n ) +
+                                                     ") writeonly buffer";
+                                          return "layout(std430, binding = " + std::to_string( n ) + ") buffer";
+                                      } );
                 }
                 out += run.Text;
             }

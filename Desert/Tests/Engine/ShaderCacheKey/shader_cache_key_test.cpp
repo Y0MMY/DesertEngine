@@ -45,6 +45,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using Desert::Core::CollectShaderIncludes;
@@ -1503,6 +1504,116 @@ TEST( DShaderCommentsVsSpirv, CommentsDoNotMoveALocationInTheCompiledModule )
     // Two modules that differ only in comments are the SAME module: comments do not survive
     // preprocessing, so anything at all in the binary would mean the sugar had written code.
     EXPECT_EQ( withProse, withNone );
+}
+
+// ─── No shipped shader claims one descriptor slot twice ───────────────────────────────────────────
+//
+// Г17. The DSL can allocate binding numbers automatically (`Uniform Name {}` with no parentheses takes
+// the lowest free slot), and it decides which slots are free by scanning ONE TEXT for
+// `binding = <digits>`. That is a RECOGNIZER, not a census, and it is blind three ways:
+//
+//   * a binding spelled as a MACRO is not digits — Common/CloudAuthored.glslh, Common/CloudParams.glslh
+//     and Common/FogParams.glslh all write theirs that way;
+//   * a binding declared in an INCLUDED file is not in the text at all, because ShaderIncluder hands
+//     every `.glslh` its own separate translation call;
+//   * a binding a SECOND STAGE declares is not in this stage's text either.
+//
+// Widening the pattern only closes the first of the three, so it is not what this asserts. THE NUMBER IS
+// A NUMBER AFTER COMPILATION, whatever spelled it — so the claim is made against the SPIR-V the GPU is
+// handed, by the engine's own reflection, over the whole shipped tree. It is the same asked-of-the-
+// compiler form as the material-row test above, and it cannot be outrun by a syntax invented tomorrow.
+//
+// It has to be asked here rather than of glslang, which compiles two resources on one Binding with no
+// diagnostic at all — measured with `glslc -Werror --target-env=vulkan1.1` on 2026-09-08, both Binding
+// decorations present in the disassembly.
+namespace
+{
+    shaderc_shader_kind KindOf( ShaderStage stage )
+    {
+        switch ( stage )
+        {
+            case ShaderStage::Vertex:
+                return shaderc_vertex_shader;
+            case ShaderStage::Fragment:
+                return shaderc_fragment_shader;
+            case ShaderStage::Compute:
+                return shaderc_compute_shader;
+            case ShaderStage::TessControl:
+                return shaderc_tess_control_shader;
+            case ShaderStage::TessEvaluation:
+                return shaderc_tess_evaluation_shader;
+            default:
+                return shaderc_glsl_infer_from_source;
+        }
+    }
+
+    std::vector<std::filesystem::path> ShippedShaderFiles()
+    {
+        std::vector<std::filesystem::path> files;
+        const std::filesystem::path        root = "Resources/Shaders";
+        if ( std::filesystem::exists( root ) )
+            for ( const auto& entry : std::filesystem::recursive_directory_iterator( root ) )
+                if ( entry.is_regular_file() && entry.path().extension() == ".shader" )
+                    files.push_back( entry.path() );
+        std::sort( files.begin(), files.end() );
+        return files;
+    }
+} // namespace
+
+TEST_F( ShaderRootFixture, NoShippedShaderClaimsOneDescriptorSlotTwice )
+{
+    const auto files = ShippedShaderFiles();
+    ASSERT_GE( files.size(), 60u ) << "found " << files.size()
+                                   << " shipped shaders under Resources/Shaders — the walk found"
+                                      " nothing to examine, so a green result would mean nothing";
+
+    // The ONE shipped shader that is not meant to compile: MatBroken.shader is generated from
+    // Assets/ShaderGraphs/MatBroken.dgraph, a deliberately mistyped graph kept so the editor's handling
+    // of a bad graph has something real to fail on (it assigns a vec2 to a vec4 at line 25). It is named
+    // rather than detected, and its presence is asserted, so that a day when it compiles — or when it is
+    // deleted — is a red test rather than a silently shrinking census.
+    const std::filesystem::path kDeliberatelyBroken = "Resources/Shaders/Programs/Graph/MatBroken.shader";
+    ASSERT_TRUE( std::filesystem::exists( kDeliberatelyBroken ) )
+         << kDeliberatelyBroken.string() << " is gone; drop this exception instead of carrying it";
+
+    int passesChecked = 0;
+
+    for ( const auto& file : files )
+    {
+        if ( file == kDeliberatelyBroken )
+            continue;
+
+        const auto parsed = Desert::Core::Preprocess::DShaderParser::Parse( ReadFile( file ) );
+        ASSERT_TRUE( parsed.IsSuccess() ) << file.string() << ": " << parsed.GetError();
+
+        // One ReflectionData PER PASS, because one pass is one pipeline layout. Sharing it across
+        // passes would invent collisions between shaders that never meet on a device.
+        const auto checkPass =
+             [&]( const std::string& passName, const std::unordered_map<ShaderStage, std::string>& stages )
+        {
+            ShaderResource::ReflectionData data;
+            for ( const auto& [stage, source] : stages )
+            {
+                const auto spirv = CompileStage( source, file, KindOf( stage ) );
+                if ( spirv.empty() )
+                    continue; // CompileStage already reported it
+
+                const auto diagnostics = ShaderReflection::ReflectStage( spirv, stage, data );
+                EXPECT_TRUE( diagnostics.empty() )
+                     << file.string() << " [pass '" << passName
+                     << "']: " << ( diagnostics.empty() ? std::string{} : diagnostics.front() );
+            }
+            ++passesChecked;
+        };
+
+        if ( parsed.GetValue().Passes.empty() )
+            checkPass( "", parsed.GetValue().Stages );
+        else
+            for ( const auto& pass : parsed.GetValue().Passes )
+                checkPass( pass.Name, pass.Stages );
+    }
+
+    EXPECT_GE( passesChecked, (int)files.size() - 1 );
 }
 
 int main( int argc, char** argv )

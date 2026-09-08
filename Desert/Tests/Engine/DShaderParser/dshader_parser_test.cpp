@@ -686,6 +686,66 @@ TEST( DShaderParser, AutoBindingsSkipExplicit )
     EXPECT_NE( c.find( "layout(std430, binding = 2) buffer Counter" ), std::string::npos );   // auto next free
 }
 
+// Г17 made the translation skip the rules whose keyword is not present, because running fifteen
+// std::regex passes over every shader and every included header at startup cost 5.6 s of the 7.9 s
+// shader-preload phase in Debug. The saving is only sound if the cheap presence scan and the regexes
+// agree, character for character, about what counts as an occurrence — and the two spellings of "a
+// whole word" are exactly the shape this repository keeps paying for.
+//
+// So both directions, in one shader: identifiers that CONTAIN a keyword must not make the pass run as
+// if a declaration were there, and a real declaration standing next to them must still be translated.
+static const char* kKeywordLookalikes = R"(
+Shader "Lookalikes"
+{
+    Compute
+    {
+        LocalSize( 8, 8, 1 );
+        Uniform(3) CameraUB { mat4 vp; };
+        Buffer Particles { vec4 p[]; };
+        float UniformScale = 2.0;
+        float Inscattering = 0.5;
+        float FadeOut = 1.0;
+        vec4  BufferedValue = vec4( 0.0 );
+        void main() { }
+    }
+}
+)";
+
+TEST( DShaderParser, IdentifiersContainingAKeywordAreNotDeclarations )
+{
+    auto res = DShaderParser::Parse( kKeywordLookalikes );
+    ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
+    const auto& c = res.GetValue().Stages.at( ShaderStage::Compute );
+
+    // The real declarations still translate: the explicit one keeps its number, the automatic one takes
+    // the lowest free slot, which is 0 because only 3 is spoken for.
+    EXPECT_NE( c.find( "layout(binding = 3) uniform CameraUB" ), std::string::npos ) << c;
+    EXPECT_NE( c.find( "layout(std430, binding = 0) buffer Particles" ), std::string::npos ) << c;
+
+    // And the four look-alikes come through untouched — neither rewritten nor counted as an occupancy.
+    EXPECT_NE( c.find( "float UniformScale = 2.0;" ), std::string::npos ) << c;
+    EXPECT_NE( c.find( "float Inscattering = 0.5;" ), std::string::npos ) << c;
+    EXPECT_NE( c.find( "float FadeOut = 1.0;" ), std::string::npos ) << c;
+    EXPECT_NE( c.find( "vec4  BufferedValue = vec4( 0.0 );" ), std::string::npos ) << c;
+}
+
+// The other half of the same agreement: a text in which NO keyword stands alone anywhere is returned
+// unchanged. This is the case the gate short-circuits entirely, and "unchanged" is the only acceptable
+// meaning of "skipped".
+TEST( DShaderParser, ATextWithNoSugarKeywordIsReturnedVerbatim )
+{
+    const char* kPlainGlsl = R"(#version 450
+// Inscattering, UniformScale and BufferedValue are prose here, and code below.
+layout( binding = 0 ) uniform sampler2D u_Albedo;
+layout( location = 0 ) in  vec2 v_UV;
+layout( location = 0 ) out vec4 o_Color;
+float Inscattering( float x ) { return x * 0.5; }
+void main() { o_Color = texture( u_Albedo, v_UV ) * Inscattering( 1.0 ); }
+)";
+
+    EXPECT_EQ( DShaderParser::TranslateSugar( kPlainGlsl ), std::string( kPlainGlsl ) );
+}
+
 // A pass that samples a 3D noise volume needs `sampler3D` and `image3D` to survive the
 // DSL untouched. They were EXPECTED to: the sugar rewrites `Uniform(n) T name;` without looking at T,
 // and storage-image format qualifiers are deliberately left as raw `layout(...)`. Expected, but never

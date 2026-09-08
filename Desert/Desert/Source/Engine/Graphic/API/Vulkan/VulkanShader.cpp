@@ -157,13 +157,15 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         // Every refused resource is named, with its real type, before the shader is dropped: a missing
-        // binding surfaces far from its cause, and a silently mis-filed one never surfaces at all.
+        // binding surfaces far from its cause, and a silently mis-filed one never surfaces at all. The
+        // same channel carries a descriptor slot claimed twice, which is refused for the same reason —
+        // the layout that would come out of it is complete, plausible and missing a resource.
         for ( const auto& message : diagnostics )
         {
             LOG_ERROR( "Shader '{}' [{}]: {}", m_ShaderName, GetStringShaderStage( stage ), message );
         }
 
-        return Common::MakeFormattedError( "Shader '{}' [{}]: {} unsupported resource(s); first: {}", m_ShaderName,
+        return Common::MakeFormattedError( "Shader '{}' [{}]: {} rejected resource(s); first: {}", m_ShaderName,
                                            GetStringShaderStage( stage ), diagnostics.size(),
                                            diagnostics.front() );
     }
