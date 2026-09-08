@@ -671,10 +671,11 @@ namespace Desert::Core
         }
     }
 
-    Common::BoolResultStr Scene::Serialize( const Assets::AssetManager* assetManager ) const
+    Common::BoolResultStr Scene::Serialize( const Assets::AssetManager* assetManager,
+                                            const Common::Filepath&     path ) const
     {
         SceneSerializer serializer( this, assetManager );
-        return serializer.SaveToFile();
+        return serializer.SaveToFile( path );
     }
 
     void Scene::RegisterExternalPass( Graphic::ExternalPassSpecification&& spec )

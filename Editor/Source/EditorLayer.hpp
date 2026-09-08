@@ -362,6 +362,13 @@ namespace Desert::Editor
         // false here means the project's own default scene is not on disk.
         [[nodiscard]] bool SaveSceneTo( const std::string& path );
 
+        // WHERE Ctrl+S goes: the file the scene was opened from, or — for a scene that has never been on
+        // disk — one named after it, which is the only thing there is to name it after. That fallback is
+        // the ONLY surviving name-to-path derivation in the editor and it is reachable only when there is
+        // no path; it used to run on EVERY save, in the engine, and silently sent a save meant for an
+        // open file into a second file beside it.
+        [[nodiscard]] Common::Filepath SceneSaveDestination() const;
+
         // THE ONE place the open scene is saved from. Every entry point (Ctrl+S, File -> Save, the
         // command palette, the "Save and Open" button) goes through it, so the policy — clear the
         // unsaved-changes mark and announce success ONLY when the bytes landed — is written once and
@@ -641,6 +648,21 @@ namespace Desert::Editor
         // answer is not lost to the exit — a client that never hears "ok" cannot tell a clean shutdown
         // from a crash.
         std::optional<int32_t> m_ControlQuitCode;
+
+        // WHICH FILE THE OPEN SCENE IS. Set by a load that succeeded, adopted by a save that landed,
+        // and cleared by File -> New Scene, which produces a scene that is not any file yet.
+        //
+        // It is the editor's, not the scene's, and that is the point: Play -> Stop clears the scene and
+        // rebuilds it from a snapshot, so an identity kept inside Scene would either be destroyed by that
+        // (and the next Ctrl+S would go somewhere else) or have to be saved and restored around it by
+        // hand, which is the link that gets dropped. The document is open in the editor; the editor knows
+        // which one.
+        //
+        // Empty means "this scene has never been on disk", and SceneSaveDestination is the ONE place that
+        // turns that into a path. Everything else that used to do it is gone: SceneSerializer derived the
+        // destination from the scene's NAME on every save, which is why an open U52_LockProbe.desce was
+        // never written and a U52_Lock_Probe.desce appeared beside it under a green "Saved" toast.
+        Common::Filepath m_OpenScenePath;
 
         std::optional<Common::Filepath> m_SceneLoadRequested;
         // Stop tears down + recreates GPU render resources (framebuffers / render graph). It must run

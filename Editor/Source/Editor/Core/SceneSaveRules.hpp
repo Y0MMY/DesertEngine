@@ -8,6 +8,42 @@
 namespace Desert::Editor::Core::Rules
 {
     /**
+     * @brief WHICH FILE a save of the open scene writes. Pure: three strings in, a path out.
+     *
+     * THE DEFECT THIS REPLACES. The destination used to be computed inside the engine, on every save,
+     * from the scene's NAME: `Scene/` + the name with its spaces turned into underscores. So a scene
+     * opened from `Scene/U52_LockProbe.desce` whose name is "U52 Lock Probe" saved into
+     * `Scene/U52_Lock_Probe.desce` — a second file, beside the first, under a green "Saved" toast. The
+     * user's next open of "the same" level showed the work missing, and the work itself was sitting one
+     * filename away. A display name and a file identity are two different things and the engine cannot
+     * tell them apart; only whoever opened the file can, so it says.
+     *
+     * @param openScenePath the file the scene was opened from or last written to. WINS whenever it is
+     *        not empty, and that precedence IS the fix — the name may say anything.
+     * @param sceneName     what the scene is called. Reached only when there is no file yet (File -> New
+     *        Scene), where it is the only thing there is to name one after.
+     * @param sceneDir      the project's scene directory, for that fallback.
+     * @param extension     the scene file extension, including the dot.
+     */
+    [[nodiscard]] inline std::string SceneSaveDestination( std::string_view openScenePath,
+                                                           std::string_view sceneName, std::string_view sceneDir,
+                                                           std::string_view extension )
+    {
+        if ( !openScenePath.empty() )
+            return std::string( openScenePath );
+
+        std::string name( sceneName );
+        for ( auto& ch : name )
+            if ( ch == ' ' )
+                ch = '_';
+
+        std::string directory( sceneDir );
+        if ( !directory.empty() && directory.back() != '/' )
+            directory += '/';
+        return directory + name + std::string( extension );
+    }
+
+    /**
      * @brief What the editor is allowed to do once a scene save has ANSWERED. Pure: a result and two
      *        names in, a verdict out — no ImGui, no disk, no globals.
      *
@@ -43,19 +79,26 @@ namespace Desert::Editor::Core::Rules
         /// Is `Message` a failure? Drives the toast level and whether the log line is an error.
         bool IsError = false;
 
-        /// What the user is shown. On failure it names the scene AND carries the reason the save chain
-        /// gave, which already contains the destination path — a message that says only "save failed"
-        /// sends the user to the log to find out which file, and the log is exactly what a user of a
-        /// GUI editor does not have open.
+        /// What the user is shown. It names the scene, the FILE, and on failure the reason the save
+        /// chain gave — a message that says only "save failed" sends the user to the log to find out
+        /// which file, and the log is exactly what a user of a GUI editor does not have open.
+        ///
+        /// THE SUCCESS MESSAGE NAMES THE FILE FOR A REASON. It used to say only "Saved 'X'", where X is
+        /// the scene's NAME, at a time when the destination was DERIVED from that name — so a scene
+        /// opened from U52_LockProbe.desce and called "U52 Lock Probe" was written to a second file and
+        /// the toast said the one thing that was true of both. The path is what the two differ in, so
+        /// the path is what the message has to carry.
         std::string Message;
     };
 
     /**
-     * @param save      what Scene::Serialize answered.
-     * @param sceneName the scene's name, for the message. Not used to decide anything.
+     * @param save        what Scene::Serialize answered.
+     * @param sceneName   the scene's name, for the message. Not used to decide anything.
+     * @param destination the file that was written, for the message. Not used to decide anything.
      */
     [[nodiscard]] inline SaveVerdict DecideAfterSceneSave( const Common::BoolResultStr& save,
-                                                           std::string_view             sceneName )
+                                                           std::string_view             sceneName,
+                                                           std::string_view             destination )
     {
         SaveVerdict verdict;
         if ( save.IsSuccess() )
@@ -63,7 +106,7 @@ namespace Desert::Editor::Core::Rules
             verdict.MarkSceneSaved  = true;
             verdict.MayDiscardScene = true;
             verdict.IsError         = false;
-            verdict.Message         = "Saved '" + std::string( sceneName ) + "'";
+            verdict.Message         = "Saved '" + std::string( sceneName ) + "' to " + std::string( destination );
             return verdict;
         }
 
