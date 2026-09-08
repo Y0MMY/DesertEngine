@@ -1,16 +1,71 @@
 #include "ShaderIncluder.hpp"
 
 #include <Common/Core/Constants.hpp>
+#include <Common/Core/Logger.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
 
 #include <format>
+#include <memory>
+#include <string>
 
 namespace Desert::Core
 {
+    namespace
+    {
+        // THE OWNER OF ONE INCLUDE RESULT'S BYTES. shaderc is handed raw pointers into these two strings
+        // and reads them until ReleaseInclude, so this object is what keeps them alive — and it is a named
+        // type rather than a std::pair because "the source name and the content, owned together" is the
+        // whole invariant, and a pair says nothing about which member is which.
+        //
+        // NOTHING HERE MAY MOVE AFTER THE POINTERS ARE TAKEN. That is the defect this replaces: the
+        // previous code captured c_str() and then moved the strings, which was valid only while they were
+        // long enough to live on the heap. The strings land here first, once, and the pointers are taken
+        // from their final home.
+        struct IncludeBytes
+        {
+            std::string Name;
+            std::string Content;
+        };
+    } // namespace
 
     ShaderIncluder::ShaderIncluder( const Common::Filepath& basePath ) : m_BasePath( basePath )
     {
+    }
+
+    ShaderIncluder::~ShaderIncluder()
+    {
+        // SAID OUT LOUD RATHER THAN ASSERTED. shaderc's contract is to release every result it is given,
+        // so this is zero after every compile — but if it ever is not, the bytes of that many include
+        // bodies have leaked and this object is the only one that can tell. A hard failure here would take
+        // the editor down for a leak, which trades a small loss for a total one.
+        if ( m_LiveResults != 0 )
+        {
+            LOG_WARN( "[ShaderIncluder] {} include result(s) were never released ({}). Each one owns the "
+                      "bytes of an included header, so that is a leak of exactly that many.",
+                      m_LiveResults, m_BasePath.string() );
+        }
+    }
+
+    shaderc_include_result* ShaderIncluder::MakeResult( std::string name, std::string content )
+    {
+        // THE BYTES FIRST, THE POINTERS SECOND, and the order is the fix. `owned` is the only copy from
+        // here on: the strings are moved into it, and everything shaderc is told about them is read out of
+        // it afterwards.
+        auto owned     = std::make_unique<IncludeBytes>();
+        owned->Name    = std::move( name );
+        owned->Content = std::move( content );
+
+        auto result = std::make_unique<shaderc_include_result>();
+
+        result->source_name        = owned->Name.c_str();
+        result->source_name_length = owned->Name.length();
+        result->content            = owned->Content.c_str();
+        result->content_length     = owned->Content.length();
+        result->user_data          = owned.release();
+
+        ++m_LiveResults;
+        return result.release();
     }
 
     shaderc_include_result* ShaderIncluder::GetInclude( const char* requested_source, shaderc_include_type type,
@@ -53,45 +108,31 @@ namespace Desert::Core
         // Translate the Desert layout sugar so shared `.glslh` headers can use the SAME vocabulary as the
         // stage blocks (the compiler inlines includes AFTER stage assembly, so headers must be translated
         // here). Line-preserving, so #line-based include error mapping stays exact.
-        std::string content = Preprocess::DShaderParser::TranslateSugar( rawInclude.ExtractValue() );
-
-        auto result = new shaderc_include_result;
-
-        auto sourceName = new std::string( fullPath.string() );
-        auto contentStr = new std::string( std::move( content ) );
-
-        result->source_name        = sourceName->c_str();
-        result->source_name_length = sourceName->length();
-        result->content            = contentStr->c_str();
-        result->content_length     = contentStr->length();
-
-        result->user_data =
-             new std::pair<std::string, std::string>( std::move( *sourceName ), std::move( *contentStr ) );
-
-        return result;
+        return MakeResult( fullPath.string(),
+                           Preprocess::DShaderParser::TranslateSugar( rawInclude.ExtractValue() ) );
     }
 
     shaderc_include_result* ShaderIncluder::CreateErrorIncludeResult( const std::string& error )
     {
-        auto result    = new shaderc_include_result;
-        auto error_str = new std::string( error );
-
-        result->source_name        = "";
-        result->source_name_length = 0;
-        result->content            = error_str->c_str();
-        result->content_length     = error_str->length();
-        result->user_data          = new std::pair<std::string, std::string>( "", *error_str );
-
-        return result;
+        // shaderc's convention for a failed include: an EMPTY source name, and the message as the content.
+        // It goes through the same owner as a successful one — the message used to be a `new std::string`
+        // that nothing ever deleted, so every unresolved include leaked its own diagnostic.
+        return MakeResult( std::string{}, error );
     }
 
     void ShaderIncluder::ReleaseInclude( shaderc_include_result* data )
     {
-        if ( data && data->user_data )
-        {
-            auto userData = static_cast<std::pair<std::string, std::string>*>( data->user_data );
-            delete userData;
-            delete data;
-        }
+        if ( !data )
+            return;
+
+        // UNCONDITIONALLY, and that is a second small fix. This used to free nothing at all unless
+        // `user_data` was non-null, so a result without one leaked the result itself — and after the
+        // change above every result HAS one, which makes the old guard a guard against a state that can
+        // no longer happen while still being able to leak.
+        delete static_cast<IncludeBytes*>( data->user_data );
+        delete data;
+
+        if ( m_LiveResults > 0 )
+            --m_LiveResults;
     }
 } // namespace Desert::Core
