@@ -174,6 +174,14 @@ namespace Desert::ShaderResources::API::Vulkan
             return Common::MakeFormattedError<bool>( "storage buffer '{}' is not usable: {}", m_BufferName,
                                                      m_Built.GetError() );
 
+        // ASKED HERE AND NOT ONLY BY MappedMemory, because the CPU SHADOW COPY is written first. The
+        // mapped write below refuses a null source (Г7-C), but the `std::memcpy` into m_LocalStorage
+        // further down does not, and it runs before anything else has a chance to object.
+        if ( data == nullptr && size != 0 )
+            return Common::MakeFormattedError<bool>( "storage buffer '{}' was given {} byte(s) from a null "
+                                                     "source",
+                                                     m_BufferName, size );
+
         // GROWING IS NOT WRITING, AND THIS IS WHERE THE TWO WERE ONE LINE. The old body did
         // `if ( size + offset > m_Size ) { m_Size = size + offset; RT_Invalidate(); }` for every buffer
         // alike — and RT_Invalidate destroys every VkBuffer this object owns. For a PERSISTENT buffer

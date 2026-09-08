@@ -1,10 +1,24 @@
 #include "ShaderResourcesManager.hpp"
 
+#include <Common/Core/Logger.hpp>
+
 namespace Desert::ShaderResources
 {
+    // A NULL BUFFER IS NOT REGISTERED UNDER ITS NAME. Since Г13 the two factories refuse to hand back a
+    // buffer that could not allocate or map its device memory, so `Create` can answer nullptr — and a
+    // registry entry pointing at nothing is worse than a missing one: every lookup by name would then
+    // succeed and hand a null shared_ptr to material code that dereferences it. A MISSING name is a
+    // question the material layer already knows how to answer.
     void ShaderResourcesManager::AddUniformBuffer( std::shared_ptr<UniformBuffer>&& buffer,
                                                    const std::string&               name )
     {
+        if ( !buffer )
+        {
+            LOG_ERROR( "[ShaderResources] uniform buffer '{}' was not created (see the error above) and is "
+                       "not registered; every material that declares it will report it missing.",
+                       name );
+            return;
+        }
         const auto index = m_UniformBuffersData.Data.size();
         m_UniformBuffersData.Data.push_back( std::move( buffer ) );
         m_UniformBuffersData.Names[name] = index;
@@ -13,6 +27,13 @@ namespace Desert::ShaderResources
     void ShaderResourcesManager::AddStorageBuffer( std::shared_ptr<StorageBuffer>&& buffer,
                                                    const std::string&               name )
     {
+        if ( !buffer )
+        {
+            LOG_ERROR( "[ShaderResources] storage buffer '{}' was not created (see the error above) and is "
+                       "not registered; every material that declares it will report it missing.",
+                       name );
+            return;
+        }
         const auto index = m_SrorageBuffersData.Data.size();
         m_SrorageBuffersData.Data.push_back( std::move( buffer ) );
         m_SrorageBuffersData.Names[name] = index;

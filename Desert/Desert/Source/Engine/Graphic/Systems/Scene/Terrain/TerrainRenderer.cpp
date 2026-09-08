@@ -534,13 +534,23 @@ namespace Desert::Graphic::System
             // buffer's own GetBinding()); the compute dispatch rebinds it explicitly at slot 1.
             m_GrassVisibleBuf = ShaderResources::StorageBuffer::Create(
                  "GrassVisible", maxInstances * static_cast<uint32_t>( sizeof( uint32_t ) ), 3 );
-            m_GrassVisibleCapacity = maxInstances;
 
-            // Point the grass material's (reflection-created) storage buffer at OUR sized, compute-written
-            // buffer so the vertex shader and the compute pass share the same VkBuffer.
-            if ( m_GrassMaterial )
-                if ( auto* sb = m_GrassMaterial->Get<StorageBufferProperty>( "GrassVisible" ) )
-                    sb->SetBuffer( m_GrassVisibleBuf );
+            // THE CAPACITY IS RECORDED ONLY ON SUCCESS, and the buffer is only handed to the material if
+            // it exists. StorageBuffer::Create refuses to return a buffer whose device memory could not
+            // be allocated (Г13), so this pointer can be null — and recording the capacity anyway would
+            // stop this function ever retrying, exactly the defect Render2D::EnsureCapacity already
+            // carries a paragraph about. Same shape, same fix.
+            if ( m_GrassVisibleBuf )
+            {
+                m_GrassVisibleCapacity = maxInstances;
+
+                // Point the grass material's (reflection-created) storage buffer at OUR sized,
+                // compute-written buffer so the vertex shader and the compute pass share the same
+                // VkBuffer.
+                if ( m_GrassMaterial )
+                    if ( auto* sb = m_GrassMaterial->Get<StorageBufferProperty>( "GrassVisible" ) )
+                        sb->SetBuffer( m_GrassVisibleBuf );
+            }
         }
     }
 
@@ -569,6 +579,11 @@ namespace Desert::Graphic::System
         const uint32_t grid         = std::clamp<uint32_t>( static_cast<uint32_t>( gt->GrassParams.y ), 8u, 512u );
         const uint32_t maxInstances = grid * grid;
         EnsureGrassCullBuffers( maxInstances );
+        // Either buffer can be null when its device allocation was refused — StorageBuffer::Create says
+        // why and hands back nothing rather than a buffer that is not there (Г13). No cull this frame;
+        // EnsureGrassCullBuffers tries again on the next one.
+        if ( !m_GrassIndirectBuf || !m_GrassVisibleBuf )
+            return;
 
         // Reset the indirect args each frame: vertexCount = bladesPerClump * 24 geometric-blade verts
         // (blades packed into GrassTint.y by the ECS), instanceCount = 0 (the cull compute atomicAdds the
