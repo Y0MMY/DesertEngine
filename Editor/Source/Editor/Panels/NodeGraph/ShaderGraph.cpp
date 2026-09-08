@@ -29,12 +29,25 @@ namespace Desert::Editor::ShaderGraph
     static constexpr unsigned POST    = DomainBit( Domain::PostProcess );
     static constexpr unsigned VOLUME  = DomainBit( Domain::Volume );
 
-    // Nodes that are valid everywhere EXCEPT the cloud medium. The Volume domain has no UVs, no scene
-    // colour, no exposed properties and no textures of its own — a medium is compiled INTO four programs
-    // whose descriptor sets are hand-built, so a graph that declared its own bindings would have to pick
-    // numbers that are free in all four, and a collision between two GLSL declarations at one binding is
-    // silent (see the note at the Properties emitter below). Constants, maths and the cloud sample are
-    // what a medium is written from; Docs/Clouds/O1_DESIGN.md §10.3 names the rest as its own task.
+    // Nodes that are valid everywhere EXCEPT the cloud medium. The Volume domain has no UVs and no scene
+    // colour — there is neither in a volume — and no exposed properties or textures of its own.
+    //
+    // THE REASON FOR THAT LAST ONE CHANGED, AND THE OLD ONE IS NOW MEASURABLY WRONG. It read: "a graph
+    // that declared its own bindings would have to pick numbers that are free in all four consumers, and
+    // a collision between two GLSL declarations at one binding is silent". The collision is not silent
+    // any more (Г17 refuses it by name at reflection, in all four), and the numbers ARE free: О1-G
+    // compiled a medium declaring its own storage buffer AND its own sampler in the reserved window into
+    // each of the four real programs, and both came back at the numbers they asked for with nothing else
+    // displaced (Desert/Tests/Engine/ShaderCacheKey). The binding was never the expensive half.
+    //
+    // What is missing is the OTHER end of such a parameter: a cloud material has no place to keep a value
+    // whose name comes from a graph. Its look is a TYPED struct (Graphic::CloudMaterialValues) mirrored
+    // field for field against the shipped Properties block and pinned by CloudMaterialSchema, and a
+    // per-graph name/value pair is not expressible in it; nor is there a buffer reaching the four
+    // consumers to carry one, nor a panel row to author it. That is the task, and it is a material task
+    // rather than a shader one — see Docs/Clouds/O1_DESIGN.md §12.3 and §12.7.
+    //
+    // Constants, maths and the cloud sample are what a medium is written from until then.
     static constexpr unsigned NOT_VOLUME = CORE & ~VOLUME;
 
     // The catalogue is a TABLE and is kept as one: one node per visual row, pins grouped on their own

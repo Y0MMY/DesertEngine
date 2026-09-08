@@ -1837,6 +1837,25 @@ TEST_F( ShaderRootFixture, NoShippedProgramDeclaresABindingInTheGraphsReservedWi
         const auto parsed = Desert::Core::Preprocess::DShaderParser::Parse( ReadFile( file ) );
         ASSERT_TRUE( parsed.IsSuccess() ) << file.string() << ": " << parsed.GetError();
 
+        // WHAT THIS FILE IS ENTITLED TO PUT IN THE WINDOW — ITS OWN TEXTURE PROPERTIES, BY NAME.
+        //
+        // The DSL numbers a Properties block's Texture2D/TextureCube properties upward from the block's
+        // base, one at a time, declaring each as `sampler2D <PropertyName>` — and a shader GENERATED from
+        // a graph asks for the reserved base. So a graph-generated shader with three textures legitimately
+        // occupies the first three slots of the window, and a census that simply forbade the window would
+        // go red on the next such file somebody commits. That false alarm's obvious "fix" is to edit the
+        // reservation, which is the failure this whole test replaces.
+        //
+        // BY NAME AND NOT BY COUNT, and the difference is a hole. A count says "N slots of the window are
+        // excused", which excuses them in a shader whose textures are at base 2 and never went near the
+        // window — Programs/Text/TextSDF.shader would have bought an engine binding at 24 a free pass.
+        // The name says WHICH resource is standing there, so the excuse only covers the declaration it
+        // was granted for.
+        std::set<std::string> ownTextureProperties;
+        for ( const auto& param : parsed.GetValue().Meta.Params )
+            if ( param.IsTexture && !param.IsAssetRef() )
+                ownTextureProperties.insert( param.Name );
+
         const auto checkPass =
              [&]( const std::string& passName, const std::unordered_map<ShaderStage, std::string>& stages )
         {
@@ -1862,22 +1881,44 @@ TEST_F( ShaderRootFixture, NoShippedProgramDeclaresABindingInTheGraphsReservedWi
             if ( setZero == data.ShaderDescriptorSets.end() )
                 return;
 
+            // What a Properties texture COULD have become: the parser emits `sampler2D` for Texture2D and
+            // `samplerCube` for TextureCube and nothing else, so those are the only two buckets an
+            // entitled declaration can be in. A uniform block, a storage buffer, a storage image or a
+            // sampler3D inside the window is an engine declaration whatever it is called.
+            std::map<uint32_t, std::string> entitledCandidates;
+            for ( const auto& [binding, resource] : setZero->second.Image2DSamplers )
+                entitledCandidates.emplace( binding, resource.Name );
+            for ( const auto& [binding, resource] : setZero->second.ImageCubeSamplers )
+                entitledCandidates.emplace( binding, resource.Name );
+
             for ( const auto& binding : ShaderReflection::BuildLayoutBindings( setZero->second ) )
             {
-                EXPECT_LT( binding.binding, Desert::Core::kGraphOwnedBindingFirst )
+                if ( binding.binding < Desert::Core::kGraphOwnedBindingFirst )
+                {
+                    // The headroom below is about the ENGINE's slots, so a graph's own texture must not be
+                    // counted into it — it lives in the window by right and would report a headroom of -1
+                    // for a tree in which nothing is wrong.
+                    if ( binding.binding > highest )
+                    {
+                        highest      = binding.binding;
+                        highestWhere = file.string() + " [" + passName + "]";
+                    }
+                    continue;
+                }
+
+                const auto        candidate = entitledCandidates.find( binding.binding );
+                const std::string name = candidate == entitledCandidates.end() ? std::string{} : candidate->second;
+
+                EXPECT_TRUE( !name.empty() && ownTextureProperties.count( name ) == 1 )
                      << file.string() << " [pass '" << passName << "'] declares set 0, binding " << binding.binding
+                     << ( name.empty() ? "" : " ('" + name + "')" )
                      << ", which is inside the window reserved for a shader graph's own resources"
                         " (Core::kGraphOwnedBindingFirst = "
                      << Desert::Core::kGraphOwnedBindingFirst
-                     << "). A graph's texture would land on top of it, and GLSL says nothing about two"
-                        " declarations on one slot. Move this binding down, or raise the reservation and"
-                        " regenerate every .shader whose Properties block spells TextureBinding().";
-
-                if ( binding.binding > highest )
-                {
-                    highest      = binding.binding;
-                    highestWhere = file.string() + " [" + passName + "]";
-                }
+                     << ") and is not one of this file's own Texture2D/TextureCube properties. A graph's"
+                        " texture would land on top of it, and GLSL says nothing about two declarations on"
+                        " one slot. Move this binding down, or raise the reservation and regenerate every"
+                        " .shader whose Properties block spells TextureBinding().";
             }
         };
 
