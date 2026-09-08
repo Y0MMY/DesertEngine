@@ -453,6 +453,44 @@ TEST( ThumbnailRequesters, TheOnlyExceptionIsBackedByTheSiteThatQueuesForIt )
 }
 
 // ---------------------------------------------------------------------------------------------------
+// 3b. WHO OWNS THE PICTURES — a decision, not a label.
+//
+// Every thumbnail image in this editor is created on one line of ThumbnailCache::Get, and it is claimed
+// there as ResourceOwner::EditorTool (Engine/Graphic/ResourceLedger.hpp). The alternative that would look
+// plausible to a future reader is AssetService, because a thumbnail is a picture OF an asset — and it is
+// the one label that must never be used here: AssetService is the ONLY category asset eviction may
+// release, on the grounds that the asset's file is the recipe and re-reading it is cheap. A thumbnail's
+// recipe is a 370 ms offscreen RENDER. Mis-filing it would hand eviction a lever that turns a memory
+// reclaim into a re-capture, silently.
+//
+// Asserted here rather than in the ledger's own suite because it is a statement about THIS subsystem's
+// place in that taxonomy, and because a test that needs a Vulkan device to observe the row cannot be
+// written at all — nothing in the editor prints the ledger in production yet.
+// ---------------------------------------------------------------------------------------------------
+TEST( ThumbnailRequesters, ThumbnailImagesAreClaimedAsEditorToolAndNeverAsAssetService )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    const std::string body =
+         FunctionBody( CodeOf( root, "Editor/Source/Editor/Widgets/ThumbnailCache.cpp" ), "ThumbnailCache::Get" );
+    ASSERT_FALSE( body.empty() ) << "ThumbnailCache::Get not found — it is the ONE place a thumbnail image "
+                                    "is created, which is why one claim there covers every panel. If it "
+                                    "moved, re-point this test at wherever the creation went.";
+
+    EXPECT_NE( body.find( "ResourceAttributionScope" ), std::string::npos )
+         << "the thumbnail images are no longer claimed in the GPU resource ledger, so every one of them "
+            "counts as Unclaimed — the figure that ledger exists to make trustworthy, and the one "
+            "device-loss recovery has to plan against.";
+    EXPECT_NE( body.find( "ResourceOwner::EditorTool" ), std::string::npos )
+         << "the claim is no longer EditorTool. That is the category for the editor's own pictures.";
+    EXPECT_EQ( body.find( "ResourceOwner::AssetService" ), std::string::npos )
+         << "thumbnails are claimed as AssetService — the one owner asset eviction is allowed to release. "
+            "Eviction would then drop a picture whose 'recipe' is a 370 ms render rather than a file read, "
+            "and rebuild it by re-rendering, quietly, whenever memory got tight.";
+}
+
+// ---------------------------------------------------------------------------------------------------
 // 4. DISCOVERY: the table is derived from the tree, not typed and hoped over.
 //
 // This is what makes the census a census. Without it the four tests above are statements about five
