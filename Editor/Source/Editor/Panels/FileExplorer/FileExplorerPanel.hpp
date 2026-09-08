@@ -144,11 +144,12 @@ namespace Desert::Editor
         void        GoBack();
         void        GoForward();
         void        NavigateToPath( const std::string& path ); // resolves a visited path to its dir
-        void        ToggleFavorite( const std::string& folderPath );
-        bool        IsFavorite( const std::string& folderPath ) const;
-        void        LoadFavorites();
-        void        SaveFavorites() const;
-        std::string FavoritesFile() const;
+
+        // THE PINNED FOLDERS ARE NOT THIS PANEL'S, and К5 is why they used to look like they were. This
+        // class owned a `m_Favorites` vector, a `FavoritesFile()` that spelled out `$HOME/.desertengine`
+        // by hand, and a `SaveFavorites()` that truncated that file and reported nothing about the write.
+        // They are EditorPreferences::{Current,Is,Toggle}FavouriteFolder now — per project, relative to
+        // the assets root, written by the one checked writer editor.json has.
 
         // Phase-4 engine integration: instantiate a prefab into the open scene; create a new material asset.
         void AddPrefabToScene( const std::string& prefabPath );
@@ -297,7 +298,6 @@ namespace Desert::Editor
         std::vector<std::string> m_NavHistory;           // visited folder paths (back/forward)
         int                      m_NavPos            = -1;
         bool                     m_NavigatingHistory = false; // suppress history push during back/forward
-        std::vector<std::string> m_Favorites;                 // pinned folder paths (persisted)
 
         Assets::AssetManager*           m_AssetManager = nullptr;
         // WHICH FILES ARE DOCUMENTS, and how each becomes a subject. Non-owning; the registry is a member

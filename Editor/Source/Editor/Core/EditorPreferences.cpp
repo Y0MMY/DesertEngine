@@ -2,6 +2,7 @@
 
 #include <Engine/Project/ProjectContext.hpp>
 
+#include <Common/Core/Constants.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Core/Logger.hpp>
 
@@ -16,6 +17,7 @@
 #include <filesystem>
 #include <iterator>
 #include <optional>
+#include <sstream>
 
 namespace Desert::Editor
 {
@@ -34,6 +36,71 @@ namespace Desert::Editor
     static std::string PrefsFile()
     {
         return EditorPreferences::ConfigDirectory() + "/editor.json";
+    }
+
+    // THE RETIRED PINNED-FOLDERS FILE (К5). It is named in exactly one place — here — and only so that the
+    // migration below can read it once and delete it. Nothing reads the pinned folders from it.
+    //
+    // The directory it sits in is asked of ConfigDirectory() rather than resolved again. `$HOME` was
+    // spelled out by hand in the content browser, which made a THIRD statement of where this user's
+    // configuration lives, differing from ProjectContext's in the one respect that mattered: it did not
+    // create the directory. Two of the three copies were already one function.
+    static std::filesystem::path LegacyFavouritesFile()
+    {
+        return std::filesystem::path( EditorPreferences::ConfigDirectory() ) / "asset_favorites.txt";
+    }
+
+    // WHICH PROJECT'S PINS ARE BEING ASKED ABOUT, and "" when the answer is none. The key is the `Name`
+    // out of the open `.deproj`; see the field's comment for why that and not the project's path.
+    static std::string CurrentProjectKey()
+    {
+        if ( !::Desert::Project::ProjectContext::HasProject() )
+            return {};
+        return ::Desert::Project::ProjectContext::Current().Name;
+    }
+
+    // IS THIS PIN'S FOLDER PROVABLY GONE? True only when the filesystem gave a definite answer and that
+    // answer was "there is nothing here" (or "what is here is not a folder"). False when the question could
+    // not be asked at all — an unmounted volume, a network share that is down, a parent this process may
+    // not traverse — because dropping a pin on that is destroying a user's data because a disk was busy.
+    //
+    // WHY exists() AND NOT is_directory(). Both take an error_code, and they disagree about what a MISSING
+    // path is. Measured on this toolchain (libc++, macOS 15): `is_directory("/no/such/path", ec)` returns
+    // false AND SETS ec TO ENOENT, while `exists("/no/such/path", ec)` returns false and leaves ec clear.
+    // So the obvious one-liner — `!is_directory(p, ec)` guarded by `!ec` — is wrong in the direction that
+    // does not show: it never prunes anything, because the case it is meant to catch is the case it reads
+    // as an error. That was the first version of this, and the test below it is what said so.
+    static bool PinIsProvablyGone( const std::filesystem::path& folder )
+    {
+        std::error_code ec;
+        const bool      there = std::filesystem::exists( folder, ec );
+        if ( ec )
+            return false; // the filesystem could not answer; the pin stays
+        if ( !there )
+            return true;
+
+        // It is there, so this cannot fail with "not found"; a failure now is again an unanswerable
+        // question and again keeps the pin.
+        std::error_code kindEc;
+        const bool      isFolder = std::filesystem::is_directory( folder, kindEc );
+        return !kindEc && !isFolder;
+    }
+
+    // A folder inside the assets root, in the form the field stores: relative, `/`-separated, "." for the
+    // root itself. Empty means the path is NOT inside the root and therefore cannot be stored — the caller
+    // decides what to say about that, because the two callers say different things.
+    //
+    // LEXICALLY, and not std::filesystem::relative: that one resolves symlinks against the real disk, so
+    // the answer would depend on whether the folder still exists — and the migration has to be able to
+    // classify a line naming a folder that was deleted years ago.
+    static std::string RelativeToAssets( const std::filesystem::path& assetsRoot,
+                                         const std::filesystem::path& folder )
+    {
+        const std::filesystem::path rel =
+             folder.lexically_normal().lexically_relative( assetsRoot.lexically_normal() );
+        if ( rel.empty() || *rel.begin() == ".." )
+            return {};
+        return rel.generic_string();
     }
 
     // THE ONE PUSH THIS FILE USED TO MAKE IS GONE. `PushToRenderConfig` copied MSAASamples into
@@ -334,6 +401,126 @@ namespace Desert::Editor
         return raised;
     }
 
+    std::vector<std::string> EditorPreferences::MigrateFavouritesFile( EditorPreferences&              p,
+                                                                       const std::string&              project,
+                                                                       const std::filesystem::path&    assetsRoot,
+                                                                       const std::vector<std::string>& lines )
+    {
+        std::vector<std::string> raised;
+        if ( project.empty() )
+            return raised;
+
+        std::vector<std::string>& pins = p.FavouriteFolders[project];
+        const std::size_t         had  = pins.size();
+
+        std::size_t foreign = 0;
+        for ( const std::string& line : lines )
+        {
+            if ( line.empty() )
+                continue;
+
+            const std::string rel = RelativeToAssets( assetsRoot, line );
+            if ( rel.empty() )
+            {
+                ++foreign;
+                raised.push_back( "pinned folder '" + line +
+                                  "' dropped: it is outside this project's assets root, and the retired "
+                                  "file recorded no project to attribute it to" );
+                continue;
+            }
+            if ( std::find( pins.begin(), pins.end(), rel ) == pins.end() )
+                pins.push_back( rel );
+        }
+
+        if ( pins.size() > had )
+            raised.push_back( std::to_string( pins.size() - had ) + " pinned folder(s) moved into '" + project +
+                              "' from the retired asset_favorites.txt" );
+        else if ( foreign == 0 && !lines.empty() )
+            raised.push_back( "the retired asset_favorites.txt held nothing this project did not already have" );
+
+        // A key with nothing behind it is what the operator[] above would otherwise leave for a file that
+        // was empty, or held only another project's folders. See ToggleFavouriteFolder.
+        if ( pins.empty() )
+            p.FavouriteFolders.erase( project );
+
+        return raised;
+    }
+
+    // READ THE RETIRED FILE ONCE, MOVE WHAT IT HOLDS, DELETE IT — in that order, and the order is the
+    // whole safety of it (К5). The write is confirmed before the deletion, so a run that cannot save
+    // preferences leaves the old file exactly where it was and tries again next launch; the alternative is
+    // a migration that destroys the only copy of the data it failed to move. That is the И2 shape — a
+    // writer reporting success over a file it has just emptied — and this function is a deletion, which is
+    // the same shape one step further along.
+    static void AdoptLegacyFavourites()
+    {
+        const std::filesystem::path legacy = LegacyFavouritesFile();
+        std::error_code             ec;
+        if ( !std::filesystem::exists( legacy, ec ) )
+            return;
+
+        const std::string project = CurrentProjectKey();
+        if ( project.empty() )
+        {
+            // NOT AN ERROR AND NOT A DELETION. Every line in the file needs a project to be attributed to,
+            // so a session without one cannot migrate — and must not destroy the file trying.
+            LOG_INFO( "[Prefs] {} is waiting for a project: its pinned folders are moved into editor.json "
+                      "the first time this editor opens one.",
+                      legacy.string() );
+            return;
+        }
+
+        std::vector<std::string> lines;
+        {
+            const auto raw = Common::Utils::FileSystem::ReadFileContent( legacy.string() );
+            if ( !raw )
+            {
+                LOG_ERROR( "[Prefs] {} exists but could not be read: {} — the pinned folders it holds are "
+                           "not migrated and the file is left in place.",
+                           legacy.string(), raw.GetError() );
+                return;
+            }
+
+            std::istringstream in( raw.GetValue() );
+            std::string        line;
+            while ( std::getline( in, line ) )
+            {
+                if ( !line.empty() && line.back() == '\r' )
+                    line.pop_back();
+                lines.push_back( line );
+            }
+        }
+
+        const auto raised = EditorPreferences::MigrateFavouritesFile(
+             EditorPreferences::Get(), project, Common::Constants::Path::ASSETS_PATH, lines );
+
+        // Contract §4.7: which file, from what to what, and how many entries moved.
+        for ( const std::string& line : raised )
+            LOG_INFO( "[Prefs] {} migrated: {}", legacy.string(), line );
+
+        if ( !PersistCurrent( "pinned folders moved out of asset_favorites.txt (" +
+                              std::to_string( raised.size() ) + " note(s))" ) )
+        {
+            LOG_ERROR( "[Prefs] {} is NOT deleted: the pinned folders could not be written to {}, so the "
+                       "old file is the only copy and stays until a save succeeds.",
+                       legacy.string(), PrefsFile() );
+            return;
+        }
+
+        std::filesystem::remove( legacy, ec );
+        if ( ec )
+        {
+            // The pins are already in editor.json, so nothing is lost — but a file that survives its own
+            // migration is read again next launch, and saying so is what stops that being a mystery.
+            LOG_ERROR( "[Prefs] {} was migrated but could NOT be deleted: {} — it will be read (and its "
+                       "entries re-merged, harmlessly) on every launch until it is removed by hand.",
+                       legacy.string(), ec.message() );
+            return;
+        }
+        LOG_INFO( "[Prefs] {} is retired and deleted; pinned folders live in {} now.", legacy.string(),
+                  PrefsFile() );
+    }
+
     void EditorPreferences::Load()
     {
         // Anything short of a file we read AND understood leaves the memo empty, which means "we cannot
@@ -344,66 +531,79 @@ namespace Desert::Editor
 
         // First run: no prefs file yet — keep defaults, and skip the read's "could not read file"
         // error line, which would be noise for a state that is expected.
-        if ( !std::filesystem::exists( PrefsFile() ) )
-            return;
+        //
+        // A BARE `return` STOOD HERE AND BECAME A DEFECT THE MOMENT A SECOND MIGRATION JOINED THIS
+        // FUNCTION — caught end to end, running the editor against a planted legacy file rather than by
+        // reading the diff. `AdoptLegacyFavourites()` below is about a DIFFERENT file, and under the early
+        // return it ran only for a user who also had an editor.json: a fresh install carrying pinned
+        // folders and nothing else migrated silently never, and the file it should have retired stayed on
+        // disk being ignored. The recurring middle-link shape — both ends right, the step between them not
+        // reached — so the condition is a block now and the load has one exit.
+        if ( std::filesystem::exists( PrefsFile() ) )
+        {
+            if ( const auto raw = Common::Utils::FileSystem::ReadFileContent( PrefsFile() ); !raw )
+            {
+                // The file EXISTS — that is tested above — so a failed read is a permission or I/O problem
+                // and not the expected first-run case. It used to fall through a bare `if ( raw && ... )`
+                // with nothing logged, which is §1.4's silent fallback: the editor came up on defaults and
+                // the user's own settings were one unexplained launch from being overwritten.
+                LOG_ERROR( "[Prefs] {} exists but could not be read: {} — this session runs on defaults, and "
+                           "the next settings change will overwrite the file.",
+                           PrefsFile(), raw.GetError() );
+            }
+            else if ( raw.GetValue().empty() )
+            {
+                LOG_WARN( "[Prefs] {} is empty; using defaults.", PrefsFile() );
+            }
+            // DefaultIfMissing: prefs written by older builds (fewer fields) keep loading — new
+            // fields just take their in-struct defaults instead of failing the whole file.
+            else if ( auto parsed = rfl::json::read<EditorPreferences, rfl::DefaultIfMissing>( raw.GetValue() );
+                      parsed.has_value() )
+            {
+                Get() = parsed.value();
+                // The canonical form of what the file holds, NOT the raw bytes: an older build's key order or
+                // spacing is not a settings change, and a memo taken from the raw text would report the whole
+                // struct as changed on the first save after an upgrade.
+                s_OnDisk = rfl::json::write( Get() );
+            }
+            else
+            {
+                LOG_WARN( "[Prefs] editor.json is corrupt, using defaults: {}", parsed.error().what() );
+            }
 
-        if ( const auto raw = Common::Utils::FileSystem::ReadFileContent( PrefsFile() ); !raw )
-        {
-            // The file EXISTS — that is tested above — so a failed read is a permission or I/O problem
-            // and not the expected first-run case. It used to fall through a bare `if ( raw && ... )`
-            // with nothing logged, which is §1.4's silent fallback: the editor came up on defaults and
-            // the user's own settings were one unexplained launch from being overwritten.
-            LOG_ERROR( "[Prefs] {} exists but could not be read: {} — this session runs on defaults, and "
-                       "the next settings change will overwrite the file.",
-                       PrefsFile(), raw.GetError() );
-        }
-        else if ( raw.GetValue().empty() )
-        {
-            LOG_WARN( "[Prefs] {} is empty; using defaults.", PrefsFile() );
-        }
-        // DefaultIfMissing: prefs written by older builds (fewer fields) keep loading — new
-        // fields just take their in-struct defaults instead of failing the whole file.
-        else if ( auto parsed = rfl::json::read<EditorPreferences, rfl::DefaultIfMissing>( raw.GetValue() );
-                  parsed.has_value() )
-        {
-            Get() = parsed.value();
-            // The canonical form of what the file holds, NOT the raw bytes: an older build's key order or
-            // spacing is not a settings change, and a memo taken from the raw text would report the whole
-            // struct as changed on the first save after an upgrade.
-            s_OnDisk = rfl::json::write( Get() );
-        }
-        else
-        {
-            LOG_WARN( "[Prefs] editor.json is corrupt, using defaults: {}", parsed.error().what() );
+            if ( const auto raised = MigrateLoaded( Get() ); !raised.empty() )
+            {
+                // Contract §4.7: a migration says which file, from what to what, and how many fields moved.
+                for ( const std::string& line : raised )
+                    LOG_INFO( "[Prefs] {} migrated: {}", PrefsFile(), line );
+
+                // Written back in the new form so the migration runs once, not every launch — and through
+                // SaveMigrated rather than Save, so the log names the migration instead of reporting a
+                // settings change the user did not make.
+                SaveMigrated( "migration write-back (" + std::to_string( raised.size() ) + " field(s) raised)" );
+            }
+
+            // CARRYING A KEY WE DO NOT UNDERSTAND IS AN EVENT, NOT A DETAIL. It means another build — an
+            // agent's worktree, an older install, a branch that has since landed — owns settings this binary
+            // cannot show or edit, and the only symptom otherwise available is the one К9 came from: nobody
+            // noticing until the values were already gone. Named rather than counted, because "3 unknown
+            // keys" tells a reader nothing about whether to go and look for the build that wrote them.
+            if ( !Get().UnknownKeys.empty() )
+            {
+                std::string names = Get().UnknownKeys.begin()->first;
+                for ( auto it = std::next( Get().UnknownKeys.begin() ); it != Get().UnknownKeys.end(); ++it )
+                    names += ", " + it->first;
+
+                LOG_INFO( "[Prefs] {} holds {} key(s) this build does not know ({}); they belong to another "
+                          "build and are preserved on save, not dropped.",
+                          PrefsFile(), Get().UnknownKeys.size(), names );
+            }
         }
 
-        if ( const auto raised = MigrateLoaded( Get() ); !raised.empty() )
-        {
-            // Contract §4.7: a migration says which file, from what to what, and how many fields moved.
-            for ( const std::string& line : raised )
-                LOG_INFO( "[Prefs] {} migrated: {}", PrefsFile(), line );
-
-            // Written back in the new form so the migration runs once, not every launch — and through
-            // SaveMigrated rather than Save, so the log names the migration instead of reporting a
-            // settings change the user did not make.
-            SaveMigrated( "migration write-back (" + std::to_string( raised.size() ) + " field(s) raised)" );
-        }
-
-        // CARRYING A KEY WE DO NOT UNDERSTAND IS AN EVENT, NOT A DETAIL. It means another build — an
-        // agent's worktree, an older install, a branch that has since landed — owns settings this binary
-        // cannot show or edit, and the only symptom otherwise available is the one К9 came from: nobody
-        // noticing until the values were already gone. Named rather than counted, because "3 unknown
-        // keys" tells a reader nothing about whether to go and look for the build that wrote them.
-        if ( !Get().UnknownKeys.empty() )
-        {
-            std::string names = Get().UnknownKeys.begin()->first;
-            for ( auto it = std::next( Get().UnknownKeys.begin() ); it != Get().UnknownKeys.end(); ++it )
-                names += ", " + it->first;
-
-            LOG_INFO( "[Prefs] {} holds {} key(s) this build does not know ({}); they belong to another "
-                      "build and are preserved on save, not dropped.",
-                      PrefsFile(), Get().UnknownKeys.size(), names );
-        }
+        // LAST, because it writes through this struct: the pinned folders it moves have to land on top of
+        // what was just read, not be overwritten by it. Ordinarily a no-op — the file it reads exists only
+        // on an installation that predates К5, and it deletes the file it migrates.
+        AdoptLegacyFavourites();
     }
 
     bool EditorPreferences::IsFavouriteField( const std::string& key )
@@ -443,6 +643,90 @@ namespace Desert::Editor
             v.push_back( name );
         else
             v.erase( it );
+        Save();
+    }
+
+    std::vector<std::string> EditorPreferences::CurrentFavouriteFolders()
+    {
+        const std::string project = CurrentProjectKey();
+        if ( project.empty() )
+            return {};
+
+        const auto stored = Get().FavouriteFolders.find( project );
+        if ( stored == Get().FavouriteFolders.end() )
+            return {};
+
+        const std::filesystem::path& root = Common::Constants::Path::ASSETS_PATH;
+
+        std::vector<std::string> absolute;
+        absolute.reserve( stored->second.size() );
+        for ( const std::string& rel : stored->second )
+            absolute.push_back( ( rel == "." ? root : root / rel ).generic_string() );
+        return absolute;
+    }
+
+    bool EditorPreferences::IsFavouriteFolder( const std::string& absoluteFolder )
+    {
+        const std::string project = CurrentProjectKey();
+        if ( project.empty() )
+            return false;
+
+        const auto stored = Get().FavouriteFolders.find( project );
+        if ( stored == Get().FavouriteFolders.end() )
+            return false;
+
+        const std::string rel = RelativeToAssets( Common::Constants::Path::ASSETS_PATH, absoluteFolder );
+        if ( rel.empty() )
+            return false;
+        return std::find( stored->second.begin(), stored->second.end(), rel ) != stored->second.end();
+    }
+
+    void EditorPreferences::ToggleFavouriteFolder( const std::string& absoluteFolder )
+    {
+        const std::string project = CurrentProjectKey();
+        if ( project.empty() )
+        {
+            LOG_WARN( "[Prefs] '{}' was not pinned: a pinned folder belongs to a project and none is open.",
+                      absoluteFolder );
+            return;
+        }
+
+        const std::filesystem::path& root = Common::Constants::Path::ASSETS_PATH;
+        const std::string            rel  = RelativeToAssets( root, absoluteFolder );
+        if ( rel.empty() )
+        {
+            // The browser only ever walks inside the assets root, so this is unreachable from the panel —
+            // and it is here rather than assumed away because the alternative is storing a path that
+            // CurrentFavouriteFolders() would resolve back to a different folder in the next project.
+            LOG_ERROR( "[Prefs] '{}' was not pinned: it is outside this project's assets root ({}).",
+                       absoluteFolder, root.generic_string() );
+            return;
+        }
+
+        std::vector<std::string>& pins = Get().FavouriteFolders[project];
+        const auto                at   = std::find( pins.begin(), pins.end(), rel );
+        if ( at != pins.end() )
+            pins.erase( at );
+        else
+            pins.push_back( rel );
+
+        // THE ONLY PLACE ANYTHING IS EVER REMOVED FROM THIS LIST WITHOUT THE USER ASKING, and it removes
+        // only what it can PROVE is gone. The legacy file never shrank at all, so a pin of a folder deleted
+        // two projects ago was still drawn in the sidebar. Done at the write and not at the read, because a
+        // reader that mutates its store is a save the user did not make (К6) — and this IS a user action,
+        // with a save already going out.
+        //
+        // "GONE" AND "CANNOT BE ANSWERED" ARE DIFFERENT ANSWERS (§1.4), and telling them apart is not the
+        // one-liner it looks like — see PinIsProvablyGone.
+        pins.erase( std::remove_if( pins.begin(), pins.end(), [&root]( const std::string& kept )
+                                    { return PinIsProvablyGone( kept == "." ? root : root / kept ); } ),
+                    pins.end() );
+
+        // An empty list is not a project with no pins, it is a key with nothing behind it. Erasing it is
+        // what keeps a user who tried the feature once from carrying that project's name for ever.
+        if ( pins.empty() )
+            Get().FavouriteFolders.erase( project );
+
         Save();
     }
 

@@ -293,6 +293,21 @@ namespace
          { "FavouriteFields", Owner::Machine, kPrefsImpl },
          { "CollapsedComponents", Owner::Machine, kPrefsImpl },
 
+         // The content browser's pinned folders, per project. Machine by question 1 and not a close call:
+         // which folders one person keeps at hand is the definition of a value two people on the same
+         // project hold differently at the same moment, and a pin is invisible to everybody else.
+         //
+         // IT IS THE FIFTH PER-USER STORE, AND IT WAS A FILE (К5). `~/.desertengine/asset_favorites.txt`
+         // held it: flat lines, no schema, absolute paths, an `ofstream` truncation whose result nobody
+         // read, and one list shared by every project this user had ever opened. Every one of those is a
+         // rule this suite states — so the file was outside all of them, for the single reason that no
+         // census had ever been asked whether it existed.
+         //
+         // The consumer is EditorPreferences.cpp rather than the browser, like its two neighbours above
+         // and for the same reason: the panel is handed absolute paths by the three helpers there, and
+         // which project a pin belongs to and what it is relative to are decided in this field's own file.
+         { "FavouriteFolders", Owner::Machine, kPrefsImpl },
+
          // The three packaging answers, moved out of the Build Settings panel's own memory by П6 — they
          // were held nowhere, so every session started over. All three are Machine by question 1: an
          // output path is a place on ONE person's disk, and whether the Runtime bundled is Debug or

@@ -558,6 +558,13 @@ namespace Desert::Editor
                 VM_Lit,
                 VM_Wireframe,
                 VM_Normals,
+                // К7: the entry that closes the OTHER half of a dead setting. `DebugView.LightingDebug` was
+                // read all the way down to a twenty-five-line branch in three PBR shaders and written by no
+                // widget anywhere, so the only way to see it was to edit editor.json by hand — working code
+                // a person could not reach. §1.3 names the mirror case (a control that does nothing) and
+                // not this one; they are the same gap between what the code does and what is available,
+                // read from opposite ends.
+                VM_Lighting,
                 VM_Albedo,
                 VM_Metallic,
                 VM_Roughness,
@@ -573,6 +580,7 @@ namespace Desert::Editor
             const char* kViewModes[] = { ICON_MDI_LIGHTBULB_ON "  Lit",
                                          ICON_MDI_VECTOR_TRIANGLE "  Wireframe",
                                          ICON_MDI_AXIS_ARROW "  Normals",
+                                         ICON_MDI_LIGHTBULB_MULTIPLE "  Lighting",
                                          ICON_MDI_PALETTE "  Albedo (Unlit)",
                                          ICON_MDI_CIRCLE_HALF_FULL "  Metallic",
                                          ICON_MDI_BLUR "  Roughness",
@@ -590,6 +598,8 @@ namespace Desert::Editor
             int vm = VM_Lit;
             if ( view.WireframeMode )
                 vm = VM_Wireframe;
+            else if ( view.LightingDebug )
+                vm = VM_Lighting;
             else if ( view.ShadowDebug == Graphic::ShadowDebugMode::Cascades )
                 vm = VM_ShadowCascades;
             else if ( view.ShadowDebug == Graphic::ShadowDebugMode::ShadowFactor )
@@ -685,15 +695,24 @@ namespace Desert::Editor
             ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 8.0f, 6.0f ) );
             if ( ImGui::Combo( "##ViewMode", &vm, kViewModes, IM_ARRAYSIZE( kViewModes ) ) )
             {
-                // Reset every debug channel, then set the one this mode needs.
+                // Reset every debug channel, then set the one this mode needs. LightingDebug is in the
+                // list because it is a channel like the others: left out, "Lighting" would be the one mode
+                // you could not leave, and the dropdown would keep reporting it whatever else was picked.
                 view.WireframeMode = false;
                 view.ShowNormals   = false;
+                view.LightingDebug = false;
                 view.DeferredDebug = Graphic::DeferredDebugMode::Off;
                 view.ShadowDebug   = Graphic::ShadowDebugMode::Off;
                 switch ( vm )
                 {
                     case VM_Wireframe:
                         view.WireframeMode = true;
+                        break;
+                    case VM_Lighting:
+                        // No DeferredDebug partner, unlike Normals below: the deferred path zeroes
+                        // u_DebugParams, so SceneRenderer forces the FORWARD path while this is on — the
+                        // same treatment Wireframe gets, for the same reason.
+                        view.LightingDebug = true;
                         break;
                     case VM_Normals:
                         view.ShowNormals   = true;
@@ -739,7 +758,8 @@ namespace Desert::Editor
             ImGui::PopStyleVar();
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Viewport view mode. Buffer views (Albedo/Metallic/Roughness/AO)\n"
-                                   "need the Deferred render path." );
+                                   "need the Deferred render path; Wireframe and Lighting force\n"
+                                   "the Forward one." );
         }
 
         // --- Right edge: editor camera settings (speed) behind a gear button ---

@@ -12,6 +12,7 @@
 #include <Editor/Panels/MaterialEditor/MaterialDocumentOpen.hpp>
 #include <Editor/Core/AssetFileOps.hpp>
 #include <Editor/Core/AssetReferences.hpp>
+#include <Editor/Core/EditorPreferences.hpp> // the pinned folders live in editor.json (К5)
 #include <Editor/Panels/NodeGraph/NodeGraphPanel.hpp>
 #include "../../Core/EditorResources.hpp"
 
@@ -233,7 +234,10 @@ namespace Desert::Editor
         m_Sweeper    = std::make_unique<ThumbnailSweeper>();
         ThumbnailCache::PurgeOldVersions(); // drop stale-renderer thumbnails so they regenerate cleanly
 
-        LoadFavorites(); // pinned folders, persisted in ~/.desertengine/asset_favorites.txt
+        // NO LOAD STEP FOR THE PINNED FOLDERS ANY MORE (К5). They are read out of EditorPreferences where
+        // they are drawn; a panel-local copy taken at construction is the shape К6 removed from the gizmo
+        // snap, and here it would additionally be a copy of a list the user can change while the panel is
+        // alive (opening a different project changes which pins exist).
 
 #ifdef DESERT_PLATFORM_WINDOWS
         m_Delimiter = std::string( "\\" );
@@ -441,51 +445,6 @@ namespace Desert::Editor
         m_NavigatingHistory = true;
         NavigateToPath( m_NavHistory[m_NavPos] );
         m_NavigatingHistory = false;
-    }
-
-    std::string FileExplorerPanel::FavoritesFile() const
-    {
-        const char* home = std::getenv( "HOME" );
-#ifdef DESERT_PLATFORM_WINDOWS
-        if ( !home )
-            home = std::getenv( "USERPROFILE" );
-#endif
-        return ( std::filesystem::path( home ? home : "." ) / ".desertengine" / "asset_favorites.txt" )
-             .string();
-    }
-
-    void FileExplorerPanel::LoadFavorites()
-    {
-        m_Favorites.clear();
-        std::ifstream f( FavoritesFile() );
-        std::string   line;
-        while ( std::getline( f, line ) )
-            if ( !line.empty() )
-                m_Favorites.push_back( line );
-    }
-
-    void FileExplorerPanel::SaveFavorites() const
-    {
-        std::error_code ec;
-        std::filesystem::create_directories( std::filesystem::path( FavoritesFile() ).parent_path(), ec );
-        std::ofstream f( FavoritesFile(), std::ios::trunc );
-        for ( const auto& p : m_Favorites )
-            f << p << '\n';
-    }
-
-    bool FileExplorerPanel::IsFavorite( const std::string& folderPath ) const
-    {
-        return std::find( m_Favorites.begin(), m_Favorites.end(), folderPath ) != m_Favorites.end();
-    }
-
-    void FileExplorerPanel::ToggleFavorite( const std::string& folderPath )
-    {
-        auto it = std::find( m_Favorites.begin(), m_Favorites.end(), folderPath );
-        if ( it != m_Favorites.end() )
-            m_Favorites.erase( it );
-        else
-            m_Favorites.push_back( folderPath );
-        SaveFavorites();
     }
 
     void FileExplorerPanel::AddPrefabToScene( const std::string& prefabPath )
@@ -1013,10 +972,14 @@ namespace Desert::Editor
             // LEFT PANE.
             ImGui::BeginChild( "##cb_left", ImVec2( m_TreeWidth, 0.0f ), true );
             {
-                if ( !m_Favorites.empty() )
+                // The pins OF THE OPEN PROJECT, asked for where they are drawn. A second project's
+                // folders used to appear here, because the retired file had one list for every project
+                // this user had ever opened (К5).
+                const std::vector<std::string> favourites = EditorPreferences::CurrentFavouriteFolders();
+                if ( !favourites.empty() )
                 {
                     ImGui::TextDisabled( ICON_MDI_STAR " FAVORITES" );
-                    for ( const auto& fav : m_Favorites )
+                    for ( const auto& fav : favourites )
                     {
                         const std::string label = std::filesystem::path( fav ).filename().string();
                         ImGui::PushID( fav.c_str() );
@@ -1027,7 +990,7 @@ namespace Desert::Editor
                         if ( ImGui::BeginPopupContextItem( "##favctx" ) )
                         {
                             if ( ImGui::MenuItem( "Remove from Favorites" ) )
-                                ToggleFavorite( fav );
+                                EditorPreferences::ToggleFavouriteFolder( fav );
                             ImGui::EndPopup();
                         }
                         ImGui::PopID();
@@ -1213,9 +1176,10 @@ namespace Desert::Editor
                         ImGui::SetTooltip( "Favorite folders" );
                     if ( ImGui::BeginPopup( "##favMenu" ) )
                     {
-                        if ( m_Favorites.empty() )
+                        const std::vector<std::string> favourites = EditorPreferences::CurrentFavouriteFolders();
+                        if ( favourites.empty() )
                             ImGui::TextDisabled( "No favorites — right-click a folder -> Add to Favorites." );
-                        for ( const auto& fav : m_Favorites )
+                        for ( const auto& fav : favourites )
                         {
                             const std::string label = std::filesystem::path( fav ).filename().string();
                             if ( ImGui::MenuItem( ( label.empty() ? fav : label ).c_str() ) )
@@ -1923,9 +1887,9 @@ namespace Desert::Editor
                 ChangeDirectory( &entry );
             if ( ImGui::MenuItem( "Show in Explorer" ) )
                 ShellRevealInExplorer( entry.AssetPath );
-            if ( ImGui::MenuItem( IsFavorite( entry.AssetPath ) ? "Remove from Favorites"
-                                                               : "Add to Favorites" ) )
-                ToggleFavorite( entry.AssetPath );
+            if ( ImGui::MenuItem( EditorPreferences::IsFavouriteFolder( entry.AssetPath ) ? "Remove from Favorites"
+                                                                                          : "Add to Favorites" ) )
+                EditorPreferences::ToggleFavouriteFolder( entry.AssetPath );
         }
 
         ImGui::Separator();
