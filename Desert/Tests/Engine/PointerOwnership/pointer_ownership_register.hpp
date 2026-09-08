@@ -114,7 +114,7 @@ namespace Desert::Tests::PointerCensus
          "comes from a local or a member of the caller";
 
     // ----------------------------------------------------------------------------------------------
-    // THE 145 ROWS. Sorted by file and line, which is the order the scan reports them in.
+    // THE 138 ROWS. Sorted by file and line, which is the order the scan reports them in.
     // ----------------------------------------------------------------------------------------------
     //
     // The table is kept out of the formatter's hands: one row is three lines — where, what, why — and
@@ -319,6 +319,11 @@ namespace Desert::Tests::PointerCensus
         { "Desert/Desert/Source/Engine/Graphic/Materials/Fog/MaterialHeightFog.hpp",
           "MaterialHeightFog", "m_FogTexture", Guard::OwnedByThisObject,
           kWhyMaterialProperty },
+        { "Desert/Desert/Source/Engine/Graphic/Materials/MaterialInstance.hpp",
+          "MaterialSlotBinding", "Slots", Guard::OwnedByThisObject,
+          "the parallel `Owned` vector in the SAME object holds a shared_ptr to every instance this view "
+          "names, and the two are only ever built together; that is the whole purpose of the type, and it "
+          "is why the render path may hold this view when it may not hold the component's" },
         { "Desert/Desert/Source/Engine/Graphic/Materials/Material.hpp",
           "Material", "m_RegisteredProperties", Guard::OwnedByThisObject,
           "every entry is the address of an MPROPERTY member of this same object, registered by that member's own registrar sub-object at construction" },
@@ -445,23 +450,11 @@ namespace Desert::Tests::PointerCensus
           "DrawStaticMeshCommand", "Mesh", Guard::FrameScoped,
           "the mesh is held by the ECS component, the primitive factory's process-wide table or MeshService for the whole frame" },
         { "Desert/Desert/Source/Engine/Graphic/Render/Commands/DrawMeshCommand.hpp",
-          "DrawStaticMeshCommand", "MaterialSlots", Guard::Debt,
-          "the address of a std::vector MEMBER of an entt component. The vendored entt stores components by value in a flat std::vector (entt.hpp:4733), so any AddComponent or DestroyEntity reallocates or swap-and-pops the pool -- and ScriptSystem, which runs Lua, is registered AFTER MeshECSSystem and before ExecuteAll", "A8-3" },
-        { "Desert/Desert/Source/Engine/Graphic/Render/Commands/DrawMeshCommand.hpp",
           "DrawInstancedStaticMeshCommand", "Mesh", Guard::FrameScoped,
           "the mesh is held by the ECS component or the primitive factory's process-wide table for the whole frame" },
-        { "Desert/Desert/Source/Engine/Graphic/Render/Commands/DrawMeshCommand.hpp",
-          "DrawInstancedStaticMeshCommand", "Material", Guard::FrameScoped,
-          "a heap MaterialInstance behind a shared_ptr in the component, so an entt pool move does not touch it" },
-        { "Desert/Desert/Source/Engine/Graphic/Render/Commands/DrawMeshCommand.hpp",
-          "DrawInstancedStaticMeshCommand", "Transforms", Guard::Debt,
-          "the address of InstancedStaticMeshComponent::InstanceTransforms, invalidated by the same entt pool reallocation as DrawStaticMeshCommand::MaterialSlots and read two passes deeper", "A8-3" },
         { "Desert/Desert/Source/Engine/Graphic/Render/Commands/DrawSkinnedMeshCommand.hpp",
           "DrawSkinnedMeshCommand", "Mesh", Guard::FrameScoped,
           "held by the ECS component for the whole frame" },
-        { "Desert/Desert/Source/Engine/Graphic/Render/Commands/DrawSkinnedMeshCommand.hpp",
-          "DrawSkinnedMeshCommand", "MaterialSlot", Guard::OwnedByThisObject,
-          "the vector is a member of the command itself, destroyed by RenderCommandBuffer::Clear which runs the virtual destructor; the pointers in it are MaterialInstances owned by the component" },
         { "Desert/Desert/Source/Engine/Graphic/Render/Commands/DrawSlotMaterialMeshCommand.hpp",
           "DrawSlotMaterialMeshCommand", "Mesh", Guard::FrameScoped,
           "held by the ECS component or the primitive factory for the whole frame" },
@@ -515,14 +508,8 @@ namespace Desert::Tests::PointerCensus
           "MeshRenderData", "Mesh", Guard::CallScoped,
           "a temporary aggregate consumed synchronously by MeshRenderer::SubmitMesh" },
         { "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Mesh/MeshRenderer.hpp",
-          "MeshRenderData", "MaterialSlots", Guard::Debt,
-          "carries the same ECS-component vector address as DrawStaticMeshCommand::MaterialSlots into the renderer", "A8-3" },
-        { "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Mesh/MeshRenderer.hpp",
           "StaticMeshRenderData", "Mesh", Guard::FrameScoped,
           "held by the ECS component, the primitive factory or MeshService for the whole frame" },
-        { "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Mesh/MeshRenderer.hpp",
-          "StaticMeshRenderData", "MaterialSlots", Guard::Debt,
-          "stored in m_StaticQueue and dereferenced in five passes AFTER Lua has run; the pointee is a vector member of an entt component whose pool can have moved", "A8-3" },
         { "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Mesh/MeshRenderer.hpp",
           "SkinnedMeshRenderData", "Mesh", Guard::FrameScoped,
           "held by the ECS component for the whole frame" },
@@ -530,17 +517,14 @@ namespace Desert::Tests::PointerCensus
           "SkinnedMeshRenderData", "Material", Guard::FrameScoped,
           "a Material owned by the MeshRenderer itself" },
         { "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Mesh/MeshRenderer.hpp",
-          "SkinnedMeshRenderData", "Instance", Guard::FrameScoped,
-          "a heap MaterialInstance behind a shared_ptr in the component" },
+          "SkinnedMeshRenderData", "Instance", Guard::OwnedByThisObject,
+          "selected out of the MaterialSlots binding carried in the SAME struct, which co-owns it; before "
+          "A8-3 this row read 'a heap MaterialInstance behind a shared_ptr in the component', and that was "
+          "the register being too generous with itself -- the component's shared_ptr dies with the entity, "
+          "and Lua can destroy the entity while this queue is waiting to be drawn" },
         { "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Mesh/MeshRenderer.hpp",
           "InstancedMeshRenderData", "Mesh", Guard::FrameScoped,
           "held by the ECS component or the primitive factory for the whole frame" },
-        { "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Mesh/MeshRenderer.hpp",
-          "InstancedMeshRenderData", "Material", Guard::FrameScoped,
-          "a heap MaterialInstance behind a shared_ptr in the component" },
-        { "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Mesh/MeshRenderer.hpp",
-          "InstancedMeshRenderData", "Transforms", Guard::Debt,
-          "stored in m_InstancedQueue and copied by iterator range in two passes after Lua has run; same entt pool instability", "A8-3" },
         { "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Mesh/MeshRenderer.hpp",
           "GenericMeshRenderData", "Mesh", Guard::FrameScoped,
           "held by the ECS component or the primitive factory for the whole frame" },
@@ -554,8 +538,9 @@ namespace Desert::Tests::PointerCensus
           "ObjDraw", "Obj", Guard::OwnedByThisObject,
           "points into m_StaticQueue, which is fully populated before the pass that builds these and is not pushed to during it" },
         { "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Mesh/MeshRenderer.hpp",
-          "ObjDraw", "Inst", Guard::FrameScoped,
-          "a heap MaterialInstance behind a shared_ptr in the component" },
+          "ObjDraw", "Inst", Guard::OwnedByThisObject,
+          "selected out of the binding held by the StaticMeshRenderData this ObjDraw points at, and that "
+          "queue entry co-owns it for as long as the frame's passes run (A8-3)" },
         { "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Mesh/MeshRenderer.hpp",
           "InstancedDraw", "Mesh", Guard::FrameScoped,
           "held by the ECS component or the primitive factory for the whole frame" },

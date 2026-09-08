@@ -100,22 +100,32 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
 
     // MEASURED, not estimated, and measured with THIS scanner. Run over the whole tree by widening
     // ScannedTrees() (Desert/Desert/Source, Desert/Common/Source, Editor/Source, Runtime/Source) it
-    // reports 761 members: 337 raw, 283 shared, 107 unique, 34 weak. Stage 1 is the 395 below, in
+    // reports 787 members: 327 raw, 315 shared, 111 unique, 34 weak. Stage 1 is the 414 below, in
     // Graphic + ShaderResources + Assets, where the cost of a lifetime mistake is a use-after-free of a
     // device object or of a loaded asset.
     //
-    // A NOTE ON A NUMBER THAT MOVED, because the first commit of this task quotes a different one. The
-    // register was scoped from a throwaway prototype that reported 738/316, and it was WRONG BY 23 in
-    // the direction that matters: it skipped every CONTAINER of raw pointers -- `std::vector<IProperty*>
-    // m_RegisteredProperties`, `std::unordered_map<uint32_t, Image*> m_BoundInputs`,
-    // `std::vector<RenderCommand*> m_Commands` -- and a container of raw pointers raises exactly the same
-    // two questions as one raw pointer. This scanner counts them, and three of them turned out to carry
-    // load-bearing arguments.
-    EXPECT_EQ( CountOf( Form::Raw ), 145 );
-    EXPECT_EQ( CountOf( Form::Shared ), 196 );
-    EXPECT_EQ( CountOf( Form::Unique ), 37 );
+    // THIS NUMBER HAS MOVED TWICE AND BOTH MOVES WERE THE CENSUS BEING WRONG, not the tree changing.
+    // Neither is written off, because a census whose number drifts without an account is a census nobody
+    // can use:
+    //
+    //   738 -> 761. The scope was picked with a throwaway prototype that skipped every CONTAINER of raw
+    //   pointers -- `std::vector<IProperty*> m_RegisteredProperties`, `std::unordered_map<uint32_t,
+    //   Image*> m_BoundInputs`, `std::vector<RenderCommand*> m_Commands`. A container of raw pointers
+    //   raises exactly the same two questions as one raw pointer, and three of those turned out to carry
+    //   load-bearing arguments.
+    //
+    //   761 -> 787. The scanner knew `std::shared_ptr` and not the project's own ALIASES for it, so
+    //   `MaterialInstancePtr m_X` and `DescriptorSetLayoutRef m_Y` were counted as NOTHING AT ALL --
+    //   seventeen members in these three trees alone were invisible, among them the four
+    //   `MaterialExecutor::m_*PropertiesStorage` vectors that forty-six of this register's rows rest on.
+    //   It was found the only way a blind spot ever is: A8-3 converted eight raw members to co-owned
+    //   handles and the total FELL by five instead of holding. The alias list is now derived from the
+    //   tree (see DeclaredAliases), not typed.
+    EXPECT_EQ( CountOf( Form::Raw ), 138 );
+    EXPECT_EQ( CountOf( Form::Shared ), 219 );
+    EXPECT_EQ( CountOf( Form::Unique ), 40 );
     EXPECT_EQ( CountOf( Form::Weak ), 17 );
-    EXPECT_EQ( (int)Members().size(), 395 )
+    EXPECT_EQ( (int)Members().size(), 414 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }
@@ -191,7 +201,7 @@ TEST( PointerOwnership, EveryRowCarriesAnArgument )
 
 TEST( PointerOwnership, MaterialPropertyStorageIsAddressStable )
 {
-    // 46 of the 145 rows rest on ONE argument: a material's cached `Texture2DProperty*` cannot dangle
+    // 46 of the 138 rows rest on ONE argument: a material's cached `Texture2DProperty*` cannot dangle
     // because the property lives in the material's own executor. That argument has three legs and all
     // three are facts about the source, so all three are checked here rather than believed.
     ASSERT_FALSE( RepoRoot().empty() );
@@ -315,7 +325,7 @@ TEST( PointerOwnership, NoRawPointerMemberIsDeletedByItsHolder )
 TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
 {
     // THE AUDIT'S LARGEST SINGLE RESULT IS A REFUSAL, and it is recorded here so the next person does
-    // not re-derive it. 196 of the 395 members in these trees are `shared_ptr`, and for the GPU
+    // not re-derive it. 219 of the 414 members in these trees are `shared_ptr`, and for the GPU
     // resources that is the CORRECT form rather than a habit: an Image2D is held at once by the
     // framebuffer that allocated it, by the descriptor sets that sample it and by the deletion queue
     // that outlives both, and no two of those have an ordered death. Converting them to `unique_ptr`
@@ -326,8 +336,74 @@ TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
     // `shared_ptr` here is a false impression of shared ownership, and the register's job is to make
     // the true owner findable instead of mass-replacing them for uniformity -- churn that would hide
     // the seven real findings in a diff of two hundred files.
-    EXPECT_EQ( CountOf( Form::Shared ), 196 );
+    EXPECT_EQ( CountOf( Form::Shared ), 219 );
     EXPECT_GT( CountOf( Form::Shared ), CountOf( Form::Unique ) + CountOf( Form::Weak ) );
+}
+
+TEST( PointerOwnership, NoECSSystemHandsARenderCommandAnAddress )
+{
+    // THE RULE A8-3 COST, WRITTEN WHERE IT CAN FAIL. A render command is recorded by an ECS system and
+    // read later — after every remaining system has run, ScriptSystem and its user Lua among them, and
+    // after the command buffer has been executed. Anything the command holds must therefore be either a
+    // value or a CO-OWNED handle; the address of a component member is neither, and it is the shape that
+    // put five members of this register in debt.
+    //
+    // The check is deliberately blunt: an argument to `Emplace<...>` may not begin with `&`. It catches
+    // `&mesh.RuntimeSlotPtrs` and `&ism.InstanceTransforms`, which is what it is for, and it also catches
+    // the address of a LOCAL — which is equally wrong here for the same reason and equally worth a
+    // conversation. Measured on the fixed tree: sixteen Emplace sites across eight systems, zero
+    // addresses.
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    const fs::path systems = fs::path( root ) / "Desert/Desert/Source/Engine/ECS/System";
+    int            sites   = 0;
+
+    std::error_code ec;
+    for ( auto it = fs::recursive_directory_iterator( systems, ec );
+          !ec && it != fs::recursive_directory_iterator(); ++it )
+    {
+        const fs::path& path = it->path();
+        if ( path.extension() != ".hpp" && path.extension() != ".cpp" )
+            continue;
+
+        const std::string src = ReadRepoFile( fs::relative( path, root ).generic_string().c_str() );
+        for ( std::size_t at : Text::WordPositions( src, "Emplace" ) )
+        {
+            const std::size_t open = src.find( '(', at );
+            if ( open == std::string::npos || src.find( '<', at ) > open )
+                continue;
+            ++sites;
+
+            int depth = 0;
+            for ( std::size_t i = open; i < src.size(); ++i )
+            {
+                if ( src[i] == '(' )
+                    ++depth;
+                else if ( src[i] == ')' && --depth == 0 )
+                    break;
+                if ( depth != 1 || ( src[i] != '(' && src[i] != ',' ) )
+                    continue;
+
+                const std::size_t arg = Text::SkipSpace( src, i + 1 );
+                if ( arg >= src.size() || src[arg] != '&' )
+                    continue;
+                if ( arg + 1 >= src.size() || !Text::IsIdentChar( src[arg + 1] ) )
+                    continue;
+
+                ADD_FAILURE()
+                     << fs::relative( path, root ).generic_string() << ":" << LineOf( src, arg )
+                     << " hands a render command the ADDRESS of `" << Text::IdentAt( src, arg + 1 )
+                     << "`.\nA command outlives the system that recorded it: every later ECS system runs "
+                        "before it is executed, ScriptSystem among them, and that one runs user Lua which "
+                        "can add or destroy entities. Pass a value, or a co-owned handle "
+                        "(Graphic::MaterialSlotBinding is the one this rule was written for).";
+            }
+        }
+    }
+
+    EXPECT_GT( sites, 8 ) << "the scan found almost no Emplace sites -- either the commands are recorded "
+                             "some other way now, or this check has stopped looking at anything.";
 }
 
 // ------------------------------------------------------------------------------------------------

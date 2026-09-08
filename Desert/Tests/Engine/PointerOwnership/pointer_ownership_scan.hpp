@@ -132,6 +132,80 @@ namespace Desert::Tests::PointerCensus
         return out;
     }
 
+    // THE PROJECT'S OWN SMART-POINTER ALIASES, DERIVED AND NOT TYPED.
+    //
+    // `MaterialSlotBindingPtr MaterialSlots;` spells neither `shared_ptr` nor `*`, so a scanner that only
+    // knows the standard names sees NOTHING there — the member disappears from the census rather than
+    // being counted under the wrong form, which is the worse of the two failures and the one this census
+    // exists to prevent. It was found the honest way: A8-3 converted eight raw members to co-owned handles
+    // and the total fell by five instead of holding, because three of them had become invisible.
+    //
+    // Typed by hand the list would drift the moment somebody adds the ninth alias, so it is read off the
+    // tree exactly as the sweep's tool list is read off `ls Tools`: every `using X = std::shared_ptr<...>`
+    // in the scanned trees plus the two the engine declares outside them (`Common::Unique`,
+    // `Assets::Asset`) is an alias, and a member naming one is that form.
+    struct Aliases
+    {
+        std::vector<std::string> Shared;
+        std::vector<std::string> Unique;
+        std::vector<std::string> Weak;
+    };
+
+    inline Aliases DeclaredAliases( const std::string& root )
+    {
+        Aliases out;
+        // The two aliases declared outside the scanned trees. Named here because they are reachable from
+        // inside them, and a census that could not see `Common::Unique<T> m_X` would under-count in the
+        // same direction as the defect above.
+        out.Unique.push_back( "Unique" );
+        out.Shared.push_back( "Asset" );
+
+        for ( const char* tree :
+              { "Desert/Desert/Source", "Desert/Common/Source", "Editor/Source", "Runtime/Source" } )
+        {
+            std::error_code ec;
+            const fs::path  base = fs::path( root ) / tree;
+            for ( auto it = fs::recursive_directory_iterator( base, ec );
+                  !ec && it != fs::recursive_directory_iterator(); ++it )
+            {
+                const fs::path& p = it->path();
+                if ( p.string().find( "lightweightvk" ) != std::string::npos )
+                    continue;
+                if ( p.extension() != ".hpp" )
+                    continue;
+
+                const std::string src = ConsumerText::StripCommentsAndLiterals( ReadAll( p ) );
+                for ( std::size_t at : ConsumerText::WordPositions( src, "using" ) )
+                {
+                    std::size_t       i    = ConsumerText::SkipSpace( src, at + 5 );
+                    const std::string name = ConsumerText::IdentAt( src, i );
+                    if ( name.empty() )
+                        continue;
+                    i = ConsumerText::SkipSpace( src, i + name.size() );
+                    if ( i >= src.size() || src[i] != '=' )
+                        continue;
+                    const std::size_t semi = src.find( ';', i );
+                    if ( semi == std::string::npos )
+                        continue;
+                    const std::string rhs = src.substr( i + 1, semi - i - 1 );
+
+                    std::vector<std::string>* bucket = nullptr;
+                    if ( rhs.find( "std::shared_ptr" ) != std::string::npos )
+                        bucket = &out.Shared;
+                    else if ( rhs.find( "std::unique_ptr" ) != std::string::npos )
+                        bucket = &out.Unique;
+                    else if ( rhs.find( "std::weak_ptr" ) != std::string::npos )
+                        bucket = &out.Weak;
+                    if ( !bucket )
+                        continue;
+                    if ( std::find( bucket->begin(), bucket->end(), name ) == bucket->end() )
+                        bucket->push_back( name );
+                }
+            }
+        }
+        return out;
+    }
+
     inline int LineOf( const std::string& src, std::size_t at )
     {
         return 1 + static_cast<int>( std::count( src.begin(), src.begin() + at, '\n' ) );
@@ -232,6 +306,15 @@ namespace Desert::Tests::PointerCensus
     {
         using namespace ConsumerText;
 
+        const Aliases aliases = DeclaredAliases( root );
+        const auto    names   = [&]( const std::string& decl, const std::vector<std::string>& list )
+        {
+            for ( const std::string& alias : list )
+                if ( !WordPositions( decl, alias ).empty() )
+                    return true;
+            return false;
+        };
+
         std::vector<Member> out;
         for ( const fs::path& path : ScannedSources( root ) )
         {
@@ -288,11 +371,11 @@ namespace Desert::Tests::PointerCensus
 
                 Member m;
                 m.Kind = Form::Raw;
-                if ( decl.find( "shared_ptr" ) != std::string::npos )
+                if ( decl.find( "shared_ptr" ) != std::string::npos || names( decl, aliases.Shared ) )
                     m.Kind = Form::Shared;
-                else if ( decl.find( "unique_ptr" ) != std::string::npos )
+                else if ( decl.find( "unique_ptr" ) != std::string::npos || names( decl, aliases.Unique ) )
                     m.Kind = Form::Unique;
-                else if ( decl.find( "weak_ptr" ) != std::string::npos )
+                else if ( decl.find( "weak_ptr" ) != std::string::npos || names( decl, aliases.Weak ) )
                     m.Kind = Form::Weak;
                 else
                 {

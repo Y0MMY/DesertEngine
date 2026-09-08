@@ -1251,17 +1251,17 @@ namespace Desert::Graphic
              ->SetLensFlareImage( flareSystem->GetFlareImage() );
     }
 
-    void SceneRenderer::SubmitMesh( const Mesh* mesh, const std::vector<MaterialInstance*>& materialSlots,
+    void SceneRenderer::SubmitMesh( const Mesh* mesh, const MaterialSlotBindingPtr& materialSlots,
                                     const glm::mat4& transform, const RenderSubmissionExtra& extra )
     {
-        if ( !mesh || materialSlots.empty() )
+        if ( !mesh || !materialSlots || materialSlots->Slots.empty() )
         {
             return;
         }
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SubmitMesh( { .Mesh            = (Mesh*)mesh,
                              .Transform       = transform,
-                             .MaterialSlots   = &materialSlots,
+                             .MaterialSlots   = materialSlots,
                              .BoneMatrices    = extra.BoneMatrices,
                              .Outlined        = extra.Outlined,
                              .HiddenSubmeshes = extra.HiddenSubmeshes,
@@ -1318,8 +1318,8 @@ namespace Desert::Graphic
                                     .VisibleSubmeshMask = visibleSubmeshMask } );
     }
 
-    void SceneRenderer::SubmitInstancedMesh( const Mesh* mesh, MaterialInstance* material,
-                                             const std::vector<glm::mat4>* transforms )
+    void SceneRenderer::SubmitInstancedMesh( const Mesh* mesh, const MaterialInstancePtr& material,
+                                             const std::shared_ptr<const std::vector<glm::mat4>>& transforms )
     {
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SubmitInstancedMesh( { .Mesh       = static_cast<Desert::StaticMesh*>( const_cast<Mesh*>( mesh ) ),

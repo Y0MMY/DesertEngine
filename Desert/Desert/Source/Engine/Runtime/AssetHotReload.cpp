@@ -39,7 +39,9 @@ namespace Desert::Runtime
                          if ( slot == materialHandle )
                          {
                              mesh.RuntimeMaterialInstances.clear();
-                             mesh.RuntimeSlotPtrs.clear();
+                             // Dropped, not emptied: a draw recorded this frame may still hold the old
+                             // binding, and it must keep the instances it names alive until it has run.
+                             mesh.RuntimeSlots.reset();
                              break;
                          }
                  } );
