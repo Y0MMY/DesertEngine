@@ -38,6 +38,14 @@ namespace Desert::Editor
      *     and persisting "this asset is bad" would turn a transient failure into one only a cache wipe
      *     could clear. The thing worth persisting is the picture, and that is what the PNG is.
      *
+     * IT SURVIVES ASSET EVICTION, AND THAT IS A PROPERTY OF WHERE THE QUESTION IS ASKED, NOT LUCK. A queued
+     * request carries a handle and a path, and a handle can go cold under it: A7 evicts the BUILT object on
+     * a scene change and keeps the shell. What saves this queue is that nothing here trusts the handle at
+     * queue time — `AssetThumbnailRenderer::RequestMesh` asks `MeshService::Get` at DISPATCH, which is the
+     * lazy path that rebuilds from the shell, so an evicted mesh reloads on the way into the capture and an
+     * unregistered one is refused with its reason. The dedup and failure sets are keyed on the asset's
+     * identity rather than on a pointer, so they mean the same thing on both sides of an eviction.
+     *
      * AND IT NEVER TAKES THE LAST RENDERER SLOT. A capture owns a full SceneRenderer, which is one of six
      * (Engine/Core/RendererSlotPool.hpp), and a renderer that finds none free does not fail — it records
      * into slot 0 and shares the main viewport's per-frame state. This queue is background work: nobody
