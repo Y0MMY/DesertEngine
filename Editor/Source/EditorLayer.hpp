@@ -413,13 +413,19 @@ namespace Desert::Editor
         uint64_t m_ActiveSceneId = kPrimarySceneViewId; // which document the editor is bound to
 
         // AssetTypeID -> the editor that opens it. Holds factories only; the documents it builds are owned by
-        // m_Documents below.
+        // m_OpenDocuments below.
         SubjectEditorRegistry m_SubjectEditors;
 
-        // THE OPEN DOCUMENTS, owned separately from the tools. See Editor/Core/DocumentWell.hpp for the
+        // THE OPEN DOCUMENTS, owned separately from the tools. See Editor/Core/OpenDocuments.hpp for the
         // whole argument; the short version is that a tool's visibility is a setting and a document's
         // existence is not, so one bool cannot serve both — and while they shared m_Panels it had to.
-        DocumentWell m_Documents;
+        //
+        // DECLARED BEFORE THE VIEWS THAT READ IT, and the order is load-bearing rather than tidy: every view
+        // below is constructed with a reference to this member.
+        OpenDocuments m_OpenDocuments;
+        // ONE VIEW OF THEM — the tabbed well, its Ctrl+Tab ring and its recently-closed list. The Clouds
+        // window is a second view of the same container and neither knows the other exists.
+        DocumentWell m_DocumentWell{ m_OpenDocuments };
         // Close requests, drained between frames by ServiceDocumentCloses. Filled by the x on a document
         // window, the x in Window ▸ Documents, Close All, and the refusal dialog's own Close buttons.
         struct PendingDocumentClose

@@ -27,10 +27,12 @@ namespace Desert::Editor
     // key's shape.
     //
     // The registry deliberately does NOT own the documents it makes: it holds factories, and the documents
-    // they build belong to Editor/Core/DocumentWell.hpp. There is EXACTLY ONE owner of open documents and
+    // they build belong to Editor/Core/OpenDocuments.hpp. There is EXACTLY ONE owner of open documents and
     // therefore exactly one answer to "which documents exist" — a second container here would be a second
     // answer, and the two would disagree the first frame a close was handled halfway; the editor already
-    // paid for that shape once (Editor/Core/SceneViewIdentity.hpp). Open-or-focus is DocumentWell::Find.
+    // paid for that shape once (Editor/Core/SceneViewIdentity.hpp). Open-or-focus is OpenDocuments::Find, and
+    // a second document for one subject is refused by OpenDocuments::Open rather than appended — which is
+    // what makes a SECOND VIEW (the Clouds window) safe to add.
     //
     // The well is a separate owner from the TOOL panels for a different reason again, and that one is about
     // lifetime rather than bookkeeping: a tool's visibility is a setting the user keeps and a document's
@@ -220,7 +222,7 @@ namespace Desert::Editor
     // It searched a PANEL LIST for a document, by dynamic_cast, because documents were mixed in among the
     // tools and had to be sifted back out at every site that wanted one. That cast is gone from every such
     // site now: documents have their own owner, so "the already-open document for this subject" is
-    // DocumentWell::Find and there is nothing to sift. Keeping this function beside it would have left two
+    // OpenDocuments::Find and there is nothing to sift. Keeping this function beside it would have left two
     // functions answering one question — the very thing the note above says the editor has already paid for
     // once — and the survivor would have been the one that could still be pointed at the wrong container.
 

@@ -1,7 +1,8 @@
 -- "A tool and a document are owned by different things, and the difference is enforced."
 --
 -- The units under test are header-only and free of the renderer: Editor/Core/PanelRegistry.hpp carries the
--- container that refuses a document, Editor/Core/DocumentWell.hpp the owner that holds one, and
+-- container that refuses a document, Editor/Core/OpenDocuments.hpp the OWNER that holds one and refuses a
+-- second for the same subject, Editor/Core/DocumentWell.hpp one VIEW over that owner, and
 -- Engine/Core/RendererSlotPool.hpp the lease a closed document has to give back. They sit in headers for the
 -- reason Editor/Core/SceneViewIdentity.hpp and Editor/Core/SubjectEditorRegistry.hpp do -- EditorLayer.cpp is
 -- compiled by no suite (scripts/CI/UnreachedSources.sh), so anything assertable has to be lifted out of it.

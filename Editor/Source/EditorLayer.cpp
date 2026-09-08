@@ -1019,7 +1019,7 @@ namespace Desert::Editor
         // The documents get the same call, from their own owner. Two loops rather than one is the visible
         // cost of the split, and it is the cost that buys "the View menu cannot list a document": every
         // place that used to iterate one container now names which of the two it means.
-        for ( auto& document : m_Documents )
+        for ( auto& document : m_OpenDocuments )
             document->OnPreUpdate();
 
         // ONE thumbnail capture pump for the whole editor. Panels only request; whether the asset browser
@@ -1541,7 +1541,7 @@ namespace Desert::Editor
 
             case Control::Op::Properties:
             {
-                ISubjectDocument* focused = m_Documents.Find( m_FocusedDocument );
+                ISubjectDocument* focused = m_OpenDocuments.Find( m_FocusedDocument );
                 if ( !focused )
                 {
                     return Control::Response::Failure(
@@ -1560,7 +1560,7 @@ namespace Desert::Editor
                 // searched for across every open window, and the first match would win — which is a
                 // different document from the one the person or the capture is looking at, on any frame
                 // where two materials declare the same parameter. They almost all do.
-                ISubjectDocument* focused = m_Documents.Find( m_FocusedDocument );
+                ISubjectDocument* focused = m_OpenDocuments.Find( m_FocusedDocument );
                 if ( !focused )
                 {
                     return Control::Response::Failure(
@@ -1636,9 +1636,9 @@ namespace Desert::Editor
         // MOST RECENTLY USED ORDER, which is the order the well lists and Ctrl+Tab walks. Reporting the
         // storage order instead would be a second sequence for the same documents, and a client reading
         // it would predict a different answer from Ctrl+Tab than the editor gives.
-        for ( const SubjectId& subject : m_Documents.MostRecentOrder() )
+        for ( const SubjectId& subject : m_DocumentWell.MostRecentOrder() )
         {
-            const ISubjectDocument* document = m_Documents.Find( subject );
+            const ISubjectDocument* document = m_OpenDocuments.Find( subject );
             if ( !document )
                 continue;
 
@@ -1673,7 +1673,7 @@ namespace Desert::Editor
             snapshot.Documents.push_back( std::move( entry ) );
         }
 
-        for ( const ClosedDocument& closed : m_Documents.RecentlyClosed() )
+        for ( const ClosedDocument& closed : m_DocumentWell.RecentlyClosed() )
         {
             Control::ClosedDocumentSnapshot entry;
             entry.Name    = closed.DisplayName;
@@ -1700,7 +1700,7 @@ namespace Desert::Editor
 #endif
 
         snapshot.RendererSlotsLive    = Graphic::SceneRenderer::GetLiveRendererCount();
-        snapshot.RendererSlotsPending = PendingRendererSlotDemand( m_Documents.Documents() );
+        snapshot.RendererSlotsPending = PendingRendererSlotDemand( m_OpenDocuments.Documents() );
         snapshot.RendererSlotsMax     = EngineContext::kMaxRendererSlots;
 
         snapshot.LogInfoCount    = LogsPanel::InfoCount();
@@ -2007,7 +2007,7 @@ namespace Desert::Editor
         // The documents are asked of their own owner rather than sifted out of the panel list with a
         // dynamic_cast. That cast was the seam an earlier task closed: it only existed because the two
         // kinds shared a container, and every place that had to write it was a place that could forget to.
-        for ( const auto& document : m_Documents )
+        for ( const auto& document : m_OpenDocuments )
         {
             // The VISIBLE half of the name. The census tells a user what to close, and they close a window
             // titled "MP_GreenTint", not one titled "MP_GreenTint###docasset:2:3333333333333333333".
@@ -2042,7 +2042,7 @@ namespace Desert::Editor
             // OPEN-OR-FOCUS, keyed by the subject, asked of the one owner of open documents. It does NOT
             // set a visibility flag any more: a document that is open is open, and "focus" is the only
             // thing a second request for the same subject can mean.
-            if ( ISubjectDocument* open = m_Documents.Find( subject ) )
+            if ( ISubjectDocument* open = m_OpenDocuments.Find( subject ) )
             {
                 FocusDocument( open->Subject() );
                 continue;
@@ -2069,7 +2069,7 @@ namespace Desert::Editor
             // The counting rule itself lives in SubjectEditorRegistry.hpp, not here: this file is compiled
             // by no suite, and a rule written in it is a rule nothing can assert.
             const uint32_t live    = Graphic::SceneRenderer::GetLiveRendererCount();
-            const uint32_t pending = PendingRendererSlotDemand( m_Documents.Documents() );
+            const uint32_t pending = PendingRendererSlotDemand( m_OpenDocuments.Documents() );
 
             if ( live + pending >= EngineContext::kMaxRendererSlots )
             {
@@ -2123,12 +2123,34 @@ namespace Desert::Editor
                 continue;
             }
 
-            m_Documents.Add( std::move( document ) );
+            // THROUGH THE OWNER'S OWN DOOR, which is what refuses a duplicate rather than appending one.
+            // The open-or-focus above already answered for the route this function serves; the refusal
+            // here is for the routes that do not exist yet, and it is the container's rule rather than a
+            // habit every future call site has to inherit (Editor/Core/OpenDocuments.hpp).
+            const DocumentOpenResult opened = m_OpenDocuments.Open( std::move( document ) );
+            if ( opened.Outcome == DocumentOpenOutcome::Refused )
+            {
+                LOG_ERROR( "[Editor] The '{}' editor built a document that names nothing for subject '{}' — "
+                           "no window was opened.",
+                           m_SubjectEditors.TypeName( subject ), subject.ToString() );
+                continue;
+            }
+            if ( opened.Outcome == DocumentOpenOutcome::AlreadyOpen )
+            {
+                // Cannot normally happen — the open-or-focus at the top of this loop catches it. Said out
+                // loud rather than swallowed, because reaching this line means two requests for one subject
+                // survived that check, and the container's refusal is what stops it becoming two documents.
+                LOG_WARN( "[Editor] A second document for subject '{}' was built and discarded; the one "
+                          "already open was focused instead.",
+                          subject.ToString() );
+            }
+
+            m_DocumentWell.Touch( subject );
             m_FocusPanel      = name; // brings the new window forward in the document well
             m_FocusedDocument = subject;
             LOG_INFO( "[Editor] Opened a '{}' document '{}' ({} open, {}/{} renderer slots in use, {} "
                       "committed).",
-                      m_SubjectEditors.TypeName( subject ), name, m_Documents.Count(),
+                      m_SubjectEditors.TypeName( subject ), name, m_OpenDocuments.Count(),
                       Graphic::SceneRenderer::GetLiveRendererCount(), EngineContext::kMaxRendererSlots,
                       committed );
         }
@@ -2156,7 +2178,7 @@ namespace Desert::Editor
 
     void EditorLayer::RequestDocumentClose( const SubjectId& subject, std::string reason )
     {
-        if ( !m_Documents.Find( subject ) )
+        if ( !m_OpenDocuments.Find( subject ) )
             return; // already gone, or never open — a second x on one window in one frame is not an error
 
         const auto queued =
@@ -2172,8 +2194,8 @@ namespace Desert::Editor
         // reads the well, and a range-for over a container something else is being asked about is the kind
         // of thing that survives review and then does not survive a refactor.
         std::vector<SubjectId> subjects;
-        subjects.reserve( m_Documents.Count() );
-        for ( const auto& document : m_Documents )
+        subjects.reserve( m_OpenDocuments.Count() );
+        for ( const auto& document : m_OpenDocuments )
             subjects.push_back( document->Subject() );
 
         for ( const SubjectId& subject : subjects )
@@ -2200,7 +2222,7 @@ namespace Desert::Editor
         // is one resolution per open document per frame — the same resolution each document already
         // performs to draw itself, and there are rarely more than six of them.
         std::vector<SubjectId> dead;
-        for ( const auto& document : m_Documents )
+        for ( const auto& document : m_OpenDocuments )
             if ( !document->IsSubjectAlive() )
                 dead.push_back( document->Subject() );
 
@@ -2224,7 +2246,7 @@ namespace Desert::Editor
         // ServiceDocumentCloses so it runs behind the SAME device-idle wait a close uses — releasing a
         // PreviewViewport destroys a Scene and a SceneRenderer, and the last submitted frame may still be
         // executing against them.
-        for ( const auto& document : m_Documents )
+        for ( const auto& document : m_OpenDocuments )
         {
             const auto it = m_DocumentHiddenFrames.find( document->Subject() );
             if ( it == m_DocumentHiddenFrames.end() || it->second < kFramesHiddenBeforeSlotRelease )
@@ -2259,7 +2281,7 @@ namespace Desert::Editor
         // either has work. Two waits in one frame would be two full pipeline drains for one frame's worth
         // of teardown.
         bool releasePending = false;
-        for ( const auto& document : m_Documents )
+        for ( const auto& document : m_OpenDocuments )
         {
             const auto it = m_DocumentHiddenFrames.find( document->Subject() );
             if ( it != m_DocumentHiddenFrames.end() && it->second >= kFramesHiddenBeforeSlotRelease &&
@@ -2283,11 +2305,16 @@ namespace Desert::Editor
 
         for ( const PendingDocumentClose& pending : m_DocumentsToClose )
         {
-            // Released, then destroyed HERE. The well hands ownership back rather than dropping the object
-            // itself, because it is this function that knows the device is idle — see DocumentWell.
-            std::unique_ptr<ISubjectDocument> closed = m_Documents.Release( pending.Subject );
+            // Released, then destroyed HERE. The owner hands ownership back rather than dropping the object
+            // itself, because it is this function that knows the device is idle — see OpenDocuments.
+            std::unique_ptr<ISubjectDocument> closed = m_OpenDocuments.Release( pending.Subject );
             if ( !closed )
                 continue;
+
+            // THE VIEWS ARE TOLD, and told BEFORE the object dies: NoteClosed reads the display name off
+            // it. A view cannot discover a departure without keeping a second copy of the open set, which
+            // is the duplicated state the ownership split removes.
+            m_DocumentWell.NoteClosed( *closed );
 
             const std::string name = closed->GetName();
             m_ContextualShown.erase( closed.get() );
@@ -2306,7 +2333,7 @@ namespace Desert::Editor
             // ServiceSubjectOpenRequests is what makes the leak readable.
             LOG_INFO( "[Editor] Closed document '{}' — {} ({} open, {}/{} renderer slots in use after "
                       "release).",
-                      DocumentDisplayName( name ), pending.Reason, m_Documents.Count(),
+                      DocumentDisplayName( name ), pending.Reason, m_OpenDocuments.Count(),
                       Graphic::SceneRenderer::GetLiveRendererCount(), EngineContext::kMaxRendererSlots );
         }
 
@@ -2315,22 +2342,22 @@ namespace Desert::Editor
 
     void EditorLayer::FocusDocument( const SubjectId& subject )
     {
-        ISubjectDocument* document = m_Documents.Find( subject );
+        ISubjectDocument* document = m_OpenDocuments.Find( subject );
         if ( !document )
             return;
 
-        m_Documents.Touch( subject );
+        m_DocumentWell.Touch( subject );
         m_FocusedDocument = subject;
         m_FocusPanel      = document->GetName(); // brings it forward in whatever dock it lives
     }
 
     void EditorLayer::CycleDocuments()
     {
-        const auto next = m_Documents.NextMostRecent( m_FocusedDocument );
+        const auto next = m_DocumentWell.NextMostRecent( m_FocusedDocument );
         if ( !next )
             return;
 
-        ISubjectDocument* document = m_Documents.Find( *next );
+        ISubjectDocument* document = m_OpenDocuments.Find( *next );
         if ( !document )
             return;
 
@@ -2372,7 +2399,7 @@ namespace Desert::Editor
         // layer for its preview numbers — the scene is an input, never a second subject — and it stopped
         // following it the moment documents left the panel list, which is exactly the "a middle link drops a
         // property" shape this codebase has paid for seven times.
-        for ( auto& document : m_Documents )
+        for ( auto& document : m_OpenDocuments )
             document->SetScene( m_MainScene );
 
         // Selection is per-scene (entity UUIDs belong to one registry) — don't carry a stale one across.
@@ -2510,7 +2537,7 @@ namespace Desert::Editor
             if ( m_CyclingDocuments && !io.KeyCtrl )
             {
                 m_CyclingDocuments = false;
-                m_Documents.Touch( m_FocusedDocument );
+                m_DocumentWell.Touch( m_FocusedDocument );
             }
         }
 
@@ -2786,7 +2813,7 @@ namespace Desert::Editor
     std::vector<PaletteCommand> EditorLayer::BuildPaletteCommands()
     {
         std::vector<PaletteCommand> commands;
-        commands.reserve( m_Panels.Size() + m_Documents.Count() + 32 );
+        commands.reserve( m_Panels.Size() + m_OpenDocuments.Count() + 32 );
 
         // Panels — jump to / reveal any tool window. TOOLS ONLY, and by construction rather than by a
         // filter: m_Panels is a PanelRegistry, which cannot hold a document. Before the split this loop
@@ -2808,7 +2835,7 @@ namespace Desert::Editor
         // Documents — FOCUS an open one. A separate category because the verb is different and the
         // difference is the point of this task: a tool is opened, a document is switched to. Nothing here
         // creates or destroys a window, so a mistyped search cannot cost the user one.
-        for ( const auto& document : m_Documents )
+        for ( const auto& document : m_OpenDocuments )
         {
             const SubjectId subject = document->Subject();
             commands.push_back( { "Document", "Go to " + DocumentDisplayName( document->GetName() ),
@@ -2820,7 +2847,7 @@ namespace Desert::Editor
         // document and show what the well offers back" was a claim nobody could photograph. It goes
         // through RequestDocumentClose like the x does, so the destruction still happens between frames
         // behind the device-idle wait.
-        for ( const auto& document : m_Documents )
+        for ( const auto& document : m_OpenDocuments )
         {
             const SubjectId subject = document->Subject();
             commands.push_back( { "Document", "Close " + DocumentDisplayName( document->GetName() ),
@@ -2834,7 +2861,7 @@ namespace Desert::Editor
         // Ctrl+Tab, as a command. The key is bound in OnImGuiRender and a key is not available to a
         // client either; this is the same CycleDocuments the keystroke calls, so the ring the two walk
         // cannot differ.
-        if ( m_Documents.Count() > 1 )
+        if ( m_OpenDocuments.Count() > 1 )
         {
             commands.push_back(
                  { "Document", "Cycle to the next most recently used", [this] { CycleDocuments(); } } );
@@ -2843,7 +2870,7 @@ namespace Desert::Editor
         // Reopening one that was closed. The list the empty well shows, reachable without a mouse — and
         // it is the same Core::SubjectOpenRequests the Selectable there uses, so a reopen is refused by the
         // six-slot cap exactly like any other open rather than becoming a second way in.
-        for ( const ClosedDocument& closed : m_Documents.RecentlyClosed() )
+        for ( const ClosedDocument& closed : m_DocumentWell.RecentlyClosed() )
         {
             const SubjectId subject = closed.Subject;
             commands.push_back( { "Document", "Reopen " + closed.DisplayName,
@@ -3024,7 +3051,8 @@ namespace Desert::Editor
         //
         // Offered for the FOCUSED document only, because that is the one a person means by "the preview"
         // and because seven entries per open document would bury everything else in the list.
-        if ( ISubjectDocument* focused = m_Documents.Find( m_FocusedDocument ); focused && focused->HasPreview() )
+        if ( ISubjectDocument* focused = m_OpenDocuments.Find( m_FocusedDocument );
+             focused && focused->HasPreview() )
         {
             for ( const PreviewViewpoint& viewpoint : kPreviewViewpoints )
             {
@@ -3034,7 +3062,8 @@ namespace Desert::Editor
                                           // Re-resolved rather than captured: the focus can move, and the
                                           // document can be destroyed, between this list being built and
                                           // the entry being run.
-                                          if ( ISubjectDocument* target = m_Documents.Find( m_FocusedDocument );
+                                          if ( ISubjectDocument* target =
+                                                    m_OpenDocuments.Find( m_FocusedDocument );
                                                target && target->HasPreview() )
                                           {
                                               target->SetPreviewViewpoint( *aim );
@@ -3054,7 +3083,7 @@ namespace Desert::Editor
         // available THIS INSTANT, exactly as the toolbar disables the two buttons in the same state; an
         // entry that ran and did nothing would be a silent no-op reported as a success, and a client
         // would read it as "the scene now has my edit".
-        if ( ISubjectDocument* focused = m_Documents.Find( m_FocusedDocument ) )
+        if ( ISubjectDocument* focused = m_OpenDocuments.Find( m_FocusedDocument ) )
         {
             const SubjectId subject = m_FocusedDocument;
 
@@ -3065,19 +3094,19 @@ namespace Desert::Editor
                 // viewpoints above follow, for the same reason.
                 commands.push_back( { "Document", "Apply this document's edits to the scene", [this, subject]
                                       {
-                                          if ( ISubjectDocument* target = m_Documents.Find( subject ) )
+                                          if ( ISubjectDocument* target = m_OpenDocuments.Find( subject ) )
                                               (void)target->ApplyEdits();
                                       } } );
                 commands.push_back( { "Document", "Discard this document's unapplied edits", [this, subject]
                                       {
-                                          if ( ISubjectDocument* target = m_Documents.Find( subject ) )
+                                          if ( ISubjectDocument* target = m_OpenDocuments.Find( subject ) )
                                               (void)target->DiscardEdits();
                                       } } );
             }
 
             commands.push_back( { "Document", "Save this document", [this, subject]
                                   {
-                                      if ( ISubjectDocument* target = m_Documents.Find( subject ) )
+                                      if ( ISubjectDocument* target = m_OpenDocuments.Find( subject ) )
                                           (void)target->SaveDocument();
                                   } } );
         }
@@ -3130,7 +3159,7 @@ namespace Desert::Editor
         // gives the same answer in every session, including after the user drags the well somewhere else.
         m_DocumentDockId = ImGui::GetWindowDockID();
 
-        if ( m_Documents.Empty() )
+        if ( m_OpenDocuments.Empty() )
         {
             // THE EMPTY STATE SAYS WHAT THE AREA IS FOR. A reserved column that is blank most of the time
             // is a column nobody learns the purpose of; this is the price B.1 pays for stable geometry and
@@ -3183,12 +3212,12 @@ namespace Desert::Editor
             // RECENTLY CLOSED: the one thing an area that stays can offer that a vanishing one cannot.
             // Reopening goes through the ordinary open request, so it is refused by the slot cap exactly
             // like any other open and cannot become a second way in.
-            if ( !m_Documents.RecentlyClosed().empty() )
+            if ( !m_DocumentWell.RecentlyClosed().empty() )
             {
                 ImGui::Dummy( ImVec2( 0.0f, 12.0f ) );
                 ImGui::Separator();
                 ImGui::TextDisabled( "RECENTLY CLOSED" );
-                for ( const ClosedDocument& closed : m_Documents.RecentlyClosed() )
+                for ( const ClosedDocument& closed : m_DocumentWell.RecentlyClosed() )
                 {
                     ImGui::PushID( static_cast<int>( std::hash<SubjectId>{}( closed.Subject ) & 0x7fffffff ) );
                     const std::string row =
@@ -3211,15 +3240,15 @@ namespace Desert::Editor
         // tab strip has the one you want off its end, so a list is not a fallback here — it is the primary
         // way to switch, and it carries the two facts a tab cannot: which type each document is, and
         // whether it is holding one of the six renderer slots.
-        ImGui::TextDisabled( "OPEN DOCUMENTS \xe2\x80\x94 %zu", m_Documents.Count() );
+        ImGui::TextDisabled( "OPEN DOCUMENTS \xe2\x80\x94 %zu", m_OpenDocuments.Count() );
         ImGui::Separator();
 
         // Most recently used first, the same order Ctrl+Tab walks — one order, read in two places, so the
         // list cannot teach a different sequence from the key.
         std::vector<SubjectId> closeRequests;
-        for ( const SubjectId& subject : m_Documents.MostRecentOrder() )
+        for ( const SubjectId& subject : m_DocumentWell.MostRecentOrder() )
         {
-            const ISubjectDocument* document = m_Documents.Find( subject );
+            const ISubjectDocument* document = m_OpenDocuments.Find( subject );
             if ( !document )
                 continue;
 
@@ -3264,7 +3293,7 @@ namespace Desert::Editor
         std::vector<SubjectId> closeRequests;
         SubjectId              focused;
 
-        for ( const auto& document : m_Documents )
+        for ( const auto& document : m_OpenDocuments )
         {
             const SubjectId subject = document->Subject();
 
@@ -3334,7 +3363,7 @@ namespace Desert::Editor
             // where the first one started. The cycling flag is cleared when Ctrl comes up, and the ring is
             // committed there — see the shortcut block in OnImGuiRender.
             if ( focused != m_FocusedDocument && !m_CyclingDocuments )
-                m_Documents.Touch( focused );
+                m_DocumentWell.Touch( focused );
 
             m_FocusedDocument = focused;
         }
@@ -3391,7 +3420,7 @@ namespace Desert::Editor
             // A row the user can act on gets a button; the main viewport and the Details preview do not,
             // because neither is a window a person closes to make room. Saying nothing on those rows is
             // the honest version: they are named because they explain where the slots went.
-            if ( consumer.Document && m_Documents.Find( *consumer.Document ) )
+            if ( consumer.Document && m_OpenDocuments.Find( *consumer.Document ) )
             {
                 ImGui::SameLine( ImGui::GetContentRegionMax().x - 64.0f );
                 ImGui::PushID( static_cast<int>( std::hash<SubjectId>{}( *consumer.Document ) & 0x7fffffff ) );
@@ -3979,7 +4008,7 @@ namespace Desert::Editor
         ImGui::SameLine( 0.0f, 16.0f );
         {
             const uint32_t live    = Graphic::SceneRenderer::GetLiveRendererCount();
-            const uint32_t pending = PendingRendererSlotDemand( m_Documents.Documents() );
+            const uint32_t pending = PendingRendererSlotDemand( m_OpenDocuments.Documents() );
 
             // ImGuiCol_TextDisabled, not ImGuiCol_Text: the line below is drawn with TextDisabled like the
             // rest of the bar, and pushing the wrong colour would leave it grey with a colour nobody sees.
@@ -3987,7 +4016,7 @@ namespace Desert::Editor
             if ( tight )
                 ImGui::PushStyleColor( ImGuiCol_TextDisabled, ThemeManager::GetWarningColor() );
             ImGui::TextDisabled( ICON_MDI_FILE_DOCUMENT_MULTIPLE_OUTLINE " %zu document%s \xc2\xb7 %u/%u slots",
-                                 m_Documents.Count(), m_Documents.Count() == 1 ? "" : "s", live,
+                                 m_OpenDocuments.Count(), m_OpenDocuments.Count() == 1 ? "" : "s", live,
                                  EngineContext::kMaxRendererSlots );
             if ( tight )
                 ImGui::PopStyleColor();
@@ -3996,7 +4025,7 @@ namespace Desert::Editor
                 ImGui::SetTooltip( "%zu open document(s). %u of the %u renderer slots are in use and %u more "
                                    "are committed to documents that have not drawn yet; a document that "
                                    "needs one is refused when they are all spoken for.",
-                                   m_Documents.Count(), live, EngineContext::kMaxRendererSlots, pending );
+                                   m_OpenDocuments.Count(), live, EngineContext::kMaxRendererSlots, pending );
         }
 
         // Active snap state: off, or the step of the CURRENT transform tool — answers "why did it
@@ -5243,21 +5272,21 @@ namespace Desert::Editor
         // A SECOND MENU, BECAUSE THESE ARE A SECOND KIND OF THING. The View menu ticks tools on and off;
         // this one lists what is open and lets you go to it or close it. Putting documents back among the
         // ticks is the defect, not the layout.
-        if ( m_Documents.Empty() )
+        if ( m_OpenDocuments.Empty() )
         {
             ImGui::TextDisabled( "No document open" );
             ImGui::TextDisabled( "Double-click an asset in the Content Browser." );
         }
         else
         {
-            ImGui::TextDisabled( "OPEN DOCUMENTS \xe2\x80\x94 %zu", m_Documents.Count() );
+            ImGui::TextDisabled( "OPEN DOCUMENTS \xe2\x80\x94 %zu", m_OpenDocuments.Count() );
 
             // The x column is placed against the WIDEST row, measured, not against the popup's content
             // region: a menu auto-sizes to its widest item, so asking the region where the right edge is
             // gives an answer that depends on the answer. (Measured — the first capture of this menu had no
             // x on any row, because every one of them was placed past the edge it was helping to define.)
             float widestRow = 0.0f;
-            for ( const auto& document : m_Documents )
+            for ( const auto& document : m_OpenDocuments )
             {
                 const std::string measured = std::string( ICON_MDI_RADIOBOX_MARKED ) + "  " +
                                              m_SubjectEditors.Icon( document->Subject(), kUnknownDocumentIcon ) +
@@ -5266,9 +5295,9 @@ namespace Desert::Editor
             }
 
             std::vector<SubjectId> closeRequests;
-            for ( const SubjectId& subject : m_Documents.MostRecentOrder() )
+            for ( const SubjectId& subject : m_DocumentWell.MostRecentOrder() )
             {
-                const ISubjectDocument* document = m_Documents.Find( subject );
+                const ISubjectDocument* document = m_OpenDocuments.Find( subject );
                 if ( !document )
                     continue;
 
@@ -5850,7 +5879,7 @@ namespace Desert::Editor
                 break;
             panel->OnEvent( event );
         }
-        for ( auto& document : m_Documents )
+        for ( auto& document : m_OpenDocuments )
         {
             if ( event.m_Handled )
                 break;
@@ -5984,7 +6013,7 @@ namespace Desert::Editor
         // Documents BEFORE tools, and both before the ImGui layer: a document owns a PreviewViewport whose
         // UIHelper holds descriptor sets, and the device has already been idled above. Explicit rather than
         // left to ~EditorLayer, which runs after the layer stack has moved on.
-        (void)m_Documents.ReleaseAll();
+        (void)m_OpenDocuments.ReleaseAll();
         m_Panels.Clear();
         // Reported and not returned even though OnDetach has a channel: everything below this line still
         // has to run, and an early return would leave the extra documents and their render slots alive.

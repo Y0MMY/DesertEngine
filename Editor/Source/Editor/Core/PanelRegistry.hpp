@@ -25,7 +25,7 @@ namespace Desert::Editor
     // are all loops over this registry, so none of them can list a document — not because each remembers to
     // skip one, but because there is none there to skip. A predicate would have put the same rule in three
     // places and obliged every fourth place to learn it; this puts it in the type, where the compiler
-    // enforces it and a new call site inherits it for free. Documents live in DocumentWell, next door.
+    // enforces it and a new call site inherits it for free. Documents live in OpenDocuments, next door.
     //
     // The registry owns and hands out non-owning access; the editor still drives every panel through IPanel.
     class PanelRegistry
@@ -46,7 +46,7 @@ namespace Desert::Editor
         Panel& Add( Args&&... args )
         {
             static_assert( Accepts<Panel>,
-                           "A document is not a tool. An ISubjectDocument belongs to DocumentWell: putting "
+                           "A document is not a tool. An ISubjectDocument belongs to OpenDocuments: putting "
                            "one here would put it back in the View menu, the command palette and "
                            "--open-panel, where unticking it destroys it." );
 
@@ -68,7 +68,7 @@ namespace Desert::Editor
         {
             static_assert( Accepts<Panel>,
                            "A document is not a tool, and a unique_ptr<IPanel> hides which one this is — "
-                           "hand over the concrete panel type. Documents belong to DocumentWell." );
+                           "hand over the concrete panel type. Documents belong to OpenDocuments." );
 
             Panel& ref = *panel;
             m_Panels.emplace_back( std::move( panel ) );

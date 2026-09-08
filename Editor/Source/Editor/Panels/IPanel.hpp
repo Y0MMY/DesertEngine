@@ -149,7 +149,7 @@ namespace Desert::Editor
     //
     // WHICH IS WHY THE TWO HAVE DIFFERENT OWNERS. A document is never in the tool registry
     // (Editor/Core/PanelRegistry.hpp, which refuses one at compile time); it lives in
-    // Editor/Core/DocumentWell.hpp, and it is closed by EditorLayer::RequestDocumentClose rather than by
+    // Editor/Core/OpenDocuments.hpp, and it is closed by EditorLayer::RequestDocumentClose rather than by
     // anything writing GetVisibility(). While the two shared a container they shared that bool too, and
     // "hide" for a tool therefore had to mean "destroy" for a document: unticking one in the View menu
     // destroyed it, and re-ticking could not bring it back.
