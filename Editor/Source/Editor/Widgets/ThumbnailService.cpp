@@ -1,5 +1,6 @@
 #include "ThumbnailService.hpp"
 
+#include <Editor/Widgets/CloudThumbnail.hpp>
 #include <Editor/Widgets/PreviewSlotBudget.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Editor/Widgets/ThumbnailFreshness.hpp>
@@ -8,8 +9,10 @@
 #include <Engine/Core/EngineContext.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
 
+#include <Common/Core/JobSystem.hpp>
 #include <Common/Core/Logger.hpp>
 
+#include <chrono>
 #include <filesystem>
 
 namespace Desert::Editor
@@ -78,7 +81,7 @@ namespace Desert::Editor
         // would let one panel's Invalidate leave another panel's entry standing — which is a queue slot
         // that never drains and a thumbnail that never refreshes.
         const std::string identity = ThumbnailKey::Identity( assetPath );
-        const std::string png      = ThumbnailCache::DiskPath( assetPath );
+        const std::string png      = ThumbnailKey::DiskPath( assetPath );
         if ( ShouldQueue( identity, png, assetPath ) )
         {
             m_Queue.push_back( { Kind::Material, material, Assets::AssetHandle( static_cast<uint64_t>( 0 ) ),
@@ -92,10 +95,26 @@ namespace Desert::Editor
                                                const Assets::AssetHandle& material )
     {
         const std::string identity = ThumbnailKey::Identity( assetPath );
-        const std::string png      = ThumbnailCache::DiskPath( assetPath );
+        const std::string png      = ThumbnailKey::DiskPath( assetPath );
         if ( ShouldQueue( identity, png, assetPath ) )
         {
             m_Queue.push_back( { Kind::Mesh, mesh, material, identity, assetPath, png, false } );
+            m_Queued.insert( identity );
+        }
+        return png;
+    }
+
+    std::string ThumbnailService::RequestPainted( const std::string& assetPath )
+    {
+        // THE SAME GATE AS THE OTHER TWO ENTRY POINTS. A painted picture is cheaper to make, which is a
+        // reason to schedule it more freely and NOT a reason to re-make one that is already on disk: the
+        // freshness rule is about whether the file is a picture OF the asset, and that question does not
+        // depend on who drew it.
+        const std::string identity = ThumbnailKey::Identity( assetPath );
+        const std::string png      = ThumbnailKey::DiskPath( assetPath );
+        if ( ShouldQueue( identity, png, assetPath ) )
+        {
+            m_PaintQueue.push_back( { identity, assetPath, png } );
             m_Queued.insert( identity );
         }
         return png;
@@ -112,8 +131,29 @@ namespace Desert::Editor
 
     void ThumbnailService::Shutdown()
     {
-        // See the header for why this exists at all. Nothing to say when the renderer was never built —
-        // a session that previewed nothing pays nothing, here as everywhere else in this file.
+        // THE PAINT QUEUE IS DRAINED FIRST AND UNCONDITIONALLY, and the "unconditionally" is the part
+        // worth writing down: this function used to open with `if ( !m_Renderer ) return;`, on the sound
+        // reasoning that a session which previewed nothing had nothing to release. That stopped being
+        // true the moment a second kind of work existed which needs no renderer — a session that painted
+        // four hundred cloud thumbnails and never photographed a mesh has no renderer AND a job in
+        // flight, and the early return would have walked straight past it.
+        //
+        // A running paint holds nothing of this object (the job captures its three strings by value), so
+        // waiting is about ORDER rather than safety: the future's destructor from `Async` does not block,
+        // and a JobSystem shutdown that ran while a paint was mid-`stbi_write_png` would leave a `.part`
+        // file behind. Waiting here costs the milliseconds one fill takes.
+        m_PaintQueue.clear();
+        if ( m_PaintInFlight.valid() )
+        {
+            m_PaintInFlight.wait();
+            m_PaintInFlight = {};
+            m_PaintInFlightIdentity.clear();
+            m_PaintInFlightSource.clear();
+        }
+        m_Painted = 0;
+
+        // See the header for why the rest of this exists at all. Nothing to say when the renderer was
+        // never built — that session pays nothing, here as everywhere else in this file.
         if ( !m_Renderer )
             return;
 
@@ -179,8 +219,86 @@ namespace Desert::Editor
         return true;
     }
 
+    void ThumbnailService::TickPainted()
+    {
+        // Collect first, dispatch second, so a queue of one asset finishes in two frames rather than
+        // three — and so the freshness re-check below sees the picture the previous paint just wrote.
+        if ( m_PaintInFlight.valid() &&
+             m_PaintInFlight.wait_for( std::chrono::seconds( 0 ) ) == std::future_status::ready )
+        {
+            const Common::BoolResultStr result = m_PaintInFlight.get();
+            m_PaintInFlight                    = {};
+
+            if ( result )
+            {
+                ++m_Painted;
+            }
+            else
+            {
+                // NAMED, AND NOT RETRIED. The reasons a paint fails are all about the FILE — a container
+                // that will not decode, a layout with no pattern, a type whose profile is all zeros — and
+                // none of them is fixed by asking again next frame. Same per-process memory as the
+                // capture path, and for the same reason: a wipe of the cache is what clears it.
+                LOG_WARN( "[Thumbnails] '{}' could not be painted: {} — not retrying.", m_PaintInFlightSource,
+                          result.GetError() );
+                m_Failed.insert( m_PaintInFlightIdentity );
+            }
+            m_Queued.erase( m_PaintInFlightIdentity );
+            m_PaintInFlightIdentity.clear();
+            m_PaintInFlightSource.clear();
+        }
+
+        if ( m_PaintInFlight.valid() || m_PaintQueue.empty() )
+            return;
+
+        // Drop anything the queue no longer owes, exactly as the capture path does and for the same
+        // reason: two panels can name one asset, and a request can sit here while the other one's paint
+        // lands.
+        while ( !m_PaintQueue.empty() && !NeedsCapture( m_PaintQueue.front().Png, m_PaintQueue.front().Source ) )
+        {
+            m_Queued.erase( m_PaintQueue.front().Identity );
+            m_PaintQueue.erase( m_PaintQueue.begin() );
+            ++m_Skipped;
+        }
+        if ( m_PaintQueue.empty() )
+            return;
+
+        const PaintRequest req = m_PaintQueue.front();
+        m_PaintQueue.erase( m_PaintQueue.begin() );
+
+        m_PaintInFlightIdentity = req.Identity;
+        m_PaintInFlightSource   = req.Source;
+
+        // THROUGH THE JobSystem, not std::async and not a std::thread. Г9 removed exactly that from the
+        // cloud bake: work outside the pool is invisible to the profiler, unbounded in thread count, and
+        // obeys no shared budget. The lambda captures its two strings BY VALUE, so nothing it touches can
+        // outlive or be outlived by this object.
+        m_PaintInFlight = Common::JobSystem::Get().Async( [source = req.Source, png = req.Png]
+                                                          { return CloudThumbnail::Write( source, png ); } );
+    }
+
     void ThumbnailService::Tick()
     {
+        // The slot-free half runs FIRST and unconditionally: every early return below is a statement
+        // about a renderer, and a paint has no renderer to be blocked by. Putting it after them is how a
+        // cloud thumbnail would come to depend on whether a mesh was being photographed.
+        TickPainted();
+
+        // WHAT THIS RUN DID, ONCE, ON THE FRAME EVERYTHING IS DONE — and asked of BOTH queues, which is
+        // why it no longer lives inside the renderer's idle branch below. A session that only ever
+        // painted cloud thumbnails has no renderer, so that branch is never reached, and the run would
+        // have finished in silence: the same "the editor has stopped bothering" reading M8 was reported
+        // as. All three numbers are needed to read the line — "8 captured, 12 painted, 0 already fresh"
+        // is a cold cache doing its job, and "0, 0, 8" is the cache doing its job.
+        if ( !HasWork() && ( m_Captured || m_Painted || m_Skipped ) )
+        {
+            LOG_INFO( "[Thumbnails] queue drained: {} captured, {} painted, {} already fresh on disk.", m_Captured,
+                      m_Painted, m_Skipped );
+            m_Captured = 0;
+            m_Painted  = 0;
+            m_Skipped  = 0;
+        }
+
         // Nothing to preview this session -> never pay for the renderer (it owns a full SceneRenderer).
         if ( m_Queue.empty() && !m_Renderer )
             return;
@@ -190,19 +308,9 @@ namespace Desert::Editor
         // different facts and only the second one means the service is done.
         if ( m_Renderer && m_Queue.empty() && m_InFlight.empty() && !m_Renderer->HasPending() )
         {
-            // Say what the run did, ONCE, on the frame the queue empties — not per capture, which would be
-            // one line per asset in a folder, and not never, which is what it used to be. Both numbers are
-            // needed to read it: "8 captured, 0 already fresh" is a cold cache doing its job, "0 captured,
-            // 8 already fresh" is the cache doing its job, and "0 captured, 0 already fresh" beside a
-            // warning is the queue giving up.
-            if ( m_Captured || m_Skipped )
-            {
-                LOG_INFO( "[Thumbnails] queue drained: {} captured, {} already fresh on disk.", m_Captured,
-                          m_Skipped );
-                m_Captured = 0;
-                m_Skipped  = 0;
-            }
-
+            // The run's own report used to be here, and it moved to the top of this function when the
+            // paint queue arrived — see the note there. What is left in this branch is only the thing
+            // that IS about the renderer: giving its slot back.
             if ( ++m_IdleTicks >= kIdleTicksBeforeRelease )
             {
                 // ~AssetThumbnailRenderer idles the device and releases the scene before the renderer, which

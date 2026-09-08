@@ -328,7 +328,8 @@ namespace Desert::Editor
         m_StartupStages.push_back(
              { "Cooking collections...", [this]
                { m_ImportManager->ImportAllFromDirectory( Common::Constants::Path::COLLECTIONS_PATH ); } } );
-        m_StartupStages.push_back( { "Preloading meshes...", [this] { m_AssetPreloader->PreloadMeshes(); } } );
+        m_StartupStages.push_back( { "Preloading meshes, textures and materials...",
+                                     [this] { m_AssetPreloader->PreloadCookedAssetsAndMaterials(); } } );
         m_StartupStages.push_back(
              { "Preloading environments...", [this] { m_AssetPreloader->PreloadSkyboxes(); } } );
         m_StartupStages.push_back(

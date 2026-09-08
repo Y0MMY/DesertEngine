@@ -12,6 +12,7 @@
 #include <Editor/Core/AssetReferences.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Widgets/ThumbnailFreshness.hpp>
+#include <Editor/Widgets/ThumbnailKey.hpp>
 #include <Editor/Import/CookPaths.hpp>
 #include <Editor/Import/MeshDnD.hpp>
 #include <Editor/Import/MeshMaterial.hpp>
@@ -617,7 +618,7 @@ namespace Desert::Editor
         // A card whose mesh has never been cooked still shows a PNG it has from a previous session:
         // ThumbnailFreshness::Judge treats unreadable stamps as no evidence of staleness, deliberately.
         const std::string cookedStr = CookPaths::CookedMesh( item.MeshPath, ".stmesh" ).generic_string();
-        const std::string pngPath   = ThumbnailCache::DiskPath( cookedStr );
+        const std::string pngPath   = ThumbnailKey::DiskPath( cookedStr );
 
         // Rendered preview already on disk, and still a picture OF this mesh? Show it. The freshness half
         // is not decoration: asking only whether the file exists is what let a mesh edited after its

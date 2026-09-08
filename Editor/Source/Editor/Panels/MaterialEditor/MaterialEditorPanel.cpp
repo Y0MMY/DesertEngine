@@ -9,6 +9,7 @@
 #include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Import/TextureDnD.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Editor/Widgets/ThumbnailKey.hpp>
 #include <Editor/Widgets/ThumbnailService.hpp>
 
 #include <Engine/Assets/AssetManager.hpp>
@@ -1955,7 +1956,7 @@ namespace Desert::Editor
         // stale the moment it is written), so a material saved shortly after its thumbnail was captured
         // would keep showing the old one for the rest of the session.
         std::error_code   ec;
-        const std::string png = ThumbnailCache::DiskPath( path.generic_string() );
+        const std::string png = ThumbnailKey::DiskPath( path.generic_string() );
         std::filesystem::remove( png, ec );
         ThumbnailService::Get().Invalidate( path.generic_string() );
         return true;
