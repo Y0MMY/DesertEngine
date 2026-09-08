@@ -52,6 +52,24 @@
 // white and every other surface in the box black — left rect mean 0.800, right rect mean 0.000. The
 // Roughness channel says the same thing the other way: left 0.125, right 0.783.
 //
+// THE FIX WAS THE ASSET, AND WHAT IT MOVED IS RECORDED HERE so the next person does not re-shoot it.
+// CB_Red.demat was restored to the shape of its sibling CB_Green.demat — same albedo, RoughnessFactor
+// 0.9, MetallicFactor dropped (StaticMeshPBR.shader declares its default as 0), MaterialId untouched.
+// Three scenes reference that asset and all three were shot before and after:
+//
+//   CornellDemo             11.949 % of pixels, max 227/255 — the left wall and what it bounces onto
+//   MAT_ProbeDeferredNoSlot 11.949 % of pixels, max 227/255 — the same box, same wall, intended
+//   DepthPrecisionProbe     18.044 % of pixels, max  11/255 — two quads lit almost entirely by a bright
+//                                                             sky, where mirror and diffuse nearly agree
+//
+// And the scenes that share the lighting path but not the asset, which must not have moved: MAT_Probe,
+// MAT_ProbeShadows and Clouds_Protocol all came back 0 differing pixels of 546260.
+//
+// Forward and deferred were checked BOTH before the fix (0.009 / 0.562 against the deferred 0.010 /
+// 0.563 — the asymmetry reproduced in both, so it was never a path divergence) and after it (0.326 /
+// 0.562 against 0.328 / 0.563). The residual two thousandths are the forward path's missing GI gather,
+// which it passes as vec3(0) by construction.
+//
 // WHAT IS DELIBERATELY NOT ASSERTED. The scene's OTHER light, CB_Sun, is a directional light whose
 // travel direction is normalize(0.6, -1, 0.2) — it is NOT on the symmetry plane, and it lights the
 // right wall's inner face at N·L = 0.507 while missing the left wall's entirely. That asymmetry is
