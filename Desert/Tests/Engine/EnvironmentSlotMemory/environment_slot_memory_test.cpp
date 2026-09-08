@@ -69,10 +69,9 @@ namespace
             ++Writes;
         }
 
-        const Common::UUID GetImageHash() const override
-        {
-            return Common::UUID{};
-        }
+        // GetImageHash() was overridden here until Г12 deleted the pure virtual: nothing asked a uniform
+        // for its image's hash, the descriptor cache keys off Image::GetHash() on the image itself. The
+        // fake had to answer it only because the base declared it.
 
         // Deliberately NOT nullptr to begin with: a test whose "cleared" answer is also its initial
         // answer proves nothing about clearing.
@@ -106,9 +105,9 @@ namespace
         void FlushUpdates() override
         {
         }
-        void ApplyPushConstants( Desert::Graphic::MaterialExecutor*, Desert::Graphic::GraphicsPipeline* ) override
-        {
-        }
+        // ApplyPushConstants was overridden here with an empty body until Г12 deleted the pure virtual.
+        // That is the argument for deleting it, stated by this file: the ONE production implementation
+        // was empty too, so the surface existed only to be satisfied — by the backend and by this fake.
 
         int CubeDescriptorWrites = 0;
     };
