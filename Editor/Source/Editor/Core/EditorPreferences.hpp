@@ -1,5 +1,7 @@
 #pragma once
 
+#include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -43,12 +45,13 @@ namespace Desert::Editor
     // (It skips the ONE member that is not a key of the file, UnknownKeys; PreferenceOwnership asserts
     // that the skip and what rfl::json::write actually emits still agree, so the exemption cannot widen.)
     //
-    // AND THIS IS THE ONLY PER-USER SETTINGS STORE. `~/.desertengine` holds four neighbours and not one of
+    // AND THIS IS THE ONLY PER-USER SETTINGS STORE. `~/.desertengine` holds three neighbours and not one of
     // them is an alternative to this struct: `projects.json` and `engines.json` are cross-process
-    // REGISTRIES shared with the launcher, `Layouts/*.ini` (and the working-directory `imgui.ini`) are
-    // opaque ImGui dock state that ImGui itself writes and parses, and `asset_favorites.txt` is user state
-    // that should have been fields here — it is filed as debt, not as precedent. A new per-user setting
-    // goes in this struct; a new per-user FILE is a conversation with the owner.
+    // REGISTRIES shared with the launcher, and `Layouts/*.ini` (with the working-directory `imgui.ini`) is
+    // opaque ImGui dock state that ImGui itself writes and parses. `asset_favorites.txt` was a fourth and
+    // was the one exception; К5 closed it — the pinned folders are `FavouriteFolders` below, the file is
+    // deleted by the migration that reads it, and there is no second per-user store left to point at. A new
+    // per-user setting goes in this struct; a new per-user FILE is a conversation with the owner.
     struct EditorPreferences
     {
         float CameraSpeed = 1.0f;
@@ -165,6 +168,35 @@ namespace Desert::Editor
         // expanded, so a fresh install behaves exactly like before this was persisted.
         std::vector<std::string> CollapsedComponents;
 
+        // --- Content browser ------------------------------------------------------------------------
+        // The folders the user pinned in the Assets browser. KEYED BY PROJECT — the key is the `Name` the
+        // project's `.deproj` states — and every entry is a path RELATIVE to that project's assets root
+        // ("." is the root itself).
+        //
+        // BOTH HALVES OF THAT REPLACE A DEFECT, and the defect was a whole separate file (К5). This list
+        // was `~/.desertengine/asset_favorites.txt`: one flat line per pin, no schema, no project, and the
+        // pin written as the ABSOLUTE path it happened to have on the machine that made it. Three things
+        // followed, and all three are gone with the shape:
+        //
+        //   * PATH AS IDENTITY. Moving a project — or cloning it into a worktree, which is how this
+        //     engine is developed — invalidated every pin silently, because the string named a place on a
+        //     disk rather than a folder in a project. The same defect had already been paid for twice, in
+        //     `.tex` (Ф2) and in scene files (Д2); a path relative to the assets root cannot carry it.
+        //   * NO PROJECT ANYWHERE. There was ONE list for every project this user had ever opened, and the
+        //     browser drew all of it: opening a second project showed the first one's folders in its
+        //     sidebar. The key is what makes a pin belong to something.
+        //   * NOBODY EVER REMOVED ANYTHING. The file only grew. Pins of a folder that no longer exists are
+        //     dropped by ToggleFavouriteFolder for the project being edited, and a project whose list
+        //     empties loses its key outright.
+        //
+        // WHAT THAT STILL DOES NOT CLEAN, stated rather than implied: the key of a project this user has
+        // DELETED survives, because a key is a name and this build cannot tell a deleted project from one
+        // on a drive that is not mounted — and guessing wrong destroys pins nobody can restore. The
+        // residue is a name and a few short strings in this user's own file. Two projects that share a
+        // `Name` share a list for the same reason: `Name` is the only identity a `.deproj` carries, and
+        // the alternative — the project's path — is the defect this field exists to remove.
+        std::map<std::string, std::vector<std::string>> FavouriteFolders;
+
         // --- EVERY OTHER KEY THE FILE HAPPENS TO CONTAIN ------------------------------------------
         // NOT A SETTING, AND NOT A KEY OF ITS OWN. rfl::ExtraFields is spread flat at this struct's own
         // level on write and captures every top-level key the fields above did not claim on read, so
@@ -201,6 +233,22 @@ namespace Desert::Editor
         static bool IsComponentCollapsed( const std::string& name );
         static void SetComponentCollapsed( const std::string& name, bool collapsed );
 
+        // The pinned folders OF THE PROJECT THAT IS OPEN, as ABSOLUTE paths — the form the content
+        // browser navigates and compares with. Empty when no project is open, which is a real answer and
+        // not a failure: a pin belongs to a project, so without one there is nothing to pin it to.
+        //
+        // THE PANEL NEVER SEES THE STORED FORM. Which project a pin belongs to and what it is relative to
+        // are decided here, in the file that owns the field, and nowhere else — the browser hands over the
+        // absolute path it already has and gets absolute paths back. That is the same rule the gizmo snap
+        // had to be given back after К6: one value, one place that knows its shape.
+        static std::vector<std::string> CurrentFavouriteFolders();
+        static bool                     IsFavouriteFolder( const std::string& absoluteFolder );
+        // Pins or unpins, and SAVES on the spot, exactly as the two list helpers above do and for the same
+        // reason — this is a single click in a context menu. A write that fails is named by Save() itself,
+        // with the file and the reason, and this session then holds the pin in memory only; that is why
+        // there is no third return convention here for one store.
+        static void ToggleFavouriteFolder( const std::string& absoluteFolder );
+
         // ~/.desertengine (created on demand); shared with the Project Hub's projects.json.
         static std::string ConfigDirectory();
 
@@ -226,6 +274,27 @@ namespace Desert::Editor
         // UnknownKeys above. A deletion is a decision, so it is spelled out here; it is never the
         // side effect of one binary saving before another.
         static std::vector<std::string> MigrateLoaded( EditorPreferences& p );
+
+        // THE OTHER MIGRATION, AND IT IS A DIFFERENT SHAPE BECAUSE IT COMES FROM A DIFFERENT FILE (К5).
+        // MigrateLoaded() raises editor.json's own stored values; this folds the retired
+        // `~/.desertengine/asset_favorites.txt` into FavouriteFolders. In: the lines that file held, the
+        // project they are being read for, and that project's assets root. Out: one line per thing it did,
+        // empty when there was nothing to do. Pure on the same terms as MigrateLoaded — no file, no
+        // globals, no logging — so the rules below are testable without a home directory:
+        //
+        //   * a line INSIDE `assetsRoot` becomes a path relative to it, appended in file order and never
+        //     duplicated (the legacy file could hold the same folder twice; nothing deduplicated it);
+        //   * a line OUTSIDE it is DROPPED AND NAMED. It is a folder of some other project, and this
+        //     build cannot say which: the file recorded no project, which is the defect being migrated
+        //     away from. Carrying it into the open project's list would be inventing an answer;
+        //   * `assetsRoot` itself becomes ".".
+        //
+        // §4 AND NOT A COMPATIBILITY PATH: it runs once, the caller then deletes the file, and no reader
+        // of the pinned folders ever looks at the old location again. Two stores for one value is what
+        // К5 was.
+        static std::vector<std::string> MigrateFavouritesFile( EditorPreferences& p, const std::string& project,
+                                                               const std::filesystem::path&    assetsRoot,
+                                                               const std::vector<std::string>& lines );
 
         // THE USER JUST CHANGED SOMETHING. Called by every control that edits this struct, at the moment
         // the edit finishes (ImGui::IsItemDeactivatedAfterEdit for a slider or a drag, the click for a

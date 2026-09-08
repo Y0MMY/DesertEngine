@@ -1649,6 +1649,157 @@ TEST( PreferenceOwnershipSource, NoSaveOfThePreferencesIsFencedByARestoredField 
                               "is not seeing the code it is meant to be judging";
 }
 
+// ---------------------------------------------------------------------------------------------------
+// 8. THE PINNED FOLDERS — A FILE THAT WAS OUTSIDE EVERY RULE THIS SUITE STATES (К5)
+// ---------------------------------------------------------------------------------------------------
+//
+// `~/.desertengine/asset_favorites.txt` was the content browser's list of pinned folders: flat lines, no
+// schema, ABSOLUTE paths, an `ofstream ... trunc` whose result nobody read, and ONE list shared by every
+// project the user had ever opened. Four defects, and the reason all four survived is that the file was
+// not in any census — the rule "a per-user value is a field of EditorPreferences" was stated by the
+// header above it and enforced only over the fields that were already there.
+//
+// What is asserted here is the migration and the two properties the new shape has and the file did not:
+// a pin belongs to a PROJECT, and it names a folder RELATIVE to that project rather than a place on this
+// machine's disk. Those are relations (desert-engine-verify §4) — the stored string and the assets root
+// have to agree, and the whole defect was that the string alone was taken as the answer.
+
+namespace
+{
+    // The assets root of an imaginary project, as a path. Nothing here touches the disk: the migration is
+    // pure and classifies lines lexically, which is what lets it judge a folder that was deleted years ago.
+    const std::filesystem::path kRootA = "/home/dev/ProjectA/Assets";
+    const std::filesystem::path kRootB = "/elsewhere/B/Content";
+} // namespace
+
+TEST( PreferenceOwnershipFavourites, TheLegacyFileFoldsIntoTheOpenProjectAndForeignLinesAreNamedNotGuessed )
+{
+    EditorPreferences p;
+
+    const std::vector<std::string> legacy = {
+         "/home/dev/ProjectA/Assets/Scenes",         // inside — migrates
+         "/home/dev/ProjectA/Assets/Textures/UI",    // inside, nested — migrates
+         "",                                         // the file's trailing newline
+         "/home/dev/SomeOtherProject/Assets/Meshes", // ANOTHER project's folder, and the file said so nowhere
+         "/home/dev/ProjectA/Assets/Scenes",         // the legacy file deduplicated nothing
+    };
+
+    const auto raised = EditorPreferences::MigrateFavouritesFile( p, "ProjectA", kRootA, legacy );
+
+    const std::vector<std::string> expected = { "Scenes", "Textures/UI" };
+    EXPECT_EQ( p.FavouriteFolders["ProjectA"], expected )
+         << "the folders inside the project did not arrive relative, in file order and deduplicated";
+
+    // THE FOREIGN LINE IS THE POINT OF THE TEST. Attributing it to the open project would be inventing the
+    // answer the retired file never recorded — and it would put a folder of somebody else's project in
+    // this one's sidebar, which is the defect being migrated away from, carried across by the migration.
+    EXPECT_EQ( std::count( p.FavouriteFolders["ProjectA"].begin(), p.FavouriteFolders["ProjectA"].end(),
+                           "../../SomeOtherProject/Assets/Meshes" ),
+               0 );
+
+    bool named = false;
+    for ( const std::string& line : raised )
+        named = named || line.find( "SomeOtherProject" ) != std::string::npos;
+    EXPECT_TRUE( named ) << "a dropped pin was not named; a migration that discards silently is §1.4's "
+                            "empty successful answer";
+}
+
+// THE RELATION THE ABSOLUTE PATH COULD NOT HOLD. One project, two places on disk — a clone, a worktree,
+// a machine with a different home — and the stored form must be the same, because it is a fact about the
+// project and not about the disk. With absolute paths the second column here was a different string and
+// every pin silently stopped matching.
+TEST( PreferenceOwnershipFavourites, TheSameFolderInTwoCheckoutsIsTheSameStoredPin )
+{
+    EditorPreferences here;
+    EditorPreferences there;
+
+    EditorPreferences::MigrateFavouritesFile( here, "P", kRootA, { kRootA.generic_string() + "/Scenes/Levels" } );
+    EditorPreferences::MigrateFavouritesFile( there, "P", kRootB, { kRootB.generic_string() + "/Scenes/Levels" } );
+
+    EXPECT_EQ( here.FavouriteFolders["P"], there.FavouriteFolders["P"] );
+    EXPECT_EQ( here.FavouriteFolders["P"], ( std::vector<std::string>{ "Scenes/Levels" } ) );
+}
+
+// The assets root itself is pinnable from the tree's own context menu, and "" is not a path. It round
+// trips as ".", which CurrentFavouriteFolders resolves back to the root rather than to `root/`.
+TEST( PreferenceOwnershipFavourites, TheAssetsRootItselfIsStorableAndIsNotAnEmptyString )
+{
+    EditorPreferences p;
+    EditorPreferences::MigrateFavouritesFile( p, "P", kRootA, { kRootA.generic_string() } );
+    EXPECT_EQ( p.FavouriteFolders["P"], ( std::vector<std::string>{ "." } ) );
+}
+
+// A key with nothing behind it is not "a project with no pins", it is residue — and residue accumulating
+// for ever was the fourth of the four defects. A file holding only another project's folders leaves none.
+TEST( PreferenceOwnershipFavourites, AFileWithNothingToMigrateLeavesNoKeyBehind )
+{
+    EditorPreferences p;
+    EditorPreferences::MigrateFavouritesFile( p, "P", kRootA, { "/somewhere/else/Assets/Scenes" } );
+    EXPECT_EQ( p.FavouriteFolders.count( "P" ), 0u );
+
+    EditorPreferences empty;
+    EXPECT_TRUE( EditorPreferences::MigrateFavouritesFile( empty, "P", kRootA, {} ).empty() );
+    EXPECT_EQ( empty.FavouriteFolders.count( "P" ), 0u );
+}
+
+// TWO PROJECTS, TWO LISTS, AND THE FILE IS THE THING THAT HAS TO KEEP THEM APART. The retired store had
+// one list for all of them, so opening a second project drew the first one's folders in its sidebar; this
+// asserts the property that replaced it, through the real file rather than in memory.
+TEST( PreferenceOwnershipFavourites, EachProjectsPinsSurviveARestartAndDoNotReachTheOther )
+{
+    FreshInstall();
+
+    EditorPreferences::Get().FavouriteFolders["Alpha"] = { "Scenes", "Textures/UI" };
+    EditorPreferences::Get().FavouriteFolders["Beta"]  = { "Meshes" };
+    ASSERT_TRUE( EditorPreferences::Save() );
+
+    EditorPreferences::Get() = EditorPreferences{};
+    EditorPreferences::Load();
+
+    EXPECT_EQ( EditorPreferences::Get().FavouriteFolders["Alpha"],
+               ( std::vector<std::string>{ "Scenes", "Textures/UI" } ) );
+    EXPECT_EQ( EditorPreferences::Get().FavouriteFolders["Beta"], ( std::vector<std::string>{ "Meshes" } ) );
+    EXPECT_EQ( EditorPreferences::Get().FavouriteFolders.size(), 2u )
+         << "the two projects' pins did not stay two lists";
+}
+
+// ONE PLACE COMPOSES `$HOME/.desertengine`, AND THE CONTENT BROWSER WAS THE THIRD.
+//
+// `FavoritesFile()` read `HOME` (and `USERPROFILE` on Windows) and joined the directory name itself — a
+// third statement of where this user's configuration lives, differing from the real one in the respect
+// that mattered: it did not create the directory, so the first pin of a fresh install was written into a
+// folder that might not exist. EditorPreferences::ConfigDirectory() is not a fourth: it forwards.
+//
+// The census is over the RAW text on purpose. The shared reader blanks string literals, and the literal
+// is the whole subject — a census run over stripped text here would be looking at nothing and would pass
+// whatever the tree did.
+TEST( PreferenceOwnershipFavourites, OnlyOnePlaceInTheEditorAndTheEngineComposesTheUserConfigDirectory )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    std::vector<std::string> composers;
+    for ( const char* tree :
+          { "Editor/Source", "Desert/Desert/Source", "Desert/Common/Source", "Runtime/Source" } )
+        for ( const auto& entry : std::filesystem::recursive_directory_iterator( root + tree ) )
+        {
+            if ( !entry.is_regular_file() )
+                continue;
+            const std::string ext = entry.path().extension().string();
+            if ( ext != ".cpp" && ext != ".hpp" )
+                continue;
+            if ( ReadWholeFile( entry.path() ).find( "\".desertengine\"" ) != std::string::npos )
+                composers.push_back( entry.path().filename().string() );
+        }
+
+    const std::vector<std::string> expected = { "ProjectContext.cpp" };
+    EXPECT_EQ( composers, expected )
+         << "the user config directory is composed somewhere other than ProjectContext::ConfigDirectory(). "
+            "A second copy is a directory that is not created, or a directory that moves in one place and "
+            "not the other; Tools/ProjectHub keeps its own only because it is a separate binary that links "
+            "no engine code at all.";
+}
+
 int main( int argc, char** argv )
 {
     // ~/.desertengine/editor.json is a real file in a real home directory, and this suite writes it. Point
