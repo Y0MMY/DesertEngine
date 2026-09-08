@@ -578,21 +578,25 @@ namespace
          { "Window", "IsWindowMinimized", "Desert/Desert/Source/Engine/Core/Window.hpp",
            "OWNER DECIDES: same surface." },
 
-         // ---- EDITOR INTERFACES WHOSE CALLER WAS NEVER WRITTEN ---------------------------------------
-
-         // ---- MATERIAL PROPERTY METADATA -------------------------------------------------------------
-         { "IProperty", "GetTypeTag", "Desert/Desert/Source/Engine/Graphic/Materials/Properties/TProperty.hpp",
-           "UNASSIGNED: the property type/editor-metadata surface, implemented by both property "
-           "templates and asked by nothing. Same family as the `Clone` М9 removed." },
-         { "IProperty", "GetEditorMeta", "Desert/Desert/Source/Engine/Graphic/Materials/Properties/TProperty.hpp",
-           "UNASSIGNED: same surface." },
-         { "IProperty", "SetEditorMeta", "Desert/Desert/Source/Engine/Graphic/Materials/Properties/TProperty.hpp",
-           "UNASSIGNED: same surface." },
-
-         // ---- ONE LEFTOVER ---------------------------------------------------------------------------
-         { "MeshAsset", "GetMaterialHandle", "Desert/Desert/Source/Engine/Assets/Mesh/MeshAsset.hpp",
-           "UNASSIGNED: the SINGULAR of a pair. Both mesh assets implement it, and every caller in the "
-           "engine and the editor uses the plural GetMaterialHandles() beside it." },
+         // ---- FOUR MORE WENT WITH Г12, AND BOTH REASONS ARE WORTH KEEPING ---------------------------
+         //
+         // IProperty::{GetTypeTag, GetEditorMeta, SetEditorMeta} left together with the enum and the
+         // struct they served, because they were never an unbuilt capability — they were a SECOND
+         // DESIGN for editor hints the engine already has and uses. The live mechanism is the
+         // reflection macro `PROPERTY( DisplayName(...), Category(...), Range(lo,hi) )`, authored
+         // beside the field it describes; colour is decided by the parameter's TYPE at the draw site,
+         // not by an `isColor` flag; and the material editor groups by the Category written in the
+         // shader's own Properties block. Keeping the struct was maintaining a competing source of
+         // truth for a value that already has one — a DEAD competing source, which is the worse kind,
+         // because it reads as the intended mechanism to whoever finds it first.
+         //
+         // MeshAsset::GetMaterialHandle — the SINGULAR of a pair — went with the two helpers that
+         // existed only to serve it: a shared bounds check and a NullMaterialHandle() constant.
+         // Deleting a guard deserves an argument rather than a shrug, so: all five callers of the
+         // plural accessor iterate it or take its size and NONE indexes with a bare `[i]`, and the
+         // loaders build exactly one handle per submesh from the same parsed data, so the two sizes
+         // agree BY CONSTRUCTION after any successful load. A guard against a state the constructor
+         // cannot produce, reached through a function nobody calls, is the appearance of safety.
     };
 
     std::string Key( const std::string& cls, const std::string& method )
@@ -753,7 +757,7 @@ TEST( PureVirtualCensus, TheNumberIsStatedSoAShrinkageIsVisible )
     // that was a design question is allowed to leave. Up is a regression; down is welcome, and this
     // line moves with it. The count is quoted because a per-row diff never says "there are four more
     // of these now".
-    EXPECT_EQ( std::size( k_Census ), 10u )
+    EXPECT_EQ( std::size( k_Census ), 6u )
          << "the number of pure virtuals implemented by everybody and called by nobody has changed";
 }
 

@@ -63,9 +63,10 @@ namespace Desert::Assets
         // `emplace_back`s one handle per submesh; without this clear a SECOND Load — which is exactly what
         // eviction plus EnsureLoaded produces, and what a hot reload would produce the day meshes get one
         // — leaves m_Submeshes.size() == N while m_MaterialAssetHandles.size() == 2N, with the STALE
-        // handles occupying indices [0,N). GetMaterialHandle(i) would then return the material assignment
-        // from before the reload, so a reload whose whole purpose is to pick up an edited file would
-        // silently keep the old bindings, and the vector would grow by N on every cycle.
+        // handles occupying indices [0,N). `GetMaterialHandles()` would then answer with a vector twice
+        // as long as the submesh list, whose first N entries are the material assignment from BEFORE the
+        // reload — so a reload whose whole purpose is to pick up an edited file would silently keep the
+        // old bindings, and the vector would grow by N on every cycle.
         m_MaterialAssetHandles.clear();
 
         m_Vertices.reserve( data.StaticVertices.size() );

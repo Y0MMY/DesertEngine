@@ -11,31 +11,22 @@ namespace Desert::Graphic
         Texture2D,  // void* image pointer — written to a Texture2DProperty
     };
 
-    // Runtime type tag so the editor can dispatch to the correct ImGui widget without RTTI.
-    enum class PropertyTypeTag
-    {
-        Float,
-        Vec2,
-        Vec3,
-        Vec4,
-        Bool,
-        Int,
-        Texture2D,
-        Unknown,
-    };
-
-    // Per-property editor hints.  All fields have defaults so only relevant ones need to be set.
-    struct PropertyEditorMeta
-    {
-        const char* displayName = nullptr;  // null = use IProperty::GetName()
-        const char* category    = nullptr;  // null = no category grouping
-        float       minVal      = 0.0f;
-        float       maxVal      = 1.0f;
-        float       step        = 0.01f;
-        bool        isColor     = false;    // render as ColorEdit instead of DragFloat
-        bool        isHidden    = false;    // skip in editor
-        bool        isReadOnly  = false;    // show but disable editing
-    };
+    // A `PropertyTypeTag` enum and a `PropertyEditorMeta` struct STOOD HERE, together with the three
+    // pure virtuals that served them (GetTypeTag, GetEditorMeta, SetEditorMeta) and a `m_Meta` member on
+    // both property templates. Г12 deleted all of it, and the reason is worth more than the deletion:
+    //
+    // this was not an unbuilt capability. It was a SECOND DESIGN for editor hints the engine already
+    // has and uses. `PropertyEditorMeta` carried displayName / category / minVal / maxVal — and the
+    // live mechanism is the reflection macro, `PROPERTY( DisplayName( ... ), Category( ... ),
+    // Range( lo, hi ) )`, authored beside the field it describes and read across the editor. Colour is
+    // decided by the parameter's TYPE at the draw site, not by an `isColor` flag. Category grouping in
+    // the material editor comes from the shader's own Properties block, which is where the parameter is
+    // declared.
+    //
+    // So keeping it was not "holding a feature in reserve", it was maintaining a competing source of
+    // truth for a value that already has one (contract §2, one source of truth per value) — and a dead
+    // one, which is the worst kind: it reads as the intended mechanism to anyone who finds it first.
+    // Nothing is filed as a follow-up, because there is nothing to build: the capability exists.
 
     class IProperty
     {
@@ -48,13 +39,9 @@ namespace Desert::Graphic
         virtual void             MarkClean()           = 0;
         virtual void             Reset()               = 0;
 
-        virtual PropertyKind    GetKind()                    const = 0;
-        virtual PropertyTypeTag GetTypeTag()                 const = 0;
-        virtual size_t          GetByteSize()                const = 0;
-        virtual void            CopyValueTo( void* out )     const = 0;
-
-        virtual const PropertyEditorMeta& GetEditorMeta()  const                     = 0;
-        virtual void                      SetEditorMeta( const PropertyEditorMeta& ) = 0;
+        virtual PropertyKind GetKind() const                = 0;
+        virtual size_t       GetByteSize() const            = 0;
+        virtual void         CopyValueTo( void* out ) const = 0;
     };
 
     // Base interface for objects that own typed properties (i.e. Material and its subclasses).
@@ -87,20 +74,6 @@ namespace Desert::Graphic
         void             MarkClean()           override { m_Dirty = false; }
         PropertyKind     GetKind()       const override { return PropertyKind::Value; }
         size_t           GetByteSize()   const override { return sizeof( T ); }
-
-        PropertyTypeTag GetTypeTag() const override
-        {
-            if constexpr ( std::is_same_v<T, float> )          return PropertyTypeTag::Float;
-            else if constexpr ( std::is_same_v<T, glm::vec2> ) return PropertyTypeTag::Vec2;
-            else if constexpr ( std::is_same_v<T, glm::vec3> ) return PropertyTypeTag::Vec3;
-            else if constexpr ( std::is_same_v<T, glm::vec4> ) return PropertyTypeTag::Vec4;
-            else if constexpr ( std::is_same_v<T, bool> )      return PropertyTypeTag::Bool;
-            else if constexpr ( std::is_same_v<T, int> )       return PropertyTypeTag::Int;
-            else                                                return PropertyTypeTag::Unknown;
-        }
-
-        const PropertyEditorMeta& GetEditorMeta() const override { return m_Meta; }
-        void SetEditorMeta( const PropertyEditorMeta& meta ) override { m_Meta = meta; }
 
         void CopyValueTo( void* out ) const override
         {
@@ -139,7 +112,6 @@ namespace Desert::Graphic
         std::string_view    m_ShaderName;
         T                   m_Value;
         T                   m_Default;
-        PropertyEditorMeta  m_Meta;
         // Start dirty so the default value is uploaded to the GPU on the first frame even when
         // Set() is called with the same value (equality check would skip it).
         bool                m_Dirty = true;
@@ -159,12 +131,11 @@ namespace Desert::Graphic
         std::string_view GetShaderName() const override { return m_ShaderName; }
         bool             IsDirty()       const override { return m_Dirty; }
         void             MarkClean()           override { m_Dirty = false; }
-        PropertyKind     GetKind()       const override { return PropertyKind::Texture2D; }
-        PropertyTypeTag  GetTypeTag()    const override { return PropertyTypeTag::Texture2D; }
+        PropertyKind     GetKind() const override
+        {
+            return PropertyKind::Texture2D;
+        }
         size_t           GetByteSize()   const override { return sizeof( void* ); }
-
-        const PropertyEditorMeta& GetEditorMeta() const override { return m_Meta; }
-        void SetEditorMeta( const PropertyEditorMeta& meta ) override { m_Meta = meta; }
 
         void CopyValueTo( void* out ) const override
         {
@@ -183,7 +154,6 @@ namespace Desert::Graphic
     private:
         std::string_view    m_Name;
         std::string_view    m_ShaderName;
-        PropertyEditorMeta  m_Meta;
         void*               m_Value = nullptr;
         bool                m_Dirty = false;
     };

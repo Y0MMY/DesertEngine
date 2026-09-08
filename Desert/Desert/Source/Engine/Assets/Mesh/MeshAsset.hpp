@@ -20,14 +20,24 @@ namespace Desert::Assets
             return AssetTypeID::Mesh;
         }
 
-        // The material a submesh names, or the NULL handle when there is none — which is also what an
-        // out-of-range index answers, loudly. Both implementations used to `return m_MaterialAssetHandles[
-        // submeshIndex ]` with no bound at all, and one of them never populated the vector, so the read was
-        // out of bounds every time. `MeshAsset::NullMaterialHandle()` is the value both refusals return, so
-        // "no material" has one spelling.
-        virtual const Common::UUID&              GetMaterialHandle( const uint32_t submeshIndex ) const = 0;
-        virtual const std::vector<Common::UUID>& GetMaterialHandles() const                             = 0;
-        virtual bool                             IsSkinned() const                                      = 0;
+        // A SINGULAR `GetMaterialHandle( submeshIndex )` STOOD BESIDE THIS ONE and Г12 removed it, along
+        // with the two helpers that existed only to serve it: a shared bounds check and a
+        // `NullMaterialHandle()` constant. All three had zero callers; every caller in the engine and the
+        // editor uses the plural below.
+        //
+        // The check is worth a sentence, because deleting a guard deserves an argument rather than a
+        // shrug. It was added after a real defect — both implementations indexed the vector with no bound
+        // and one never populated it — and its error path named the mesh, the index and the size. But two
+        // facts make it unreachable rather than merely unused: all five callers of the plural accessor
+        // iterate it or take its size, none indexes with a bare `[i]`; and the loaders build exactly one
+        // handle per submesh from the same parsed data, so the two sizes agree BY CONSTRUCTION after any
+        // successful load. A guard against a state the constructor cannot produce, reached through a
+        // function nobody calls, is not safety — it is the appearance of it.
+        //
+        // If a per-index accessor is ever wanted again, it needs that bounds check back: the reason it
+        // was written has not stopped being true, only stopped being reachable.
+        virtual const std::vector<Common::UUID>& GetMaterialHandles() const = 0;
+        virtual bool                             IsSkinned() const          = 0;
 
         // THE DRAWABLE PARTS OF THIS MESH — on the base, because the one thing every caller of the mesh
         // services needs to know about a mesh asset is how many pieces it has, and until now that question
@@ -43,31 +53,6 @@ namespace Desert::Assets
         {
             static const std::vector<MorphTarget> kEmpty;
             return kEmpty;
-        }
-
-        /// The one value that means "this submesh names no material". A reference, because
-        /// GetMaterialHandle returns one and a refusal has to be able to.
-        static const Common::UUID& NullMaterialHandle()
-        {
-            static const Common::UUID kNone = Common::UUID::Null();
-            return kNone;
-        }
-
-        /// The bounds check both implementations share, so a second copy cannot disagree with the first.
-        /// Names the mesh, the index and the size — a bare null would be indistinguishable from a submesh
-        /// that genuinely has no material, which is §1.4's rule applied to a lookup.
-        const Common::UUID& MaterialHandleAt( const std::vector<Common::UUID>& handles,
-                                              const uint32_t                   submeshIndex ) const
-        {
-            if ( submeshIndex < handles.size() )
-                return handles[submeshIndex];
-
-            LOG_ERROR( "[Mesh] '{}' was asked for the material of submesh {} and carries {} material "
-                       "handle(s). The submesh draws with the default material. This means the mesh's "
-                       "submeshes and its material list disagree — usually a mesh cooked before the "
-                       "importer wrote per-submesh materials; re-cook it (Assets > Rebuild Cooked Assets).",
-                       m_Metadata.Filepath.string(), submeshIndex, handles.size() );
-            return NullMaterialHandle();
         }
     };
 

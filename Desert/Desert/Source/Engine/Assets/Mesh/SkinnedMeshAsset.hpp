@@ -40,11 +40,6 @@ namespace Desert::Assets
             return m_Indices;
         }
 
-        virtual const Common::UUID& GetMaterialHandle( const uint32_t submeshIndex ) const override
-        {
-            return MaterialHandleAt( m_MaterialAssetHandles, submeshIndex );
-        }
-
         virtual const std::vector<Common::UUID>& GetMaterialHandles() const override
         {
             return m_MaterialAssetHandles;

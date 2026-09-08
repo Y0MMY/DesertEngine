@@ -100,10 +100,16 @@ namespace Desert::Assets
             submesh.Transform    = s.Transform;
             submesh.BoundingBox  = s.BoundingBox;
 
-            // NEVER FILLED HERE UNTIL NOW, while `GetMaterialHandle( i )` indexes it — so every call on a
-            // skinned mesh was an out-of-bounds read of an EMPTY vector. StaticMeshAsset::Load has always
-            // had this line; the skinned path simply never grew it, and the two classes implement the same
-            // pure virtual. Found while giving Unload a caller: Unload cleared a vector Load never wrote.
+            // NEVER FILLED HERE UNTIL Д19, while a per-index accessor indexed it — so every material
+            // lookup on a skinned mesh was an out-of-bounds read of an EMPTY vector. StaticMeshAsset::Load
+            // has always had this line; the skinned path simply never grew it, and the two classes
+            // implement the same pure virtual. Found while giving Unload a caller: Unload cleared a vector
+            // Load never wrote.
+            //
+            // The per-index accessor itself is gone (Г12 — it had no callers), so this line's job is now
+            // the plural `GetMaterialHandles()`: it must answer with one handle per submesh, and it can
+            // only do that if this loop writes one. The emptiness that was a crash is now a silence, which
+            // is why the line still matters.
             m_MaterialAssetHandles.emplace_back( s.MaterialHandle );
             m_Submeshes.emplace_back( std::move( submesh ) );
         }
