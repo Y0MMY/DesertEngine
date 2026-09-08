@@ -392,7 +392,11 @@ namespace Desert::Migration
             }
             if ( report.ScriptRootRaised )
             {
-                out << " scene v" << Desert::Migration::kSceneVersionDebugView << "->v"
+                // v15, not the previous PRINTED step (v13): 14 and 15 are rows of kRetiredKeys rather
+                // than steps of their own, so the last line above this one names 13 and a file arriving
+                // here is at 15. Printing the previous printed number would report a transition no file
+                // made — the same wrong-transition trap the retired-keys line below documents.
+                out << " scene v" << Desert::Migration::kSceneVersionMachineQuality << "->v"
                     << Desert::Migration::kSceneVersionScriptRoot << " (";
                 if ( report.ScriptRoot.Slots > 0 )
                     out << report.ScriptRoot.Slots << " script reference(s) root-tagged on "
