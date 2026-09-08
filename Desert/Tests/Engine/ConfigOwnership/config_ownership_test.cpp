@@ -341,9 +341,15 @@ namespace
          { "DefaultScene", Owner::Project, kProjectContext },
          { "Description", Owner::Project, kHubProjects },
 
-         // MISPLACED — see kKnownMisplaced. The build that last wrote this descriptor is a fact about a
-         // MACHINE, recorded into a file the whole team shares and git tracks.
-         { "EngineVersion", Owner::Machine, kHubMain },
+         // K4, CLOSED: this is a Project fact now, not a Machine one. It used to be stamped with
+         // Common::Version::Full() — this machine's commit hash and `.dirty` flag — on every
+         // ProjectContext::Save(), i.e. whenever anybody picked a startup scene, into a file git tracks.
+         // The engine no longer writes it at all; the launcher writes it once, at creation, and it means
+         // THE ENGINE THIS PROJECT WAS CREATED WITH. That is stable, it is the same for everybody who
+         // opens the project, and it is exactly what a .deproj is for.
+         // The consumer is the launcher's project screen, which DRAWS it; Projects.cpp is where it is
+         // written, at creation, and the census names readers.
+         { "EngineVersion", Owner::Project, kHubMain },
     };
 
     // ------------------------------------------------------------------------------------------------
@@ -481,17 +487,17 @@ namespace
          { "<Name>.desce (Settings)", "CloudQualityTier", "К3",
            "cloud march budget; High reproduces the calibrated constants to the digit" },
 
-         // ---- К4 (proposed by К1, renumber if taken): a machine fact in a tracked team file ---------
-         // ProjectContext::Save() stamps Common::Version::Full() — which carries the commit hash and a
-         // `.dirty` suffix — on every write, and the only trigger is the Build Settings startup-scene
-         // combo, which calls SetDefaultScene with no equality guard. So re-picking the scene that is
-         // already selected rewrites a git-tracked file with a value that identifies one developer's
-         // working tree. The field has zero functional readers: the compatibility check its own header
-         // cites runs against Common::Version::CommitCount(), not against this string. К4 decides between
-         // deleting it and moving provenance somewhere untracked.
-         { "<Name>.deproj", "EngineVersion", "К4",
-           "the build that last wrote the descriptor is a fact about a machine, stamped into a file git "
-           "tracks and everyone shares" },
+         // ---- К4: CLOSED by К11, and the row is gone rather than reworded -------------------------
+         // It read: ProjectContext::Save() stamps Common::Version::Full() — the commit hash and a
+         // `.dirty` suffix — into a git-tracked file, triggered by the Build Settings startup-scene
+         // combo, with zero functional readers (the compatibility check its own header cited runs
+         // against Common::Version::CommitCount()).
+         //
+         // The engine no longer writes the field. It is now written once, by the launcher, at creation,
+         // and means THE ENGINE THE PROJECT WAS CREATED WITH — a Project fact, stable, shared, and
+         // correctly placed by the §6 procedure. It is a normal Project row above. Deleting the field
+         // instead was considered and refused: it is a real answer to "which version was this made in",
+         // and reinstating it later costs more than keeping it true.
     };
 
     // ------------------------------------------------------------------------------------------------
@@ -844,9 +850,10 @@ TEST( ConfigOwnership, TheKnownMisplacedFieldsAreExactlyThese )
          << "a field whose kind does not match its file is not in the debt register, or the register names "
             "one that has since been moved. Both are edits somebody has to see.";
 
-    // Six today: five for К3, one for К4. This number going UP without a task name is what the next
-    // assertion refuses.
-    EXPECT_EQ( registered.size(), 6u );
+    // Five today, all К3. It was six until К11 closed К4 — `.deproj::EngineVersion` stopped being a
+    // machine fact when the engine stopped stamping it, so the row is gone rather than reworded. This
+    // number going UP without a task name is what the next assertion refuses.
+    EXPECT_EQ( registered.size(), 5u );
 }
 
 // A debt entry with no owner is a note, and a note nobody owns is what this whole subject was made of
@@ -990,11 +997,13 @@ TEST( ConfigOwnershipCorpus, NoSceneOnDiskStatesASettingOfAnotherFilesKind )
     }
 }
 
-// The `.deproj` this repository ships is tracked by git, and it currently states three keys - none of them
-// machine-specific. The moment anybody touches Build Settings -> Startup scene, ProjectContext::Save()
-// rewrites it in full and stamps EngineVersion with this machine's commit hash (and `.dirty`, if the tree
-// is). This is the tripwire for that event: it is green today and goes red on the commit that lets one
-// developer's build identity into a shared file. К4 owns the fix.
+// The `.deproj` this repository ships is tracked by git, and it states no machine-specific key.
+//
+// The event it was built to catch has been removed rather than merely watched: ProjectContext::Save()
+// used to stamp EngineVersion with this machine's commit hash (and `.dirty`) on every write, triggered by
+// Build Settings -> Startup scene, and К11 stopped it. The tripwire stays because the census is what makes
+// it general — any FUTURE field declared Machine in the .deproj census reddens this the moment the tracked
+// descriptor states it, and that is worth keeping whether or not a Machine row exists today.
 TEST( ConfigOwnershipCorpus, TheTrackedProjectDescriptorStatesNoMachineSpecificKey )
 {
     const std::string root = RepoRoot();

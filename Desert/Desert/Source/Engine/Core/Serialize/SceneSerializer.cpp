@@ -5,6 +5,7 @@
 #include <Engine/Core/Serialize/ComponentRegistry.hpp>
 #include <Engine/Core/Serialize/EntitySerializer.hpp>
 #include <Engine/Core/Serialize/SceneFormat.hpp>
+#include <Engine/Core/Serialize/ForeignKeys.hpp>
 #include <Engine/Core/Serialize/SceneStitchRules.hpp>
 #include <Engine/Runtime/Factory/PrefabFactory.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
@@ -15,10 +16,39 @@
 #include <Common/Core/Constants.hpp>
 #include <Common/Core/Units.hpp>
 #include <rflcpp/rfl/json.hpp>
+#include <map>
+#include <memory>
 #include <regex>
+#include <unordered_set>
 
 namespace Desert::Core
 {
+    namespace
+    {
+        // "Is this key one an ENTITY RECORD's writer states whenever it has one?" — the meta members
+        // EntitySerializer fills in, plus every component key the registry holds.
+        //
+        // It is derived from the same two tables the writer enumerates and is not a list: the meta
+        // members come out of rfl::fields<EntityData>() (which is what rfl::json writes them from) and
+        // the component keys out of ComponentRegistry itself. A third statement of either would be the
+        // fork this whole change exists to remove.
+        Serialize::KeyIsOurs EntityRecordKeyIsOurs()
+        {
+            auto names = std::make_shared<std::unordered_set<std::string>>();
+            for ( const auto& field : rfl::fields<Assets::EntityData>() )
+                names->insert( std::string( field.name() ) );
+            for ( const auto& serializer : Serialize::ComponentRegistry::Get().All() )
+                names->insert( serializer.Key );
+            return [names]( const std::string& key ) { return names->count( key ) != 0; };
+        }
+
+        Serialize::KeyIsOurs NamesIn( const std::vector<std::string>& names )
+        {
+            auto set = std::make_shared<std::unordered_set<std::string>>( names.begin(), names.end() );
+            return [set]( const std::string& key ) { return set->count( key ) != 0; };
+        }
+    } // namespace
+
     SceneSerializer::SceneSerializer( const Scene* scene, const Assets::AssetManager* assetManager )
          : m_Scene( (Scene*)scene ), m_AssetManager( (Assets::AssetManager*)assetManager )
     {
@@ -74,7 +104,35 @@ namespace Desert::Core
                  rfl::Generic( Reflection::SerializeReflected( *st, &m_Scene->GetSettings(), &resolver ) );
         }
 
-        return rfl::json::write( scene );
+        // WHAT THIS BUILD KNOWS, MERGED ONTO WHAT THE FILE SAID. Everything above enumerates a
+        // REGISTRY — SceneSettings' 51 reflected fields, ComponentRegistry's 45 keys — so up to this
+        // line a key that is in the file and not in a registry has simply ceased to exist. The merge
+        // is what makes the enumeration go by the FILE as well: this build's answer wins for every key
+        // it states, and every other key the file carried is kept where it was.
+        //
+        // A scene that was never loaded from a file has an empty document and the merge is the
+        // identity, so File → New costs nothing.
+        const auto& source = m_Scene->GetLoadedDocument();
+        if ( source.empty() )
+            return rfl::json::write( scene );
+
+        auto written = rfl::json::read<rfl::Generic>( rfl::json::write( scene ) );
+        if ( !written.has_value() )
+        {
+            // Cannot happen through a parser that has just produced the text — but a silent fallback
+            // here would be the whole defect back again, so it is named rather than assumed away.
+            LOG_ERROR( "[SceneSerializer] '{0}': the scene this build wrote could not be re-read as a "
+                       "tree, so the keys the file carries that this build does not declare could not "
+                       "be merged back in. THEY ARE ABOUT TO BE LOST.",
+                       m_Scene->GetSceneName() );
+            return rfl::json::write( scene );
+        }
+        const auto asObject = written.value().to_object();
+        if ( !asObject.has_value() )
+            return rfl::json::write( scene );
+
+        return rfl::json::write(
+             Serialize::MergeSceneDocument( asObject.value(), source, EntityRecordKeyIsOurs() ) );
     }
 
     Common::BoolResultStr SceneSerializer::DeserializeFromJson( const std::string& json,
@@ -107,6 +165,63 @@ namespace Desert::Core
         const SceneSerialized scene = loadable.ExtractValue();
 
         LOG_INFO( "Loading scene: {0}", scene.SceneName );
+
+        // THE FILE, KEPT AS IT WAS PARSED, and every key in it this build cannot name, SAID OUT LOUD.
+        //
+        // The two halves are one decision. Preserving without naming is what UE does — an unknown
+        // property is skipped by its own byte length with no log at any verbosity — and the price is
+        // that a typo, a deleted field and a genuine schema divergence are indistinguishable at
+        // runtime. Naming without preserving is the defect. So: the data survives, and the developer
+        // hears about it.
+        //
+        // GROUPED, because a key on forty entities is one finding and not forty lines: the count is by
+        // key NAME across the whole file, and the load says it once.
+        //
+        // Component payload INTERIORS are not walked. Each level of a .desce answers to a different
+        // registry, and the key → reflected-type map for component blocks lives in ComponentRegistry's
+        // custom serializers rather than as data — so a foreign key inside a light's block is
+        // PRESERVED by the merge on save but is not named here. That is a gap in the diagnostic, not
+        // in the guarantee, and it is written down rather than left to be discovered.
+        {
+            std::map<std::string, int> foreign;
+            if ( const auto document = rfl::json::read<rfl::Generic>( json ); document.has_value() )
+                if ( const auto object = document.value().to_object(); object.has_value() )
+                {
+                    m_Scene->SetLoadedDocument( object.value() );
+
+                    std::vector<std::string> topLevel;
+                    for ( const auto& field : rfl::fields<SceneSerialized>() )
+                        topLevel.push_back( std::string( field.name() ) );
+                    Serialize::CountForeignKeysAtLevel( object.value(), NamesIn( topLevel ), foreign );
+
+                    if ( const auto settings = object.value().get( "Settings" ); settings.has_value() )
+                        if ( const auto block = settings.value().to_object(); block.has_value() )
+                            if ( const auto* st = Reflection::ReflectionRegistry::Get().Find( "SceneSettings" ) )
+                            {
+                                std::vector<std::string> fields;
+                                for ( const auto& field : st->Fields )
+                                    fields.push_back( field.Name );
+                                Serialize::CountForeignKeysAtLevel( block.value(), NamesIn( fields ), foreign );
+                            }
+
+                    if ( const auto entities = object.value().get( "Entities" ); entities.has_value() )
+                        if ( const auto array = entities.value().to_array(); array.has_value() )
+                        {
+                            const auto ours = EntityRecordKeyIsOurs();
+                            for ( const auto& record : array.value() )
+                                if ( const auto fields = record.to_object(); fields.has_value() )
+                                    Serialize::CountForeignKeysAtLevel( fields.value(), ours, foreign );
+                        }
+                }
+
+            if ( const std::string named = Serialize::DescribeForeignKeys( foreign ); !named.empty() )
+                LOG_WARN( "[SceneSerializer] '{0}' states {1} key(s) this build does not declare: {2}. "
+                          "They are KEPT — the next save writes them back untouched — but nothing in "
+                          "this build reads them. If one is a typo it will never take effect; if one "
+                          "was retired on purpose, retire it in Tools/SceneMigrator so the files stop "
+                          "carrying it.",
+                          scene.SceneName, foreign.size(), named );
+        }
 
         // Restore the scene name (was only logged before — so a renamed+saved scene reverted on load).
         if ( !scene.SceneName.empty() )

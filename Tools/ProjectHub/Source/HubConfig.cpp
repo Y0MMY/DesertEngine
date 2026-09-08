@@ -62,11 +62,26 @@ namespace Hub
                                                                 Common::Project::ReadProjectsRegistry );
     }
 
-    Common::BoolResultStr SaveProjects( const std::string&                       configDirectory,
-                                        const Common::Project::ProjectsRegistry& registry )
+    Common::ResultStr<Common::Project::ProjectsRegistry>
+    MutateProjects( const std::string&                                               configDirectory,
+                    const std::function<void( Common::Project::ProjectsRegistry& )>& apply )
     {
-        return WriteTextFile( ProjectsRegistryFile( configDirectory ),
-                              Common::Project::WriteProjectsRegistry( registry ) );
+        // The read is HERE, immediately before the write, and not at startup — see the header for
+        // what the wide window costs. A file that exists but does not parse stops the write: the
+        // caller is told why, and every project already in the registry survives.
+        auto onDisk = LoadProjects( configDirectory );
+        if ( !onDisk.IsSuccess() )
+            return Common::MakeError<Common::Project::ProjectsRegistry>( onDisk.GetError() );
+
+        Common::Project::ProjectsRegistry merged = onDisk.ExtractValue();
+        apply( merged );
+
+        if ( const auto written = WriteTextFile( ProjectsRegistryFile( configDirectory ),
+                                                 Common::Project::WriteProjectsRegistry( merged ) );
+             !written.IsSuccess() )
+            return Common::MakeError<Common::Project::ProjectsRegistry>( written.GetError() );
+
+        return Common::MakeSuccess( std::move( merged ) );
     }
 
     Common::ResultStr<Common::Engine::EngineRegistry> LoadEngines( const std::string& configDirectory )

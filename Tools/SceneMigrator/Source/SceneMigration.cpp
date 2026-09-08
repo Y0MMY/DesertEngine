@@ -1395,6 +1395,79 @@ namespace Desert::Migration
         return report;
     }
 
+    RetiredKeysMigrationReport MigrateRetiredKeysV13ToV14( std::optional<rfl::Generic>&     settings,
+                                                           std::vector<Assets::EntityData>& entities )
+    {
+        RetiredKeysMigrationReport report;
+
+        // One block, one pass: rebuild it without the rows that name it. Rebuilt rather than erased in
+        // place because rfl::Object is an ordered vector of pairs with no erase(), and rebuilding also
+        // keeps the order of everything else — which matters now that a scene read and written back
+        // unchanged is expected to be byte-identical.
+        const auto strip = [&report]( rfl::Generic::Object fields, const char* block ) -> rfl::Generic::Object
+        {
+            rfl::Generic::Object kept;
+            for ( const auto& [key, value] : fields )
+            {
+                const RetiredKey* row = nullptr;
+                for ( const RetiredKey& candidate : kRetiredKeys )
+                    if ( key == candidate.Key && std::string( block ) == candidate.Block )
+                    {
+                        row = &candidate;
+                        break;
+                    }
+
+                if ( row == nullptr )
+                {
+                    kept[key] = value;
+                    continue;
+                }
+
+                ++report.KeysRemoved;
+                report.RemovedNames.push_back( std::string( block ) + "." + key + "=" + Describe( value ) + " (" +
+                                               row->Why + ")" );
+            }
+            return kept;
+        };
+
+        if ( settings.has_value() )
+        {
+            const auto fields = settings.value().to_object();
+            if ( !fields.has_value() )
+            {
+                LOG_WARN( "[SceneMigration] the Settings block is {0}, not an object - the retired keys "
+                          "could not be removed and stay in the file",
+                          Describe( settings.value() ) );
+            }
+            else
+            {
+                settings = rfl::Generic( strip( fields.value(), "Settings" ) );
+            }
+        }
+
+        // Component payloads. A row whose Block is not "Settings" names a field inside that component on
+        // every entity carrying one; with today's single row this loop finds nothing, and it exists so
+        // that the NEXT retirement does not have to invent a second mechanism.
+        for ( Assets::EntityData& entity : entities )
+        {
+            for ( const auto& [componentKey, payload] : entity.Components )
+            {
+                const bool anyRowNamesThisBlock =
+                     std::any_of( std::begin( kRetiredKeys ), std::end( kRetiredKeys ),
+                                  [&componentKey]( const RetiredKey& row ) { return componentKey == row.Block; } );
+                if ( !anyRowNamesThisBlock )
+                    continue;
+
+                const auto fields = payload.to_object();
+                if ( !fields.has_value() )
+                    continue;
+                entity.Components[componentKey] = rfl::Generic( strip( fields.value(), componentKey.c_str() ) );
+            }
+        }
+
+        return report;
+    }
+
     CloudMaterialMigrationReport MigrateCloudMaterialV11ToV12( std::vector<Assets::EntityData>& entities,
                                                                const std::string&               sceneName )
     {
@@ -1815,6 +1888,15 @@ namespace Desert::Migration
         {
             report.DebugViewRaised = true;
             report.DebugView       = MigrateDebugViewV12ToV13( scene.Settings );
+        }
+
+        // LAST, and it has to be: every step above may WRITE keys, and this one is the statement of which
+        // keys must not be in the finished file. Running it earlier would let a later step reintroduce a
+        // retired name and leave the tool reporting a removal that did not survive its own run.
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionRetiredKeys )
+        {
+            report.RetiredKeysRaised = true;
+            report.RetiredKeys       = MigrateRetiredKeysV13ToV14( scene.Settings, scene.Entities );
         }
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,

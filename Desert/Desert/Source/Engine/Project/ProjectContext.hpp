@@ -23,9 +23,10 @@ namespace Desert::Project
     // The struct's field list is the format and is defined once, in the desert-shared submodule; the
     // three-question procedure that decides where a NEW field goes, and the census that goes red when one
     // lands in the wrong file, are in Desert/Tests/Engine/ConfigOwnership. That suite also holds a tripwire
-    // on the .deproj this repository tracks: `EngineVersion` is a fact about a MACHINE (Save() stamps
-    // Common::Version::Full(), commit hash and `.dirty` included) written into a file the whole team shares,
-    // and it is registered there as debt with the task that owns moving it.
+    // on the .deproj this repository tracks: any field the census calls a MACHINE fact reddens it the
+    // moment the shared descriptor states one. `EngineVersion` used to be exactly that — Save() stamped
+    // Common::Version::Full(), commit hash and `.dirty` included — until К11 stopped the engine writing it;
+    // it is written once, by the launcher, at creation, and means the engine the project was created with.
     using ProjectFile = Common::Project::ProjectFile;
 
     class ProjectContext final
@@ -68,13 +69,30 @@ namespace Desert::Project
         // Recent projects (most recent first) from <config>/projects.json (shared with the Project
         // Hub). The whole registry, not a list of paths: each entry carries the LastOpened the
         // launcher draws its relative time from, and RegisterRecent has to write the entries back.
-        static Common::Project::ProjectsRegistry RecentProjects();
+        //
+        // A REFUSAL AND AN EMPTY LIST ARE DIFFERENT ANSWERS (DC §1.4), and this used to return the
+        // same value for both. A machine with no registry yet has no projects; a registry that
+        // exists and does not parse has all of them, and the caller below WRITES what it gets back
+        // — so collapsing the two turned one unparseable byte into "every project you ever opened
+        // is gone". Absent file = an empty registry, successfully. Anything else = the reason.
+        //
+        // The config directory is an ARGUMENT, on the same terms as EngineRegistration's: it is what
+        // lets a suite point this at a temp folder instead of at the developer's own ~/.desertengine,
+        // and without it the two-writer protocol below would be reachable by no test at all.
+        [[nodiscard]] static Common::ResultStr<Common::Project::ProjectsRegistry>
+        RecentProjects( const std::string& configDirectory );
+
+        // Files `deprojPath` at the top of the registry in `configDirectory` — the ENGINE's half of a
+        // file two programs write (Tools/ProjectHub is the other). Public because it is one half of a
+        // cross-process protocol and a test has to be able to play the other half.
+        //
+        // READ-MODIFY-WRITE: the registry is re-read here, immediately before the write, never held
+        // from earlier. A registry that cannot be read is NOT overwritten — the reason is logged and
+        // the file is left exactly as it is.
+        static void RegisterRecent( const std::string& configDirectory, const std::string& deprojPath );
 
         // ~/.desertengine (created on demand) — user-level config shared by the tools (projects.json,
         // the editor's editor.json).
         static std::string ConfigDirectory();
-
-    private:
-        static void RegisterRecent( const std::string& deprojPath );
     };
 } // namespace Desert::Project

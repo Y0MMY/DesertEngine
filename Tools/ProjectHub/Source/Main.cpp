@@ -418,12 +418,26 @@ namespace
 
     // ────────────────────────────────────────────────────────────── actions
 
-    void PersistRegistry( HubState& st )
+    // Every change this launcher makes to the shared registry goes through here, as an INTENT
+    // applied to the file's current contents — never as a flush of `st.Registry`, which is a
+    // snapshot the Editor has been writing over ever since this window opened (Hub::MutateProjects).
+    // On success `st.Registry` becomes the MERGED registry, so the screen shows what is actually on
+    // disk, including whatever the engine filed while the user was looking at it.
+    // The reason comes back rather than being posted here: two of the three callers have something
+    // to add about what the failure MEANS for the action they were in the middle of, and one message
+    // written over another is how a strip ends up saying the less useful of the two.
+    Common::BoolResultStr ApplyToRegistry( HubState&                                                        st,
+                                           const std::function<void( Common::Project::ProjectsRegistry& )>& apply )
     {
-        if ( const auto saved = Hub::SaveProjects( st.ConfigDirectory, st.Registry ); !saved.IsSuccess() )
-            st.SetError( "Could not update " + Hub::ProjectsRegistryFile( st.ConfigDirectory ) + ": " +
-                         saved.GetError() );
+        auto merged = Hub::MutateProjects( st.ConfigDirectory, apply );
+        if ( !merged.IsSuccess() )
+        {
+            st.ResolveEntries(); // the grid keeps showing the registry it already had — nothing was written
+            return Common::MakeError( Hub::ProjectsRegistryFile( st.ConfigDirectory ) + ": " + merged.GetError() );
+        }
+        st.Registry = merged.ExtractValue();
         st.ResolveEntries();
+        return Common::MakeSuccess( true );
     }
 
     void OpenProject( HubState& st, const Hub::ProjectEntry& entry )
@@ -452,14 +466,15 @@ namespace
             return;
         }
 
-        Common::Project::PromoteRecent( st.Registry, entry.Path, Common::Project::UnixNow() );
-        if ( const auto saved = Hub::SaveProjects( st.ConfigDirectory, st.Registry ); !saved.IsSuccess() )
+        const std::string path = entry.Path;
+        if ( const auto recorded = ApplyToRegistry(
+                  st, [&path]( Common::Project::ProjectsRegistry& registry )
+                  { Common::Project::PromoteRecent( registry, path, Common::Project::UnixNow() ); } );
+             !recorded.IsSuccess() )
         {
             // The Editor IS starting, so this must not read as a failed open — but the launcher
             // stays up instead of closing over an error nobody would ever see.
-            st.SetError( "The Editor is starting, but " + Hub::ProjectsRegistryFile( st.ConfigDirectory ) +
-                         " could not be updated: " + saved.GetError() );
-            st.ResolveEntries();
+            st.SetError( "The Editor is starting, but " + recorded.GetError() );
             return;
         }
         glfwSetWindowShouldClose( st.Window, GLFW_TRUE ); // the launcher's job is done
@@ -476,12 +491,44 @@ namespace
     {
         if ( index < 0 || index >= static_cast<int>( st.Registry.Projects.size() ) )
             return;
-        st.Registry.Projects.erase( st.Registry.Projects.begin() + index );
-        if ( st.Selected == index )
-            st.Selected = -1;
-        else if ( st.Selected > index )
-            --st.Selected;
-        PersistRegistry( st );
+
+        // BY PATH, NOT BY POSITION. The row the user clicked is an index into the list this process
+        // is DRAWING; the removal lands in the list that is on DISK, and PromoteRecent moves entries
+        // to the front, so the Editor opening any project shifts every index below it. Removing
+        // position N there would forget a project the user never pointed at.
+        const std::string path = st.Registry.Projects[index].Path;
+        // Same reason, one level up: the SELECTION is a position too, so it is carried across the
+        // merge as the path it means and looked up again afterwards.
+        const std::string selectedPath =
+             ( st.Selected >= 0 && st.Selected < static_cast<int>( st.Registry.Projects.size() ) )
+                  ? st.Registry.Projects[st.Selected].Path
+                  : std::string();
+
+        if ( const auto removed = ApplyToRegistry(
+                  st,
+                  [&path]( Common::Project::ProjectsRegistry& registry )
+                  {
+                      auto& projects = registry.Projects;
+                      projects.erase( std::remove_if( projects.begin(), projects.end(),
+                                                      [&path]( const Common::Project::ProjectRecord& r )
+                                                      { return r.Path == path; } ),
+                                      projects.end() );
+                  } );
+             !removed.IsSuccess() )
+        {
+            st.SetError( "Could not forget " + path + ": " + removed.GetError() +
+                         " The project is still in the list." );
+            return;
+        }
+
+        st.Selected = -1;
+        if ( !selectedPath.empty() && selectedPath != path )
+            for ( std::size_t i = 0; i < st.Registry.Projects.size(); ++i )
+                if ( st.Registry.Projects[i].Path == selectedPath )
+                {
+                    st.Selected = static_cast<int>( i );
+                    break;
+                }
     }
 
     void OpenExisting( HubState& st )
@@ -1187,8 +1234,16 @@ namespace
                 if ( created.IsSuccess() )
                 {
                     const std::string deproj = created.ExtractValue();
-                    Common::Project::PromoteRecent( st.Registry, deproj, Common::Project::UnixNow() );
-                    PersistRegistry( st );
+                    // OpenProject promotes it again through the same protocol; filing it here as
+                    // well is what makes a project that was CREATED but whose Editor failed to
+                    // start still appear in the list.
+                    if ( const auto filed = ApplyToRegistry(
+                              st,
+                              [&deproj]( Common::Project::ProjectsRegistry& registry ) {
+                                  Common::Project::PromoteRecent( registry, deproj, Common::Project::UnixNow() );
+                              } );
+                         !filed.IsSuccess() )
+                        st.SetError( "The project was created, but " + filed.GetError() );
                     OpenProject( st, Hub::ResolveProjectEntry( deproj ) );
                 }
                 else

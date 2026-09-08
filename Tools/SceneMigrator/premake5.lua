@@ -18,7 +18,23 @@ project "SceneMigrator"
 
     files {
         "Source/**.cpp",
+        -- THE ENGINE'S OWN REFLECTION TABLE, not a copy of it. Source/SettingsCanonical.cpp writes the
+        -- Settings block the way the engine's saver writes it, which means enumerating the same 51 fields
+        -- in the same order through the same serializer. A hand-written field list here would be a second
+        -- statement of the format, which is the fork this tool's own header forbids. It is kept OUT of
+        -- SceneMigration.cpp on purpose: sixteen suites compile that file to test one schema step each,
+        -- and none of them should have to link an engine reflection table to do it.
+        --
+        -- It costs nothing but compile time: these three compile against Common alone, with no GPU, no
+        -- window and no Desert link (Desert/Tests/Engine/ConfigOwnership and SceneForeignKeys build on
+        -- exactly this recipe). Reflection.gen.cpp is emitted by DesertHeaderTool as a PREBUILD STEP OF
+        -- `Desert`, hence the dependency below.
+        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionSerializer.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionRegistry.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp",
     }
+
+    dependson { "Desert" }
 
     includedirs {
         "%{wks.location}/Desert/Common/Source",

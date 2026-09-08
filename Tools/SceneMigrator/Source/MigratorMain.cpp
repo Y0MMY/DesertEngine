@@ -32,6 +32,7 @@
 
 #include "MigratorMain.hpp"
 #include "SceneMigration.hpp"
+#include "SettingsCanonical.hpp"
 
 #include <Common/Core/Constants.hpp>
 #include <Common/Utilities/FileSystem.hpp>
@@ -172,6 +173,18 @@ namespace Desert::Migration
 
             const Desert::Migration::SceneMigrationReport report =
                  Desert::Migration::MigrateScene( parsed.value(), assetsRoot );
+
+            // CANONICALISATION IS THE TOOL'S, NOT A SCHEMA STEP'S, and the split is structural rather
+            // than tidiness. Every function in SceneMigration.hpp is pure over the parsed tree, which is
+            // what lets sixteen suites compile that one translation unit and test a step each with no
+            // engine linked; this needs the engine's reflection table, so it lives beside main where the
+            // table is already paid for. It runs on the same gate as the retirement step and AFTER it —
+            // canonical means "the fields the table describes", and a retired key is by definition not
+            // one of them, so running it first would drop the key with nothing left to report.
+            const Desert::Migration::SettingsCanonicalisationReport canonical =
+                 report.RetiredKeysRaised ? Desert::Migration::CanonicaliseSettings( parsed.value().Settings )
+                                          : Desert::Migration::SettingsCanonicalisationReport{};
+
             if ( !report.Changed() )
             {
                 out << "ok     " << path.string() << " — already at scene v" << Desert::Migration::kSceneVersion
@@ -374,6 +387,37 @@ namespace Desert::Migration
                 else
                 {
                     out << "stamp only - the scene stated no viewport debug flag";
+                }
+                out << ")";
+            }
+            if ( report.RetiredKeysRaised )
+            {
+                out << " scene v" << Desert::Migration::kSceneVersionDebugView << "->v"
+                    << Desert::Migration::kSceneVersionRetiredKeys << " (";
+                if ( report.RetiredKeys.KeysRemoved > 0 )
+                {
+                    // Named with their values AND the reason, because from v14 on this is the ONLY way a
+                    // key ever leaves a file: the saver preserves everything it does not declare, so a
+                    // removal is always a decision somebody made and the operator is entitled to see it.
+                    out << report.RetiredKeys.KeysRemoved << " retired key(s) removed:";
+                    for ( const auto& name : report.RetiredKeys.RemovedNames )
+                        out << " " << name;
+                }
+                else
+                {
+                    out << "stamp only - the scene stated no retired key";
+                }
+                if ( canonical.Refused )
+                {
+                    out << "; Settings NOT canonicalised - see the error above";
+                }
+                else
+                {
+                    out << "; Settings canonical (";
+                    if ( canonical.BlockCreated )
+                        out << "block created, ";
+                    out << canonical.KeysAdded << " field(s) the file did not state, " << canonical.ValuesRestated
+                        << " restated at float precision)";
                 }
                 out << ")";
             }

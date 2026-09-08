@@ -20,8 +20,15 @@ project(test_name)
         -- be reachable by no suite that is not willing to write into the developer's real
         -- ~/.desertengine, which is how a file-writing function ends up untested.
         "%{wks.location}/Desert/Desert/Source/Engine/Project/EngineRegistration.cpp",
-        -- The .deproj half of К11 asserts that ProjectContext::Save carries a foreign key across a
-        -- read-modify-write, so the suite has to compile the thing that writes the file.
+        -- Compiled here for TWO reasons that arrived from different directions and turned out to be
+        -- the same shape, which is why this line is worth its comment:
+        --   * the .deproj half asserts that ProjectContext::Save carries a foreign key across a
+        --     read-modify-write, so the suite has to compile the thing that writes the file;
+        --   * it is also the engine's half of the OTHER two-writer file, projects.json —
+        --     RecentProjects/RegisterRecent take the config directory as an argument, so the protocol
+        --     the launcher plays the other half of is reachable here without writing into the
+        --     developer's own ~/.desertengine.
+        -- Everything it touches is Common, which is what keeps this suite device-free.
         "%{wks.location}/Desert/Desert/Source/Engine/Project/ProjectContext.cpp",
     }
 

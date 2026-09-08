@@ -16,7 +16,17 @@ project(test_name)
         test_files,
         "%{wks.location}/Tools/SceneMigrator/Source/MigratorMain.cpp",
         "%{wks.location}/Tools/SceneMigrator/Source/SceneMigration.cpp",
+        -- The tool's loop canonicalises the Settings block through the ENGINE'S reflection table, so a
+        -- suite that compiles MigratorMain.cpp has to bring the table with it. It is deliberately not in
+        -- SceneMigration.cpp: the fifteen suites that test one schema step each must stay free of it.
+        "%{wks.location}/Tools/SceneMigrator/Source/SettingsCanonical.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionSerializer.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionRegistry.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp",
     }
+
+    -- Reflection.gen.cpp is emitted by DesertHeaderTool as a prebuild step of `Desert`.
+    dependson { "Desert" }
 
     includedirs {
         "%{wks.location}/Desert/Common/Source",

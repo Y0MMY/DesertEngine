@@ -201,17 +201,16 @@ TEST( SceneDebugViewMigration, AFileAlreadyAtTheHeadDoesNotRunTheStep )
     EXPECT_TRUE( Has( scene.Settings, "ShowColliders" ) );
 }
 
-// THE HEAD ASSERTION, which moved here from SceneCloudMaterialMigration because this is the newest step
-// now. It is the run-time half of the static_assert in SceneMigration.hpp: if a step is ever added
-// without raising Core::kSceneVersion the tool stamps files at a version the loader refuses, and every
-// scene in the repository stops opening at once while each file looks correct in isolation. The ORDER
-// half is this step's own business - it sits directly above the cloud material step.
-TEST( SceneDebugViewMigration, ThisIsTheHeadStepAndItSitsAboveItsPredecessor )
+// THE HEAD ASSERTION HAS MOVED ON, to SceneRetiredKeysMigration — v14 is the head since K11. What stays
+// here is this step's own business: its number, and that it sits directly above the cloud material step.
+// The head half is deliberately in exactly one suite at a time, and it is the run-time counterpart of the
+// static_assert in SceneMigration.hpp.
+TEST( SceneDebugViewMigration, ThisStepSitsAboveItsPredecessorAndIsNoLongerTheHead )
 {
     EXPECT_EQ( 13, Migration::kSceneVersionDebugView );
     EXPECT_GT( Migration::kSceneVersionDebugView, Migration::kSceneVersionCloudMaterial );
-    EXPECT_EQ( Migration::kSceneVersionDebugView, Core::kSceneVersion )
-         << "a newer step exists; move this assertion to that suite the way this one moved here";
+    EXPECT_LT( Migration::kSceneVersionDebugView, Core::kSceneVersion )
+         << "this is the head step again; the head assertion belongs back in this suite";
 }
 
 // ── The relation ───────────────────────────────────────────────────────────────────────────────────
