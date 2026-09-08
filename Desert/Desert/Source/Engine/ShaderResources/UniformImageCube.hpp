@@ -16,7 +16,7 @@ namespace Desert::ShaderResources
 
         virtual void SetImageCube( const Graphic::ImageCube* imageCube ) = 0;
 
-        virtual const Common::UUID GetImageHash() const = 0;
+        // GetImageHash() was here with no caller — same as UniformImage2D. Г12.
 
     private:
         static std::shared_ptr<UniformImageCube> Create( const std::string_view debugName, uint32_t binding );

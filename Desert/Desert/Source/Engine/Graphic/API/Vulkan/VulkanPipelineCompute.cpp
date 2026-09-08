@@ -51,18 +51,6 @@ namespace Desert::Graphic::API::Vulkan
         return *this;
     }
 
-    Image* VulkanPipelineCompute::GetInput( uint32_t binding ) const
-    {
-        const auto it = m_BoundInputs.find( binding );
-        return it != m_BoundInputs.end() ? it->second : nullptr;
-    }
-
-    Image* VulkanPipelineCompute::GetOutput( uint32_t binding ) const
-    {
-        const auto it = m_BoundOutputs.find( binding );
-        return it != m_BoundOutputs.end() ? it->second.Image : nullptr;
-    }
-
     namespace
     {
         // A sampled input is bound with the descriptor write that matches its DIMENSIONALITY. This is not

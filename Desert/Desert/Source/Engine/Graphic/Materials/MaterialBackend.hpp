@@ -26,7 +26,10 @@ namespace Desert::Graphic
 
         virtual void FlushUpdates() = 0;
 
-        virtual void ApplyPushConstants( MaterialExecutor* material, GraphicsPipeline* pipeline ) = 0;
+        // ApplyPushConstants was declared here and its only implementation had an EMPTY BODY — the
+        // second of two routes for the same bytes, and the one nobody took. The renderer pushes them
+        // itself at draw time out of MaterialExecutor::GetPushConstantBuffer(). Г12 removed it, because
+        // a pure virtual with an empty override is an instruction to write the next empty override.
 
     protected:
         const std::shared_ptr<Shader> m_Shader;

@@ -61,12 +61,22 @@ namespace Desert::Graphic
             return m_Accounting.GetAsset();
         }
 
-        virtual uint32_t                      GetWidth() const               = 0;
-        virtual uint32_t                      GetHeight() const              = 0;
-        virtual Core::Formats::ImageFormat    GetImageFormat() const         = 0;
-        virtual uint32_t                      GetMipmapLevels() const        = 0;
-        virtual bool                          IsLoaded() const               = 0;
-        virtual Core::Formats::ImagePixelData GetImagePixels()               = 0;
+        virtual uint32_t GetWidth() const        = 0;
+        virtual uint32_t GetHeight() const       = 0;
+        virtual uint32_t GetMipmapLevels() const = 0;
+
+        // GetImageFormat / IsLoaded / GetImagePixels USED TO SIT HERE and Г12 removed all three, because
+        // a dead pure virtual is not inert: it is a standing instruction to every future implementer to
+        // write a body, and the three bodies these already had are the argument. GetImagePixels was
+        // implemented as `DESERT_VERIFY(false)` on Image2D, as an abort on Image3D — and on ImageCube as
+        // a bare `return {}`, which is §1.4 of the contract sitting armed, waiting for its first caller
+        // to read "the cubemap is blank" out of "nobody implemented this". Format and loaded-ness are
+        // read off the specification, which is where they are authored.
+        //
+        // CPU readback is Image2D::ReadPixelsRGBA8 below, and it is deliberately the ONLY one: a volume
+        // is produced on the GPU and consumed on the GPU, so a 3D readback would be a 32 MiB stall
+        // written for nobody. That reason is kept here because it is the reason there is no general
+        // GetImagePixels, not a note about a function that no longer exists.
 
         virtual const Common::UUID GetHash() const final
         {
@@ -159,8 +169,8 @@ namespace Desert::Graphic
 
         virtual ~Image3D() = default;
 
-        [[nodiscard]] virtual uint32_t GetDepth() const = 0;
-
+        // GetDepth() was here and had no caller: a volume's depth is read off the specification below,
+        // beside its width and height, rather than asked of the image a second way. Г12.
         virtual Core::Formats::Image3DSpecification& GetImageSpecification() = 0;
 
         static std::shared_ptr<Image3D> Create( const Core::Formats::Image3DSpecification& spec );

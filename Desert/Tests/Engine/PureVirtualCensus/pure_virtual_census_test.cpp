@@ -540,27 +540,29 @@ namespace
          // A dead pure virtual is not inert: it is a standing instruction to every future implementer to
          // write a body that does nothing. That is what these eight cost, and what the ones below still
          // cost. They remain because each is a separate question about a separate capability.
-         { "Image", "GetImageFormat", "Desert/Desert/Source/Engine/Graphic/Image.hpp",
-           "FENCED (API/Vulkan): the format is read off the specification instead." },
-         { "Image", "IsLoaded", "Desert/Desert/Source/Engine/Graphic/Image.hpp",
-           "FENCED (API/Vulkan): three backends keep the flag, nobody asks for it." },
-         { "Image", "GetImagePixels", "Desert/Desert/Source/Engine/Graphic/Image.hpp",
-           "FENCED (API/Vulkan): the DEAD half of a pair -- readback goes through "
-           "Image2D::ReadPixelsRGBA8, which is called." },
-         { "Image3D", "GetDepth", "Desert/Desert/Source/Engine/Graphic/Image.hpp",
-           "FENCED (API/Vulkan): volume depth is read off the specification instead." },
-         { "ComputePipeline", "GetInput", "Desert/Desert/Source/Engine/Graphic/Pipeline.hpp",
-           "FENCED (API/Vulkan): inputs are set, never read back." },
-         { "ComputePipeline", "GetOutput", "Desert/Desert/Source/Engine/Graphic/Pipeline.hpp",
-           "FENCED (API/Vulkan): outputs are set, never read back." },
-         { "MaterialBackend", "ApplyPushConstants",
-           "Desert/Desert/Source/Engine/Graphic/Materials/MaterialBackend.hpp",
-           "FENCED (API/Vulkan): the renderer pushes them itself at draw time out of "
-           "MaterialExecutor::GetPushConstantBuffer(); this second route was never taken." },
-         { "UniformImage2D", "GetImageHash", "Desert/Desert/Source/Engine/ShaderResources/UniformImage2D.hpp",
-           "FENCED (API/Vulkan): the descriptor caches key off Image::GetHash directly." },
-         { "UniformImageCube", "GetImageHash", "Desert/Desert/Source/Engine/ShaderResources/UniformImageCube.hpp",
-           "FENCED (API/Vulkan): same as UniformImage2D." },
+         //
+         // NINE MORE WENT THE SAME WAY, and the reason they survived this long is itself the lesson.
+         // Every one of them carried the word FENCED — "Engine/Graphic/API/Vulkan is reserved for the
+         // device-loss rebuild, do not touch" — while the paragraph directly above says that fence came
+         // down when Г7, Г7-C and Г13 landed. The justification outlived its condition, in the very file
+         // written to catch justifications that outlive their conditions. Removed by Г12:
+         //
+         //   Image::GetImageFormat / Image::IsLoaded  -- both read off the specification instead, which
+         //     is where they are authored. IsLoaded's flag stayed on VulkanImage2D (SetData reads it) and
+         //     was DELETED on the cube and the volume, where removing the getter left it write-only.
+         //   Image::GetImagePixels -- three implementations: DESERT_VERIFY(false) on 2D, an abort on the
+         //     volume, and on the CUBE a bare `return {}`. That last one is §1.4 sitting armed: the first
+         //     caller would have read "the cubemap is blank" out of "nobody implemented this". CPU
+         //     readback is Image2D::ReadPixelsRGBA8, which returns a ResultStr and is called.
+         //   Image3D::GetDepth -- the specification carries Depth beside Width and Height.
+         //   ComputePipeline::GetInput / GetOutput -- bindings are SET and dispatched, never read back.
+         //   MaterialBackend::ApplyPushConstants -- its ONLY implementation had an empty body. The
+         //     renderer pushes the bytes itself out of MaterialExecutor::GetPushConstantBuffer().
+         //   UniformImage2D::GetImageHash / UniformImageCube::GetImageHash -- the descriptor caches key
+         //     off Image::GetHash() on the image. Each uniform also held a raw pointer to the image
+         //     purely so this getter could dereference it -- its own comment said so -- and both
+         //     pointers became write-only the moment the getter went, so both were deleted with it.
+         //     What these classes keep of an image is the VkDescriptorImageInfo, copied at SetImage time.
 
          // ---- THE PLATFORM WINDOW'S TITLE AND SIZE SURFACE -------------------------------------------
          // Six methods, implemented twice each (MacOSWindow, WindowsWindow), called nowhere. They read
@@ -751,7 +753,7 @@ TEST( PureVirtualCensus, TheNumberIsStatedSoAShrinkageIsVisible )
     // that was a design question is allowed to leave. Up is a regression; down is welcome, and this
     // line moves with it. The count is quoted because a per-row diff never says "there are four more
     // of these now".
-    EXPECT_EQ( std::size( k_Census ), 19u )
+    EXPECT_EQ( std::size( k_Census ), 10u )
          << "the number of pure virtuals implemented by everybody and called by nobody has changed";
 }
 

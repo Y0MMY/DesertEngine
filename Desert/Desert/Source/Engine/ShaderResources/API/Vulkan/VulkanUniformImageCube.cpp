@@ -17,8 +17,6 @@ namespace Desert::ShaderResources::API::Vulkan
 
     void VulkanUniformImageCube::SetImageCube( const Graphic::ImageCube* imageCube )
     {
-        m_ImageCube = imageCube;
-
         // NULL IS A VALUE, NOT A REFUSAL, AND THAT IS THE Г14 FIX. This used to blank the descriptor info
         // and return, which paired with a caller (TextureCubeProperty::Apply) that only wrote the
         // descriptor when it had an image — so "this scene has no environment" reached here and then

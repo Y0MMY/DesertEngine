@@ -210,9 +210,8 @@ namespace Desert::Graphic
         /** Record + submit one immediate compute dispatch with the currently-bound resources. */
         virtual void Dispatch( uint32_t groupsX, uint32_t groupsY, uint32_t groupsZ ) = 0;
 
-        [[nodiscard]] virtual Image* GetInput( uint32_t binding ) const  = 0;
-        [[nodiscard]] virtual Image* GetOutput( uint32_t binding ) const = 0;
-
+        // GetInput/GetOutput were here and had no caller: a compute pipeline's bindings are SET and then
+        // dispatched, never read back, and the backend keeps its own maps for the descriptor writes. Г12.
         static std::shared_ptr<ComputePipeline> Create( const ComputePipelineSpecification& spec );
     };
 

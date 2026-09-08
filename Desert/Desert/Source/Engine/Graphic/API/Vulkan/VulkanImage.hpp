@@ -135,12 +135,18 @@ namespace Desert::Graphic::API::Vulkan
 
         // --- Image2D Interface ---
         [[nodiscard]] uint32_t GetWidth() const override { return m_Specification.Width; }
-        [[nodiscard]] uint32_t GetHeight() const override { return m_Specification.Height; }
-        [[nodiscard]] Core::Formats::ImageFormat GetImageFormat() const override { return m_Specification.Format; }
-        [[nodiscard]] uint32_t GetMipmapLevels() const override { return m_Resource.MipLevels; }
-        [[nodiscard]] bool IsLoaded() const override { return m_IsLoaded; }
-        [[nodiscard]] Core::Formats::Image2DSpecification& GetImageSpecification() override { return m_Specification; }
-        [[nodiscard]] Core::Formats::ImagePixelData GetImagePixels() override;
+        [[nodiscard]] uint32_t GetHeight() const override
+        {
+            return m_Specification.Height;
+        }
+        [[nodiscard]] uint32_t GetMipmapLevels() const override
+        {
+            return m_Resource.MipLevels;
+        }
+        [[nodiscard]] Core::Formats::Image2DSpecification& GetImageSpecification() override
+        {
+            return m_Specification;
+        }
         NO_DISCARD Common::ResultStr<std::vector<uint8_t>> ReadPixelsRGBA8() override;
 
         Common::BoolResultStr Invalidate() override;
@@ -194,11 +200,14 @@ namespace Desert::Graphic::API::Vulkan
         {
             return m_Specification.FaceSize;
         }
-        [[nodiscard]] Core::Formats::ImageFormat GetImageFormat() const override { return m_Specification.Format; }
-        [[nodiscard]] uint32_t GetMipmapLevels() const override { return m_Resource.MipLevels; }
-        [[nodiscard]] bool IsLoaded() const override { return m_IsLoaded; }
-        [[nodiscard]] Core::Formats::ImageCubeSpecification& GetImageSpecification() override { return m_Specification; }
-        [[nodiscard]] Core::Formats::ImagePixelData GetImagePixels() override;
+        [[nodiscard]] uint32_t GetMipmapLevels() const override
+        {
+            return m_Resource.MipLevels;
+        }
+        [[nodiscard]] Core::Formats::ImageCubeSpecification& GetImageSpecification() override
+        {
+            return m_Specification;
+        }
 
         Common::BoolResultStr Invalidate() override;
         Common::BoolResultStr Release() override;
@@ -234,7 +243,6 @@ namespace Desert::Graphic::API::Vulkan
         Core::Formats::ImageCubeSpecification m_Specification;
         VulkanImageResource                   m_Resource;
         std::vector<VkImageView>              m_MipViews;
-        bool                                  m_IsLoaded = false;
     };
 
     /**
@@ -259,27 +267,14 @@ namespace Desert::Graphic::API::Vulkan
         {
             return m_Specification.Height;
         }
-        [[nodiscard]] uint32_t GetDepth() const override
-        {
-            return m_Specification.Depth;
-        }
-        [[nodiscard]] Core::Formats::ImageFormat GetImageFormat() const override
-        {
-            return m_Specification.Format;
-        }
         [[nodiscard]] uint32_t GetMipmapLevels() const override
         {
             return m_Resource.MipLevels;
-        }
-        [[nodiscard]] bool IsLoaded() const override
-        {
-            return m_IsLoaded;
         }
         [[nodiscard]] Core::Formats::Image3DSpecification& GetImageSpecification() override
         {
             return m_Specification;
         }
-        [[nodiscard]] Core::Formats::ImagePixelData GetImagePixels() override;
 
         Common::BoolResultStr Invalidate() override;
         Common::BoolResultStr Release() override;
@@ -309,7 +304,6 @@ namespace Desert::Graphic::API::Vulkan
         // Kept as a vector purely so RT_DestroyImage's deferred-deletion entry takes the same shape as
         // the 2D and cube paths; a volume has exactly one view in it.
         std::vector<VkImageView> m_MipViews;
-        bool                     m_IsLoaded = false;
     };
 
 } // namespace Desert::Graphic::API::Vulkan

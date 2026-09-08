@@ -174,11 +174,6 @@ namespace Desert::Graphic::API::Vulkan
         return VK_NULL_HANDLE;
     }
 
-    void VulkanMaterialBackend::ApplyPushConstants( MaterialExecutor* /*material*/,
-                                                    GraphicsPipeline* /*pipeline*/ )
-    {
-    }
-
     void VulkanMaterialBackend::NoteDescriptorWrite( uint32_t frameIndex, uint32_t binding, uint64_t handle )
     {
         const uint32_t slot = EngineContext::GetInstance().GetActiveRendererSlot();

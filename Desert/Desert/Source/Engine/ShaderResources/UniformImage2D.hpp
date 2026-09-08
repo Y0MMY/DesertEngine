@@ -16,7 +16,9 @@ namespace Desert::ShaderResources
 
         virtual void SetImage2D( const Graphic::Image2D* image2D ) = 0;
 
-        virtual const Common::UUID GetImageHash() const = 0;
+        // GetImageHash() was here with no caller: the descriptor caches key off Image::GetHash() on the
+        // image itself, so asking the uniform for its image's hash was a second way to the same answer,
+        // and the one that had to dereference a pointer this class does not own. Г12.
 
     private:
         static std::shared_ptr<UniformImage2D> Create( const std::string_view debugName, uint32_t binding );

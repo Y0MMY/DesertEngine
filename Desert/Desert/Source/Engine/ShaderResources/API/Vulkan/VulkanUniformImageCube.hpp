@@ -23,11 +23,6 @@ namespace Desert::ShaderResources::API::Vulkan
             return m_DescriptorInfo;
         }
 
-        virtual const Common::UUID GetImageHash() const override
-        {
-            return m_ImageCube->GetHash();
-        }
-
         void SetImageCube( const Graphic::ImageCube* imageCube ) override;
 
     private:
@@ -40,13 +35,11 @@ namespace Desert::ShaderResources::API::Vulkan
         // to fail at does not need a channel, it needs to not exist.
 
     private:
-        VkDescriptorImageInfo     m_DescriptorInfo{};
-        const std::string         m_DebugName;
-        uint32_t                  m_Binding = 0;
-        // Initialised, because it was not: the constructor left this indeterminate and
-        // GetImageHash() dereferences it, so a hash asked for before the first SetImage read
-        // through whatever the stack held. nullptr does not make that call correct -- it makes
-        // it a crash at the line that is wrong instead of a UUID out of uninitialised memory.
-        const Graphic::ImageCube* m_ImageCube = nullptr;
+        VkDescriptorImageInfo m_DescriptorInfo{};
+        const std::string     m_DebugName;
+        uint32_t              m_Binding = 0;
+        // `m_ImageCube` stood here and its comment named its ONLY reader, GetImageHash(). Г12 removed
+        // that reader, leaving the member written by SetImageCube and read by nobody, so it went too —
+        // same as VulkanUniformImage2D. What this class keeps of a cube is m_DescriptorInfo above.
     };
 } // namespace Desert::ShaderResources::API::Vulkan

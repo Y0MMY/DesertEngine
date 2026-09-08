@@ -16,8 +16,6 @@ namespace Desert::ShaderResources::API::Vulkan
 
     void VulkanUniformImage2D::SetImage2D( const Graphic::Image2D* image2D )
     {
-        m_Image2D = image2D;
-
         if ( image2D )
         {
             const auto& res              = ( (Graphic::API::Vulkan::VulkanImage2D*)image2D )->GetResource();

@@ -37,9 +37,6 @@ namespace Desert::Graphic::API::Vulkan
         // set (a descriptor set's contents are consumed at execution time, not at record time).
         void RecordInFrame( VkCommandBuffer cmd, uint32_t groupsX, uint32_t groupsY, uint32_t groupsZ );
 
-        [[nodiscard]] Image* GetInput( uint32_t binding ) const override;
-        [[nodiscard]] Image* GetOutput( uint32_t binding ) const override;
-
         virtual void Invalidate() override;
         virtual void Release() override;
 

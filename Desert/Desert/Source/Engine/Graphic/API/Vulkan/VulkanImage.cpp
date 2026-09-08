@@ -572,8 +572,10 @@ namespace Desert::Graphic::API::Vulkan
         return Utils::GetDefaultLayout( m_Specification.Format, m_Specification.Properties );
     }
 
-    VkImageView VulkanImage2D::GetMipView( uint32_t level ) const { return m_MipViews[level]; }
-    Core::Formats::ImagePixelData VulkanImage2D::GetImagePixels() { DESERT_VERIFY( false ); return {}; }
+    VkImageView VulkanImage2D::GetMipView( uint32_t level ) const
+    {
+        return m_MipViews[level];
+    }
 
     // --- VulkanImageCube ---
 
@@ -590,7 +592,8 @@ namespace Desert::Graphic::API::Vulkan
         if ( !m_Resource.Image ) return BOOLSUCCESS;
         auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanAllocator().get();
         allocator->RT_DestroyImage( m_Resource.Image, m_Resource.Allocation, m_Resource.ImageView, m_Resource.Sampler, m_MipViews );
-        m_Resource = {}; m_MipViews.clear(); m_IsLoaded = false;
+        m_Resource = {};
+        m_MipViews.clear();
         return BOOLSUCCESS;
     }
 
@@ -653,7 +656,6 @@ namespace Desert::Graphic::API::Vulkan
         TransitionLayout( cmd, finalDefaultLayout );
         CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmd );
 
-        m_IsLoaded = true;
         return Common::MakeSuccess( true );
     }
 
@@ -722,8 +724,10 @@ namespace Desert::Graphic::API::Vulkan
         return Utils::GetDefaultLayout( m_Specification.Format, m_Specification.Properties );
     }
 
-    VkImageView VulkanImageCube::GetMipView( uint32_t level ) const { return m_MipViews[level]; }
-    Core::Formats::ImagePixelData VulkanImageCube::GetImagePixels() { return {}; }
+    VkImageView VulkanImageCube::GetMipView( uint32_t level ) const
+    {
+        return m_MipViews[level];
+    }
 
     // --- VulkanImage3D ---
 
@@ -757,7 +761,6 @@ namespace Desert::Graphic::API::Vulkan
                                     m_Resource.Sampler, m_MipViews );
         m_Resource = {};
         m_MipViews.clear();
-        m_IsLoaded = false;
         return BOOLSUCCESS;
     }
 
@@ -892,7 +895,6 @@ namespace Desert::Graphic::API::Vulkan
 
         CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmd );
 
-        m_IsLoaded = true;
         return Common::MakeSuccess( true );
     }
 
@@ -934,16 +936,6 @@ namespace Desert::Graphic::API::Vulkan
         // out-of-range read of m_MipViews.
         DESERT_VERIFY( level == 0, "Image3D has exactly one mip level" );
         return m_MipViews[0];
-    }
-
-    Core::Formats::ImagePixelData VulkanImage3D::GetImagePixels()
-    {
-        // A volume is produced on the GPU and consumed on the GPU. There is no readback by design, the
-        // same answer VulkanImage2D gives: a path with no caller is a path with no test, and a volume
-        // readback would be a 32 MiB stall written for nobody. Asking is a caller bug, so it stops here
-        // rather than handing back an empty buffer that reads as "the volume is blank".
-        DESERT_VERIFY( false, "Image3D has no CPU readback" );
-        return {};
     }
 
     // --- Live sampler recreation (texture-filter setting change) ---

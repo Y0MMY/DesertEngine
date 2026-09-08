@@ -25,11 +25,6 @@ namespace Desert::ShaderResources::API::Vulkan
 
         virtual void SetImage2D( const Graphic::Image2D* image2D ) override;
 
-        virtual const Common::UUID GetImageHash() const override
-        {
-            return m_Image2D->GetHash();
-        }
-
     private:
         // `RT_Invalidate()` and `Release()` stood here with EMPTY BODIES, called from the constructor and
         // the destructor respectively. This class owns no device resource at all — it holds a
@@ -40,13 +35,13 @@ namespace Desert::ShaderResources::API::Vulkan
         // to fail at does not need a channel, it needs to not exist.
 
     private:
-        VkDescriptorImageInfo   m_DescriptorInfo{};
-        const std::string       m_DebugName;
-        uint32_t                m_Binding = 0;
-        // Initialised, because it was not: the constructor left this indeterminate and
-        // GetImageHash() dereferences it, so a hash asked for before the first SetImage read
-        // through whatever the stack held. nullptr does not make that call correct -- it makes
-        // it a crash at the line that is wrong instead of a UUID out of uninitialised memory.
-        const Graphic::Image2D* m_Image2D = nullptr;
+        VkDescriptorImageInfo m_DescriptorInfo{};
+        const std::string     m_DebugName;
+        uint32_t              m_Binding = 0;
+        // `m_Image2D` stood here, and its own comment named its ONLY reader: GetImageHash(). Г12 removed
+        // that reader, which left the member written by SetImage2D and read by nobody — so it went with
+        // it. What this class actually keeps of an image is m_DescriptorInfo above, copied out at
+        // SetImage2D time; holding the pointer as well was a second, weaker handle on something this
+        // class does not own.
     };
 } // namespace Desert::ShaderResources::API::Vulkan
