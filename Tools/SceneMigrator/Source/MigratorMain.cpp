@@ -402,8 +402,10 @@ namespace Desert::Migration
                     out << report.ScriptRoot.Slots << " script reference(s) root-tagged on "
                         << report.ScriptRoot.Entities << " entity(ies), " << report.ScriptRoot.Empty
                         << " of them an empty slot";
-                else
+                else if ( report.ScriptRoot.UnrootedNames.empty() )
                     out << "stamp only - no entity named a script";
+                else
+                    out << "no reference could be root-tagged";
                 // Named, not counted, like every step above that can refuse a value: a reference the
                 // census could not place still does not resolve in a packaged game, and the operator has
                 // to see which entity to re-point.

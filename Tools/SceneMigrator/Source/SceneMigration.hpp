@@ -851,8 +851,8 @@ namespace Desert::Migration
     struct ScriptRootMigrationReport
     {
         int Entities = 0; // entities carrying a "Script" payload that was touched
-        int Slots    = 0; // script slots whose rooted path became a root-tagged key
-        int Empty    = 0; // slots that named no script at all - the key stays empty, not "assets:"
+        int Slots    = 0; // script slots re-spelled under the new key, the Empty ones below INCLUDED
+        int Empty    = 0; // of those, the ones that named no script - the key stays empty, not "assets:"
 
         // Slots whose stored spelling names no place under a `Scripts/` folder, so the census has no
         // root to measure it against. The value is carried across UNCHANGED under the new field name -
