@@ -41,49 +41,87 @@ namespace Desert
         return Common::MakeSuccessWithCodes<bool, MeshError>( true );
     }
 
+    // THE IN-PLACE BRANCHES BELOW HAD NEVER ONCE WRITTEN A BYTE, AND Г13 IS HOW THAT BECAME VISIBLE.
+    // Every DynamicMesh buffer is created through `Create( data, size )`, whose usage argument defaults
+    // to BufferUsage::Static — and a static buffer is device-local with no mapping, so
+    // VulkanVertexBuffer::SetData returned at its first line and wrote nothing. An edit that did not
+    // CHANGE THE VERTEX COUNT therefore never reached the GPU: dragging a vertex in PolyEditTool moved
+    // it on the CPU, left the picture alone, and said nothing, because SetData returned `void`.
+    //
+    // The fix is NOT to create these buffers Dynamic. DynamicMesh backs every primitive, every terrain
+    // patch and every text mesh in the engine, so that would move all of the scene's geometry out of
+    // device-local memory to make one editor drag cheaper. Instead the in-place write is ATTEMPTED and
+    // its refusal is a fall-through to the re-upload that does work — which is what the size-change
+    // branch has always done, and the reason nobody noticed the other one was dead.
     void DynamicMesh::Update( const std::vector<Vertex>& vertices, const std::vector<Index>& indices )
     {
+        // A MESH THAT CARRIES A LOD CHAIN IS NOT EDITABLE THROUGH Update, AND NOW IT SAYS SO. Such a
+        // mesh's GPU index buffer is the base indices PLUS an appended chain, with every submesh's
+        // `LODs` range pointing into it (Geometry::BuildLODIndexBuffer, called from Invalidate above).
+        // Update rebuilds the BASE list only — it always has — so re-uploading leaves each of those
+        // ranges pointing past the end of the new buffer, which is an out-of-range indexed draw.
+        //
+        // It cannot happen today: every DynamicMesh in the engine, the editor and the runtime is
+        // constructed with the default `generateLODs = false`, which also makes the LOD branch in
+        // Invalidate dead code (named for the LOD task, not fixed here). The check exists so the first
+        // `true` finds out from this line instead of from a driver. Regenerating the chain here is not
+        // the alternative it looks like: Update runs once per mouse-move during a vertex drag, and the
+        // chain is a meshopt simplification pass over the whole mesh.
+        //
+        // REFUSED BEFORE THE CPU DATA IS TOUCHED, so the two sides stay in agreement — a half-applied
+        // edit that is on the CPU and not the GPU is the exact silence this task exists to remove.
+        if ( m_GenerateLODs )
+        {
+            LOG_ERROR( "[DynamicMesh] Update was called on a mesh that carries a LOD chain; the edit was "
+                       "NOT applied. Rebuild the mesh through Invalidate instead." );
+            return;
+        }
+
         m_Vertices = vertices;
         m_Indices  = indices;
 
-        if ( !m_VertexBuffer || m_Vertices.size() * sizeof( Vertex ) > m_VertexBuffer->GetSize() )
+        // LOGGED RATHER THAN RETURNED, and the asymmetry with Invalidate above is deliberate. Update is
+        // called once per mouse-move while a vertex is being dragged (PolyEditTool), and its single
+        // caller is inside an ImGui interaction that has nowhere to put a failure — it can neither undo
+        // the edit nor stop the drag meaningfully. What was missing was not a channel but a REPORT:
+        // before this, a re-upload that failed left the mesh drawing its previous contents and the edit
+        // simply did not appear.
+        const uint32_t vertexBytes = static_cast<uint32_t>( m_Vertices.size() * sizeof( Vertex ) );
+        bool           vertexFits  = m_VertexBuffer && vertexBytes <= m_VertexBuffer->GetSize();
+        if ( vertexFits )
         {
-            m_VertexBuffer =
-                 Graphic::VertexBuffer::Create( (void*)m_Vertices.data(), m_Vertices.size() * sizeof( Vertex ) );
-            // LOGGED HERE RATHER THAN RETURNED, and the asymmetry with Invalidate above is deliberate.
-            // Update is called once per mouse-move while a vertex is being dragged (PolyEditTool), and its
-            // single caller is inside an ImGui interaction that has nowhere to put a failure — it can
-            // neither undo the edit nor stop the drag meaningfully. What was missing was not a channel but
-            // a REPORT: before this, a reallocation that failed left the mesh drawing its previous
-            // contents and the edit simply did not appear.
+            const auto written = m_VertexBuffer->SetData( (void*)m_Vertices.data(), vertexBytes );
+            vertexFits         = written.IsSuccess();
+        }
+        if ( !vertexFits )
+        {
+            m_VertexBuffer      = Graphic::VertexBuffer::Create( (void*)m_Vertices.data(), vertexBytes );
             const auto uploaded = m_VertexBuffer->RT_Invalidate();
             if ( !uploaded.IsSuccess() )
                 LOG_ERROR( "[DynamicMesh] vertex buffer re-upload failed, the edit is not on the GPU: {}",
                            uploaded.GetError() );
         }
-        else
-        {
-            m_VertexBuffer->SetData( (void*)m_Vertices.data(), m_Vertices.size() * sizeof( Vertex ) );
-        }
 
-        if ( !m_Indices.empty() )
-        {
-            if ( !m_IndexBuffer || m_Indices.size() * sizeof( Index ) > m_IndexBuffer->GetSize() )
-            {
-                m_IndexBuffer = Graphic::IndexBuffer::Create( m_Indices.data(), m_Indices.size() * sizeof( Index ) );
-                const auto uploaded = m_IndexBuffer->RT_Invalidate(); // reported, not returned; see above
-                if ( !uploaded.IsSuccess() )
-                    LOG_ERROR( "[DynamicMesh] index buffer re-upload failed, the edit is not on the GPU: {}",
-                               uploaded.GetError() );
-            }
-            else
-            {
-                m_IndexBuffer->SetData( m_Indices.data(), m_Indices.size() * sizeof( Index ) );
-            }
-        }
-        else
+        if ( m_Indices.empty() )
         {
             m_IndexBuffer = nullptr;
+            return;
+        }
+
+        const uint32_t indexBytes = static_cast<uint32_t>( m_Indices.size() * sizeof( Index ) );
+        bool           indexFits  = m_IndexBuffer && indexBytes <= m_IndexBuffer->GetSize();
+        if ( indexFits )
+        {
+            const auto written = m_IndexBuffer->SetData( (void*)m_Indices.data(), indexBytes );
+            indexFits          = written.IsSuccess();
+        }
+        if ( !indexFits )
+        {
+            m_IndexBuffer       = Graphic::IndexBuffer::Create( m_Indices.data(), indexBytes );
+            const auto uploaded = m_IndexBuffer->RT_Invalidate(); // reported, not returned; see above
+            if ( !uploaded.IsSuccess() )
+                LOG_ERROR( "[DynamicMesh] index buffer re-upload failed, the edit is not on the GPU: {}",
+                           uploaded.GetError() );
         }
     }
 

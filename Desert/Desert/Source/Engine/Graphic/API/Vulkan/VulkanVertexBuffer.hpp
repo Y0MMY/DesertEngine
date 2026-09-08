@@ -18,7 +18,8 @@ namespace Desert::Graphic::API::Vulkan
         VulkanVertexBuffer( void* data, uint32_t size, BufferUsage usage = BufferUsage::Static );
         VulkanVertexBuffer( uint32_t size, BufferUsage usage = BufferUsage::Dynamic );
 
-        virtual void SetData( void* data, uint32_t size, uint32_t offset = 0 ) override;
+        NO_DISCARD virtual Common::BoolResultStr SetData( void* data, uint32_t size,
+                                                          uint32_t offset = 0 ) override;
         virtual void Use( BindUsage use = BindUsage::Bind ) const override;
         virtual void RT_Use( BindUsage use = BindUsage::Bind ) const override;
 

@@ -4,6 +4,8 @@
 
 #include <Engine/ShaderResources/API/Vulkan/VulkanUniformBuffer.hpp>
 
+#include <Common/Core/Logger.hpp>
+
 #include <numeric>
 
 namespace Desert::ShaderResources
@@ -16,7 +18,19 @@ namespace Desert::ShaderResources
             case Graphic::RendererAPIType::None:
                 return nullptr;
             case Graphic::RendererAPIType::Vulkan:
-                return std::make_shared<API::Vulkan::VulkanUniformBuffer>( uniform );
+            {
+                // Refused rather than handed back half-built — see StorageBuffer::Create for the whole
+                // argument; it applies here word for word.
+                auto       buffer = std::make_shared<API::Vulkan::VulkanUniformBuffer>( uniform );
+                const auto usable = buffer->EnsureMapped();
+                if ( !usable.IsSuccess() )
+                {
+                    LOG_ERROR( "[UniformBuffer] '{}' ({} bytes) is not usable and was not created: {}",
+                               uniform.Name, uniform.Size, usable.GetError() );
+                    return nullptr;
+                }
+                return buffer;
+            }
         }
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
         return nullptr;

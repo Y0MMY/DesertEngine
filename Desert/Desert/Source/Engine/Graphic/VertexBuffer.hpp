@@ -147,10 +147,20 @@ namespace Desert::Graphic
     class VertexBuffer : public DynamicResources
     {
     public:
-        virtual ~VertexBuffer()                                                = default;
-        virtual void SetData( void* data, uint32_t size, uint32_t offset = 0 ) = 0;
-        virtual void Use( BindUsage use = BindUsage::Bind ) const              = 0;
-        virtual void RT_Use( BindUsage use = BindUsage::Bind ) const           = 0;
+        virtual ~VertexBuffer() = default;
+
+        /// Overwrite @p size bytes at @p offset. Refuses, having written nothing, when the buffer is not
+        /// dynamic, when its memory is not mapped, or when the range does not fit.
+        ///
+        /// IT ANSWERS, AND THAT IS THE WHOLE POINT OF THIS SIGNATURE. It was `void` until Г13, which
+        /// meant the refusal Г7-C had just made honest one layer down (Graphic/MappedMemory.hpp) could
+        /// only ever reach a LOG_ERROR: the frame was then drawn from vertices that are not there and
+        /// nothing above had anything to ask. A contract guarded by "somebody will read the log" is not
+        /// guarded. NO_DISCARD because a caller who wants to ignore it must say so in writing.
+        NO_DISCARD virtual Common::BoolResultStr SetData( void* data, uint32_t size, uint32_t offset = 0 ) = 0;
+
+        virtual void Use( BindUsage use = BindUsage::Bind ) const    = 0;
+        virtual void RT_Use( BindUsage use = BindUsage::Bind ) const = 0;
 
         [[nodiscard]] virtual unsigned int GetSize() const = 0;
 

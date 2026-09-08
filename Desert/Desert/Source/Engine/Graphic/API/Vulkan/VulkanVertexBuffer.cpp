@@ -22,24 +22,28 @@ namespace Desert::Graphic::API::Vulkan
         }
     } // namespace
 
-    void VulkanVertexBuffer::SetData( void* data, uint32_t size, uint32_t offset /*= 0 */ )
+    Common::BoolResultStr VulkanVertexBuffer::SetData( void* data, uint32_t size, uint32_t offset /*= 0 */ )
     {
+        // A REFUSAL, NOT A NO-OP, AND THIS ARM IS THE ONE THAT CHANGED MEANING. A static buffer has no
+        // mapping to write through — its contents were staged once at Invalidate — so `SetData` on one
+        // has always done nothing. It used to do nothing SILENTLY, which is indistinguishable at the
+        // call site from a write that landed; a caller updating geometry every frame through a buffer
+        // it created as Static would have seen the first frame's data forever with no line anywhere.
         if ( m_Usage != BufferUsage::Dynamic )
-        {
-            return;
-        }
+            return Common::MakeError<bool>(
+                 "vertex buffer is not Dynamic, so it has no mapping to write through" );
 
         auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
                               ->GetVulkanAllocator()
                               .get();
 
-        // A void override has no channel, so the report is the log — and it is a report rather than a
-        // silence: unchecked, this wrote `nullptr + offset` on a failed map, and the offset was never
-        // bounded against the buffer at all. MappedMemory refuses both and names the numbers.
+        // Unchecked, this wrote `nullptr + offset` on a failed map, and the offset was never bounded
+        // against the buffer at all. MappedMemory refuses both and names the numbers; this returns them.
         MappedMemory mapping = allocator->MapMemory( m_MemoryAllocation );
         const auto   wrote   = mapping.Write( data, size, offset );
         if ( !wrote.IsSuccess() )
-            LOG_ERROR( "[VulkanVertexBuffer] SetData wrote nothing: {}", wrote.GetError() );
+            return Common::MakeFormattedError<bool>( "vertex buffer SetData wrote nothing: {}", wrote.GetError() );
+        return BOOLSUCCESS;
     }
 
     void VulkanVertexBuffer::Use( BindUsage /*use*/ /*= BindUsage::Bind */ ) const

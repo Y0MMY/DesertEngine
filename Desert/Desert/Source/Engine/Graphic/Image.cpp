@@ -17,8 +17,19 @@ namespace Desert::Graphic
             case RendererAPIType::Vulkan:
             {
 
-                const auto& image = std::make_shared<API::Vulkan::VulkanImage2D>( spec );
-                image->RT_Invalidate();
+                const auto& image  = std::make_shared<API::Vulkan::VulkanImage2D>( spec );
+                const auto  result = image->RT_Invalidate();
+                if ( !result.IsSuccess() )
+                {
+                    // ASKED, NOT ASSUMED — the treatment Image3D::Create below already had, and the
+                    // reason it has it applies here word for word: handing back a half-built image
+                    // pushes the failure into the first pass that samples it, with no connection to the
+                    // allocation that actually failed. `nullptr` is inside this function's declared
+                    // contract, not a new outcome: the RendererAPIType::None arm above returns it.
+                    LOG_ERROR( "Image2D::Create: image {}x{} failed: {}", spec.Width, spec.Height,
+                               result.GetError() );
+                    return nullptr;
+                }
 
                 if ( spec.Mips > 1 && mipGenerator )
                 {
@@ -41,8 +52,14 @@ namespace Desert::Graphic
             case RendererAPIType::Vulkan:
             {
 
-                const auto& image = std::make_shared<API::Vulkan::VulkanImageCube>( spec );
-                image->RT_Invalidate();
+                const auto& image  = std::make_shared<API::Vulkan::VulkanImageCube>( spec );
+                const auto  result = image->RT_Invalidate();
+                if ( !result.IsSuccess() )
+                {
+                    LOG_ERROR( "ImageCube::Create: cube '{}' with a {}-texel face failed: {}", spec.Tag,
+                               spec.FaceSize, result.GetError() );
+                    return nullptr;
+                }
 
                 if ( spec.Mips > 1 && mipGenerator )
                 {
@@ -78,16 +95,6 @@ namespace Desert::Graphic
             }
         }
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
-    }
-
-    std::shared_ptr<Desert::Graphic::ImageCube>
-    ImageCube::Copy( const std::shared_ptr<ImageCube>& targetImageCube )
-    {
-        // TODO!
-        const auto& image = std::make_shared<API::Vulkan::VulkanImageCube>(
-             *SP_CAST( API::Vulkan::VulkanImageCube, targetImageCube ) );
-
-        return image;
     }
 
     namespace Utils

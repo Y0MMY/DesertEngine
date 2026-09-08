@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/ShaderResources/StorageBuffer.hpp>
+#include <Engine/ShaderResources/BufferGrowth.hpp>
 #include <Common/Core/Memory/Buffer.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
@@ -21,8 +22,10 @@ namespace Desert::ShaderResources::API::Vulkan
 
         NO_DISCARD virtual Common::BoolResultStr EnsureMapped() override;
 
-        virtual void           SetData( const void* data, uint32_t size, uint32_t offset = 0 ) override;
-        virtual uint32_t       GetBinding() const override
+        NO_DISCARD virtual Common::BoolResultStr SetData( const void* data, uint32_t size,
+                                                          uint32_t offset = 0 ) override;
+
+        virtual uint32_t GetBinding() const override
         {
             return m_Binding;
         }
@@ -44,7 +47,22 @@ namespace Desert::ShaderResources::API::Vulkan
         // ask about another frame gets a silently wrong buffer.
         const VkDescriptorBufferInfo& GetDescriptorBufferInfo( uint32_t frameIndex ) const
         {
-            return m_DescriptorInfos[CopyIndex( frameIndex )];
+            // BOUNDS-CHECKED, because RT_Invalidate can now leave this array EMPTY. It refuses as a
+            // whole and releases what it had (Г13) rather than publishing a descriptor for a copy that
+            // was never allocated — which means an unbuilt buffer has no descriptors at all, and the
+            // unchecked subscript that stood here would read past the end of an empty vector.
+            //
+            // A zeroed VkDescriptorBufferInfo is the same value `dev` published for a failed copy, so
+            // this is not a new silence; what has changed is that reaching it now takes a buffer whose
+            // factory refused to hand it out (StorageBuffer::Create returns nullptr for one that did
+            // not build) or whose Grow refused after the fact and said so in the log.
+            const uint32_t copy = CopyIndex( frameIndex );
+            if ( copy >= m_DescriptorInfos.size() )
+            {
+                static const VkDescriptorBufferInfo none{};
+                return none;
+            }
+            return m_DescriptorInfos[copy];
         }
 
         virtual const void* GetData() const override
@@ -60,7 +78,24 @@ namespace Desert::ShaderResources::API::Vulkan
         static uint32_t CopyIndex();
 
         void Release();
-        void RT_Invalidate();
+
+        /// Allocate and map the buffer copies at the CURRENT m_Size. Refuses as a whole if any single
+        /// copy could not be allocated or mapped — see VulkanUniformBuffer::RT_Invalidate for the defect
+        /// the previous `continue` produced.
+        NO_DISCARD Common::BoolResultStr RT_Invalidate();
+
+        /// Re-create at @p newSize, keeping nothing. A DIFFERENT OPERATION FROM WRITING, and that is the
+        /// whole point of it having a name: `SetData` used to call RT_Invalidate directly to make room,
+        /// which for a persistent buffer threw away the GPU simulation state its own member comment
+        /// requires to survive across frames — silently, from the per-frame write path. The decision of
+        /// whether a write may reach here at all is ShaderResources::ClassifyBufferWrite.
+        NO_DISCARD Common::BoolResultStr Grow( uint32_t newSize );
+
+        /// One buffer shared by every frame and view, rather than one per (frame x slot).
+        bool IsPersistent() const
+        {
+            return m_Lifetime == Persistence::AcrossFrames;
+        }
 
     private:
         std::vector<VmaAllocation>          m_MemoryAllocs;
@@ -69,12 +104,23 @@ namespace Desert::ShaderResources::API::Vulkan
         // See VulkanUniformBuffer: the mapping owns its own unmap, and cannot be written through unmapped.
         std::vector<Desert::Graphic::MappedMemory> m_Mappings;
 
+        /// AcrossFrames = ONE device buffer shared by every frame AND every view, because the GPU is the
+        /// author of its contents; PerFrame = one per (frame in flight x renderer slot). See
+        /// StorageBuffer::Create.
+        ///
+        /// This REPLACES the `bool m_Persistent` that used to sit here, rather than sitting beside it.
+        /// The growth decision (ShaderResources::ClassifyBufferWrite) is written in this vocabulary, and
+        /// a bool and an enum saying the same thing are two things obliged to agree with nothing
+        /// checking that they do — the defect class this project keeps paying for.
+        Persistence m_Lifetime = Persistence::PerFrame;
+
+        // The outcome of the last RT_Invalidate. The constructor has no channel, and a buffer that
+        // failed to build must answer every later question with the CAUSE — see VulkanUniformBuffer.
+        Common::BoolResultStr m_Built = Common::MakeError<bool>( "storage buffer has not been built" );
+
         uint32_t          m_Size    = 0;
         uint32_t          m_Binding = 0;
         const std::string m_BufferName;
-        // true = ONE device buffer shared by every frame (GPU state persists across frames); false =
-        // per-frame-in-flight. See StorageBuffer::Create.
-        bool m_Persistent = false;
 
         Common::Memory::Buffer m_LocalStorage; // CPU shadow copy (for GetData)
     };

@@ -54,15 +54,25 @@ namespace Desert::Graphic
 
         virtual Core::Formats::Image2DSpecification& GetImageSpecification() = 0;
 
-        // Reads the image back to CPU as tightly-packed RGBA8 (size = width*height*4). Returns empty on
-        // failure / unsupported format. Used for offscreen thumbnail capture (render -> readback -> PNG).
-        virtual std::vector<uint8_t> ReadPixelsRGBA8() { return {}; }
+        /// Reads the image back to CPU as tightly-packed RGBA8 (size = width*height*4). Used for
+        /// offscreen thumbnail capture (render -> readback -> PNG).
+        ///
+        /// AN EMPTY VECTOR USED TO BE THE ANSWER TO EVERY QUESTION HERE, and that is §1.4 of the
+        /// contract exactly: this returned `{}` for an unsupported format, a failed staging allocation,
+        /// a missing command buffer AND a failed readback, so "the capture did not happen" and "the
+        /// image is empty" were one value. A thumbnail renderer cannot tell those apart, so it either
+        /// caches a blank PNG forever or retries something that will never work — both happened.
+        NO_DISCARD virtual Common::ResultStr<std::vector<uint8_t>> ReadPixelsRGBA8()
+        {
+            return Common::MakeError<std::vector<uint8_t>>(
+                 "Image2D::ReadPixelsRGBA8 not supported by this backend" );
+        }
 
         // Re-uploads tightly-packed pixel data into the EXISTING GPU image without recreating it — the
         // image (and any descriptor sets bound to its pointer) stays valid, so this is the safe, churn-free
         // way to stream changing content (video frames) every frame. `data` must match the image's format
         // and dimensions. Default: unsupported.
-        virtual Common::BoolResultStr SetData( const Core::Formats::ImagePixelData& /*data*/ )
+        NO_DISCARD virtual Common::BoolResultStr SetData( const Core::Formats::ImagePixelData& /*data*/ )
         {
             return Common::MakeError<bool>( "Image2D::SetData not supported by this backend" );
         }
@@ -80,7 +90,13 @@ namespace Desert::Graphic
 
         static std::shared_ptr<ImageCube> Create( const Core::Formats::ImageCubeSpecification& spec,
                                                   const std::unique_ptr<MipMapCubeGenerator>&  mipGenerator );
-        static std::shared_ptr<ImageCube> Copy( const std::shared_ptr<ImageCube>& targetImageCube );
+        // `Copy` stood here with an unfinished body — it carried the marker this contract forbids — that
+        // copy-constructed a VulkanImageCube: a shallow
+        // copy of live VkImage/VkImageView/VmaAllocation handles, so the two objects would have
+        // destroyed the same device resources twice. It had no caller anywhere in the engine, the
+        // editor or the runtime, and an unfinished function that cannot be called is not a feature
+        // waiting to be finished (contract §0/§1.2). Deleted rather than fixed: nothing has asked for
+        // a cubemap copy, and when something does, the operation it wants is a GPU blit, not this.
     };
 
     /**

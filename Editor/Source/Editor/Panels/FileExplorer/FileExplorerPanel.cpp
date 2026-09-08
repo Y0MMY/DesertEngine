@@ -2063,11 +2063,27 @@ namespace Desert::Editor
             return;
 
         Graphic::Renderer::GetInstance().WaitDeviceIdle(); // readback after the GPU finished the frame
-        const std::vector<uint8_t> src = img->ReadPixelsRGBA8();
-        const uint32_t             W   = img->GetWidth();
-        const uint32_t             H   = img->GetHeight();
-        if ( W == 0 || H == 0 || src.size() != static_cast<size_t>( W ) * H * 4 )
+        // THE REFUSAL IS NOW DISTINGUISHABLE FROM AN EMPTY PICTURE. The size check below was the only
+        // thing standing between "the readback failed" and "the thumbnail is blank", and it answered
+        // both with a silent `return` — so a folder icon that never appeared looked exactly like one the
+        // user had not asked for.
+        const auto read = img->ReadPixelsRGBA8();
+        if ( !read.IsSuccess() )
+        {
+            LOG_ERROR( "[ContentBrowser] the folder thumbnail was not captured: {}", read.GetError() );
             return;
+        }
+
+        const std::vector<uint8_t>& src = read.GetValue();
+        const uint32_t              W   = img->GetWidth();
+        const uint32_t              H   = img->GetHeight();
+        if ( W == 0 || H == 0 || src.size() != static_cast<size_t>( W ) * H * 4 )
+        {
+            LOG_ERROR( "[ContentBrowser] the folder thumbnail was not captured: the readback returned {} "
+                       "byte(s) for a {}x{} image",
+                       src.size(), W, H );
+            return;
+        }
 
         // Center-crop to a square, then downscale (nearest) to a square thumbnail — frame the asset in the
         // viewport so the centered square captures it.

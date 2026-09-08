@@ -203,7 +203,16 @@ namespace Desert::Graphic::System
         // and drops the sun lobe and the sky ambient (PackFogParams says so per term). Fog on a
         // sky-less scene is legitimate, so there is no bail-out here.
         const FogGpuPayload payload = PackFogParams( m_Data, atmosphere, m_FogHeightY );
-        m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
+        const auto uploaded = m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
+        if ( !uploaded.IsSuccess() )
+        {
+            // The push constants below carry the camera and the pass would run with THIS frame's
+            // camera against LAST frame's fog block — a height and a density belonging to a different
+            // moment, which reads as fog sliding relative to the world rather than as a missing effect.
+            LOG_ERROR( "[Fog] the fog pass does not run this frame, its parameters were not uploaded: {}",
+                       uploaded.GetError() );
+            return;
+        }
 
         FogPush push{};
         push.InverseViewProjection = glm::inverse( camera->GetProjectionMatrix() * camera->GetViewMatrix() );

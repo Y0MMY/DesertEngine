@@ -24,7 +24,21 @@ namespace Desert::Graphic
 
         void SetRawData( const void* data, uint32_t size )
         {
-            m_Buffer->SetData( data, size );
+            // THE REFUSAL TERMINATES HERE, AND THAT IS A DECISION RATHER THAN AN OMISSION. Above this
+            // sit ~25 `sb->SetRawData(...)` call sites in material Update() overrides that the render
+            // graph calls with no channel of their own, and there is nothing any of them could do with a
+            // failure that this line does not already do: a storage block is rebuilt from its owner's
+            // CPU data every frame, so a refused write is retried on the next one by construction. What
+            // was genuinely missing was that NOBODY WAS TOLD — including, until Г13, this line, because
+            // SetData returned void. The refusal names the buffer itself (BaseBuffer has no GetName and
+            // does not need one for this), which is what turns "the lighting looked wrong for one frame"
+            // into a grep.
+            const auto wrote = m_Buffer->SetData( data, size );
+            if ( !wrote.IsSuccess() )
+                LOG_ERROR( "[SSBO] {} byte(s) were not uploaded, the shader reads the previous frame's "
+                           "contents -- {}",
+                           size, wrote.GetError() );
+
             MarkDirty(); // every slot owes itself this write
         }
 

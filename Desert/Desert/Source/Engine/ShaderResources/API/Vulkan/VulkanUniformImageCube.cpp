@@ -8,19 +8,9 @@ namespace Desert::ShaderResources::API::Vulkan
     VulkanUniformImageCube::VulkanUniformImageCube( const std::string_view debugName, uint32_t binding )
          : m_DebugName( debugName ), m_Binding( binding )
     {
-        RT_Invalidate();
     }
 
     VulkanUniformImageCube::~VulkanUniformImageCube()
-    {
-        Release();
-    }
-
-    void VulkanUniformImageCube::Release()
-    {
-    }
-
-    void VulkanUniformImageCube::RT_Invalidate()
     {
     }
 

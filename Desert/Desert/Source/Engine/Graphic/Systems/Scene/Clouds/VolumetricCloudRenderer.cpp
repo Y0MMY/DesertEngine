@@ -957,13 +957,29 @@ namespace Desert::Graphic::System
         if ( !BuildFieldPayload( payload ) )
             return;
 
-        m_ShadowParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
+        const auto shadowParams =
+             m_ShadowParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
         // Slot A, for the shadow map as well as for the eye: a hero cloud shades the ground under it
         // because it IS the cloud field, not because anything was added to the deferred pass.
         BuildAuthoredPayload( payload );
-        m_ShadowAuthoredBuffer->SetData( &m_AuthoredPayload,
-                                         static_cast<uint32_t>( sizeof( m_AuthoredPayload ) ) );
+        const auto shadowAuthored = m_ShadowAuthoredBuffer->SetData(
+             &m_AuthoredPayload, static_cast<uint32_t>( sizeof( m_AuthoredPayload ) ) );
+
+        // NO BLOCK, NO DISPATCH — the same answer this function already gives four lines up when
+        // BuildFieldPayload refuses, extended to the upload of what it built. A march that runs against
+        // the PREVIOUS frame's parameters does not merely look stale: the layer altitude, the planet
+        // radius and the map extent it reads must agree with the m_ShadowMapView computed below from the
+        // payload in hand, and a shadow map centred on one sphere while the eye march intersects another
+        // is the "seam at 30 km" this subsystem has already paid for once.
+        if ( !shadowParams.IsSuccess() || !shadowAuthored.IsSuccess() )
+        {
+            LOG_ERROR( "[Clouds] the shadow map is not rendered this frame; its parameters were not "
+                       "uploaded. field: {} | authored: {}",
+                       shadowParams.IsSuccess() ? "ok" : shadowParams.GetError(),
+                       shadowAuthored.IsSuccess() ? "ok" : shadowAuthored.GetError() );
+            return;
+        }
 
         // THE PLANET RADIUS IS TAKEN FROM THE PACKED BLOCK, not from the component, because the packer is
         // where it is floored — and a map centred on a different sphere than the one the march intersects
@@ -1454,14 +1470,28 @@ namespace Desert::Graphic::System
         if ( !BuildFieldPayload( payload ) )
             return;
 
-        m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
+        const auto traceParams = m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
         // Slot A. Rebuilt here rather than reused from the shadow map's call: the two dispatches sit on
         // opposite sides of the render graph and the shadow map may not have run at all this frame (no
         // casting, no strength, a failed allocation), so a payload built there is a payload that might
         // not exist. It is a handful of matrix inversions for at most four entities.
         BuildAuthoredPayload( payload );
-        m_AuthoredBuffer->SetData( &m_AuthoredPayload, static_cast<uint32_t>( sizeof( m_AuthoredPayload ) ) );
+        const auto traceAuthored =
+             m_AuthoredBuffer->SetData( &m_AuthoredPayload, static_cast<uint32_t>( sizeof( m_AuthoredPayload ) ) );
+
+        // NO BLOCK, NO MARCH. Both dispatches below — the sky-light occlusion volume and the trace
+        // itself — read this one upload, so half of it arriving is worse than none: the occlusion volume
+        // would be built from this frame's field and the march from last frame's, and the two are then
+        // asserting different clouds at the same time.
+        if ( !traceParams.IsSuccess() || !traceAuthored.IsSuccess() )
+        {
+            LOG_ERROR( "[Clouds] the cloud march does not run this frame; its parameters were not "
+                       "uploaded. field: {} | authored: {}",
+                       traceParams.IsSuccess() ? "ok" : traceParams.GetError(),
+                       traceAuthored.IsSuccess() ? "ok" : traceAuthored.GetError() );
+            return;
+        }
 
         const glm::mat4     viewProjection = camera->GetProjectionMatrix() * camera->GetViewMatrix();
         const CloudSubPixel subPixel       = CloudTraceSubPixel( m_FrameIndex );
@@ -1658,7 +1688,22 @@ namespace Desert::Graphic::System
         resolve.HistoryValid          = m_HistoryValid ? 1.0f : 0.0f;
         resolve.SubPixelOffset =
              glm::ivec2( static_cast<int32_t>( subPixel.X ), static_cast<int32_t>( subPixel.Y ) );
-        m_ResolveParamsBuffer->SetData( &resolve, static_cast<uint32_t>( sizeof( resolve ) ) );
+        const auto resolveParams =
+             m_ResolveParamsBuffer->SetData( &resolve, static_cast<uint32_t>( sizeof( resolve ) ) );
+        if ( !resolveParams.IsSuccess() )
+        {
+            // AND THE HISTORY IS INVALIDATED, which is the part that is not obvious. Skipping the
+            // reconstruction leaves m_HistoryImage[writeIndex] holding whatever it held before; next
+            // frame would reproject against it as though it were the previous frame's resolve, using a
+            // PrevViewProjection that never described it. That is a smear locked to the camera path —
+            // the hardest artefact in this subsystem to attribute to its cause. One un-reconstructed
+            // frame is visible for one frame; a poisoned history is visible until the camera stops.
+            m_HistoryValid = false;
+            LOG_ERROR( "[Clouds] the temporal reconstruction is skipped and the history dropped; its "
+                       "parameters were not uploaded: {}",
+                       resolveParams.GetError() );
+            return;
+        }
 
         renderer.ComputeImageBeginWrite( m_HistoryImage[writeIndex].get() );
         renderer.ComputeImageBeginWrite( m_HistoryGuideImage[writeIndex].get() );

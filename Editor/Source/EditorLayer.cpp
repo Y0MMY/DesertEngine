@@ -1208,7 +1208,13 @@ namespace Desert::Editor
         if ( !img )
             return Common::MakeError<bool>( "scene has no final image" );
 
-        outPixels = img->ReadPixelsRGBA8();
+        // Г13: ReadPixelsRGBA8 answers instead of returning an empty vector for every kind of failure.
+        // The size check below is kept and now means only what it says — this arm carries the reason.
+        auto read = img->ReadPixelsRGBA8();
+        if ( !read.IsSuccess() )
+            return Common::MakeFormattedError<bool>( "readback refused: {}", read.GetError() );
+
+        outPixels = read.ExtractValue();
         outWidth  = img->GetWidth();
         outHeight = img->GetHeight();
         if ( outPixels.size() != static_cast<size_t>( outWidth ) * outHeight * 4 )

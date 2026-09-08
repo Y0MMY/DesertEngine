@@ -613,8 +613,18 @@ namespace Desert::Graphic::System
         if ( !m_SkyParams || !m_UseProceduralSky )
             return;
 
-        const SkyGpuPayload payload = PackSky( m_SunDir, m_Sky );
-        m_SkyParams->SetData( &payload, kSkyPayloadBytes );
+        const SkyGpuPayload payload  = PackSky( m_SunDir, m_Sky );
+        const auto          uploaded = m_SkyParams->SetData( &payload, kSkyPayloadBytes );
+        if ( !uploaded.IsSuccess() )
+            // REPORTED, NOT RETURNED, AND THE REASON IS THE CALL GRAPH. This is called from the settings
+            // path — the sky block is re-packed whenever a knob moves — and from the frame path, and
+            // neither has anywhere to put a refusal: the caller changed a value, it did not ask for a
+            // frame. The consequence is bounded and self-correcting, which is what makes the log the
+            // right answer here rather than a shrug: the buffer keeps the previous block, the sky draws
+            // one frame behind, and the very next UploadSkyParams overwrites it.
+            LOG_ERROR( "[Skybox] the sky block was not uploaded; the sky keeps the previous parameters "
+                       "until the next update: {}",
+                       uploaded.GetError() );
     }
 
     void SkyboxRenderer::EnsureProceduralEnvironment( float deltaSeconds )
@@ -705,11 +715,27 @@ namespace Desert::Graphic::System
         CloudBakeBinding cloudBinding;
         if ( m_CloudBakeParams && m_CloudBakeAuthored )
         {
-            m_CloudBakeParams->SetData( &clouds.Params, kCloudPayloadBytes );
-            m_CloudBakeAuthored->SetData( &clouds.Authored, static_cast<uint32_t>( sizeof( clouds.Authored ) ) );
+            const auto params   = m_CloudBakeParams->SetData( &clouds.Params, kCloudPayloadBytes );
+            const auto authored = m_CloudBakeAuthored->SetData(
+                 &clouds.Authored, static_cast<uint32_t>( sizeof( clouds.Authored ) ) );
 
-            cloudBinding.Params   = m_CloudBakeParams.get();
-            cloudBinding.Authored = m_CloudBakeAuthored.get();
+            // BOTH, OR NEITHER IS BOUND — and the paragraph above is exactly why. It says a layer that
+            // is not marched still WRITES, because uninitialised device memory behind a valid descriptor
+            // is what the shader's gate protects against, not an absent upload. An upload that refused
+            // leaves the buffer in precisely the state that paragraph forbids, so the bake must run
+            // without clouds rather than with a block it cannot vouch for.
+            if ( params.IsSuccess() && authored.IsSuccess() )
+            {
+                cloudBinding.Params   = m_CloudBakeParams.get();
+                cloudBinding.Authored = m_CloudBakeAuthored.get();
+            }
+            else
+            {
+                LOG_ERROR( "[SkyAtmosphere] the environment bake carries no clouds this time; their "
+                           "blocks were not uploaded. params: {} | authored: {}",
+                           params.IsSuccess() ? "ok" : params.GetError(),
+                           authored.IsSuccess() ? "ok" : authored.GetError() );
+            }
         }
 
         cloudBinding.Marched      = clouds.Marched;

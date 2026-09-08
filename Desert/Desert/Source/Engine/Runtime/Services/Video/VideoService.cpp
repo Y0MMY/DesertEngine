@@ -145,8 +145,23 @@ namespace Desert::Runtime
             if ( vp.Dirty )
             {
                 if ( auto* img = ResolveTextureImage( vp.Texture ) )
-                    img->SetData( Core::Formats::ImagePixelData( vp.Rgba ) );
-                vp.Dirty = false;
+                {
+                    // THE DIRTY FLAG SURVIVES A REFUSED UPLOAD, and that is the whole content of this
+                    // change. Clearing it regardless meant a frame that never reached the GPU was
+                    // recorded as delivered, so the video froze on the previous picture and the decoder
+                    // walked on past it — the one thing that could have corrected it was the flag that
+                    // had just been thrown away. It stays set, so the next tick uploads vp.Rgba again.
+                    const auto uploaded = img->SetData( Core::Formats::ImagePixelData( vp.Rgba ) );
+                    if ( uploaded.IsSuccess() )
+                        vp.Dirty = false;
+                    else
+                        LOG_ERROR( "[Video] a decoded frame did not reach the GPU and will be retried: {}",
+                                   uploaded.GetError() );
+                }
+                else
+                {
+                    vp.Dirty = false; // no texture to write into; the decode still advanced
+                }
             }
         }
     }

@@ -452,12 +452,20 @@ namespace Desert::Graphic::API::Vulkan
         TransitionLayout( cmd, originalLayout );
     }
 
-    std::vector<uint8_t> VulkanImage2D::ReadPixelsRGBA8()
+    Common::ResultStr<std::vector<uint8_t>> VulkanImage2D::ReadPixelsRGBA8()
     {
+        // EVERY ARM OF THIS FUNCTION USED TO RETURN `{}` AND MEAN SOMETHING DIFFERENT BY IT. An
+        // uninitialised image, a format the packer does not know, a staging allocation that failed, a
+        // command buffer that could not be taken and a readback that refused all produced one empty
+        // vector — which is also exactly what a legitimately empty picture would produce. The two
+        // callers that cache thumbnails cannot tell "not ready, ask again" from "there is nothing here",
+        // so they either cached a blank PNG for good or retried forever. Contract §1.4.
         const uint32_t w = m_Specification.Width;
         const uint32_t h = m_Specification.Height;
         if ( w == 0 || h == 0 || m_Resource.Image == VK_NULL_HANDLE )
-            return {};
+            return Common::MakeFormattedError<std::vector<uint8_t>>(
+                 "ReadPixelsRGBA8: the image is {}x{} and its VkImage is {}", w, h,
+                 m_Resource.Image == VK_NULL_HANDLE ? "null" : "valid" );
 
         // The engine's format vocabulary, mapped to the pack's own. The MAPPING belongs here, where the
         // ImageFormat enum is; the PACK is shared with the swapchain readback next door (PixelPack.hpp),
@@ -477,7 +485,9 @@ namespace Desert::Graphic::API::Vulkan
                 source = Graphic::PackedPixelSource::RGBA32F;
                 break;
             default:
-                return {}; // only color formats we know how to pack
+                return Common::MakeFormattedError<std::vector<uint8_t>>(
+                     "ReadPixelsRGBA8: image format {} has no RGBA8 packing",
+                     static_cast<int>( fmt ) ); // only colour formats the pack knows
         }
 
         auto allocator =
@@ -490,15 +500,16 @@ namespace Desert::Graphic::API::Vulkan
                                        .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT };
         auto allocRes = allocator->RT_AllocateBuffer( "ThumbReadback", bInfo, VMA_MEMORY_USAGE_GPU_TO_CPU, staging );
         if ( !allocRes.IsSuccess() )
-            return {};
+            return Common::MakeFormattedError<std::vector<uint8_t>>(
+                 "ReadPixelsRGBA8: {} byte readback buffer failed: {}", srcSize, allocRes.GetError() );
         VmaAllocation stagingAlloc = allocRes.GetValue();
 
         const auto cmdAlloc = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
         if ( !cmdAlloc.IsSuccess() )
         {
-            LOG_ERROR( "[ReadPixelsRGBA8] no command buffer: {}", cmdAlloc.GetError() );
             allocator->RT_DestroyBuffer( staging, stagingAlloc );
-            return {};
+            return Common::MakeFormattedError<std::vector<uint8_t>>( "ReadPixelsRGBA8: no command buffer: {}",
+                                                                     cmdAlloc.GetError() );
         }
         const VkCommandBuffer cmd      = cmdAlloc.GetValue();
         const VkImageLayout   original = m_Resource.Layout;
@@ -518,15 +529,16 @@ namespace Desert::Graphic::API::Vulkan
             const auto   read     = readback.ReadInto( raw.data(), static_cast<size_t>( srcSize ) );
             if ( !read.IsSuccess() )
             {
-                LOG_ERROR( "[ReadPixelsRGBA8] {}", read.GetError() );
+                const std::string reason = read.GetError();
                 readback.Unmap();
                 allocator->RT_DestroyBuffer( staging, stagingAlloc );
-                return {};
+                return Common::MakeFormattedError<std::vector<uint8_t>>( "ReadPixelsRGBA8: {}", reason );
             }
         }
         allocator->RT_DestroyBuffer( staging, stagingAlloc );
 
-        return Graphic::PackToRGBA8( raw.data(), raw.size(), static_cast<size_t>( w ) * h, source );
+        return Common::MakeSuccess(
+             Graphic::PackToRGBA8( raw.data(), raw.size(), static_cast<size_t>( w ) * h, source ) );
     }
 
     void VulkanImage2D::TransitionLayout( VkCommandBuffer cmd, VkImageLayout newLayout, uint32_t mip )

@@ -241,7 +241,15 @@ namespace Desert::Graphic::API::Vulkan
         fbSpec.Attachments.Attachments = { Core::Formats::ImageFormat::BGRA8F };
         fbSpec.PresentTarget           = true; // build its render pass to match the actual present pass
         m_CompositeFramebuffer = std::make_shared<VulkanFramebuffer>( fbSpec );
-        std::static_pointer_cast<VulkanFramebuffer>( m_CompositeFramebuffer )->RT_Invalidate();
+        // The wrapper whose render pass every present/UI pipeline is built against. A failure here is not
+        // a degraded frame, it is a pipeline compiled against nothing — so the swapchain refuses, which
+        // it already does for the framebuffers above and could not for this one until RT_Invalidate was
+        // made NO_DISCARD.
+        const auto composite =
+             std::static_pointer_cast<VulkanFramebuffer>( m_CompositeFramebuffer )->RT_Invalidate();
+        if ( !composite.IsSuccess() )
+            return Common::MakeFormattedError<bool>( "the swapchain composite framebuffer: {}",
+                                                     composite.GetError() );
 
         return Common::MakeSuccess( true );
     }

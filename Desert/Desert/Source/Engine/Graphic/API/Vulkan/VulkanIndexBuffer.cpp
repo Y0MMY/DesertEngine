@@ -34,12 +34,12 @@ namespace Desert::Graphic::API::Vulkan
         m_StorageBuffer.Allocate( size );
     }
 
-    void VulkanIndexBuffer::SetData( void* data, uint32_t size, uint32_t offset )
+    Common::BoolResultStr VulkanIndexBuffer::SetData( void* data, uint32_t size, uint32_t offset )
     {
+        // A refusal rather than a silent no-op — see the sibling arm in VulkanVertexBuffer::SetData for
+        // the defect that silence hid.
         if ( m_Usage != BufferUsage::Dynamic )
-        {
-            return;
-        }
+            return Common::MakeError<bool>( "index buffer is not Dynamic, so it has no mapping to write through" );
 
         auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
                               ->GetVulkanAllocator()
@@ -53,12 +53,13 @@ namespace Desert::Graphic::API::Vulkan
         // anywhere. Every current caller passes 0 or omits it, so nothing changes today; what changes is
         // that the interface is now telling the truth.
         //
-        // A void override has no channel, so the report is the log. The offset is now BOUNDED as well as
-        // honoured: `dst + offset` past the end of the mapping corrupted whatever VMA had placed after it.
+        // The offset is BOUNDED as well as honoured: `dst + offset` past the end of the mapping
+        // corrupted whatever VMA had placed after it.
         MappedMemory mapping = allocator->MapMemory( m_MemoryAllocation );
         const auto   wrote   = mapping.Write( data, size, offset );
         if ( !wrote.IsSuccess() )
-            LOG_ERROR( "[VulkanIndexBuffer] SetData wrote nothing: {}", wrote.GetError() );
+            return Common::MakeFormattedError<bool>( "index buffer SetData wrote nothing: {}", wrote.GetError() );
+        return BOOLSUCCESS;
     }
 
     void VulkanIndexBuffer::Use( BindUsage /*use*/ /*= BindUsage::Bind */ ) const
