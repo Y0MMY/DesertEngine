@@ -307,6 +307,167 @@ TEST( ShaderReflection, ClassifiesDimensionsDirectly )
     }
 }
 
+// ─── One descriptor slot holds one resource ───────────────────────────────────────────────────────
+//
+// Г17. The engine has an automatic binding allocator in its shader DSL (DShaderParser's
+// TranslateLayoutSugar): `Uniform Name {}` with no number takes the lowest slot not already taken. It
+// learns which slots are taken by scanning ONE TEXT for `binding = <digits>` — and that is a
+// recognizer, not a census. It cannot see a binding spelled as a MACRO (three shipped headers do
+// exactly that, e.g. Common/CloudAuthored.glslh's `binding = CLOUD_AUTHORED_BUFFER_BINDING`) and it
+// cannot see one declared in an INCLUDED file at all, because every `.glslh` is translated in its own
+// separate call. So it can hand out an occupied number, and nothing downstream used to notice:
+//
+//   * glslang compiles two resources on one Binding with no diagnostic — measured with
+//     `glslc -Werror --target-env=vulkan1.1` on 2026-09-08, both Binding decorations present in the
+//     disassembly;
+//   * the reflection's buckets are keyed BY BINDING, so the second resource simply overwrote the
+//     first and the descriptor layout that came out was complete, plausible, and short one resource.
+//
+// THE RELATION, and it is the point of these three tests: the number of descriptor-bound resources the
+// SPIR-V declares must equal the number of slots the layout claims. Both sides look right on their own
+// — the module is valid, the layout is well-formed — and they disagree by exactly the resource that
+// was lost. Asserting it here is what makes the loss impossible to spell, whatever syntax produced it.
+namespace
+{
+    // How many resources in the module consume a descriptor slot — the left-hand side of the relation,
+    // read from the SPIR-V rather than from the reflection under test.
+    size_t DescriptorBoundResourceCount( const std::vector<uint32_t>& spirv )
+    {
+        spirv_cross::CompilerGLSL compiler( spirv );
+        const auto                resources = compiler.get_shader_resources();
+        return resources.uniform_buffers.size() + resources.sampled_images.size() +
+               resources.storage_buffers.size() + resources.storage_images.size();
+    }
+
+    size_t LayoutSlotCount( const ShaderResource::ReflectionData& data )
+    {
+        size_t total = 0;
+        for ( const auto& [set, descriptorSet] : data.ShaderDescriptorSets )
+            total += ShaderReflection::BuildLayoutBindings( descriptorSet ).size();
+        return total;
+    }
+} // namespace
+
+// Two resources of the SAME kind on one binding: the pure form of the loss, because both land in one
+// bucket and the map keeps whichever was written last.
+TEST( ShaderReflection, RefusesTwoStorageBuffersOnOneBinding )
+{
+    // Written the way the shipped headers write it, so the test fails for the reason the tree can
+    // actually produce: an explicit binding the DSL's digit scan cannot read, and a second resource on
+    // the number that scan therefore believes is free.
+    const char* kMacroThenAuto = R"(#version 450
+#define CLOUD_AUTHORED_BUFFER_BINDING 0
+layout(std430, binding = CLOUD_AUTHORED_BUFFER_BINDING) readonly buffer Authored { vec4 a[]; };
+layout(std430, binding = 0) buffer Output { vec4 o[]; };
+layout(local_size_x = 8) in;
+void main() { o[0] = a[0]; }
+)";
+
+    const auto spirv = Compile( kMacroThenAuto, shaderc_glsl_compute_shader );
+    ASSERT_FALSE( spirv.empty() ) << "the compiler refused it, so this test is no longer about silence";
+    ASSERT_EQ( DescriptorBoundResourceCount( spirv ), 2u );
+
+    ShaderResource::ReflectionData data;
+    const auto diagnostics = ShaderReflection::ReflectStage( spirv, ShaderStage::Compute, data );
+
+    ASSERT_EQ( diagnostics.size(), 1u ) << FirstOr( diagnostics, "no diagnostic at all" );
+    EXPECT_NE( diagnostics.front().find( "Authored" ), std::string::npos ) << diagnostics.front();
+    EXPECT_NE( diagnostics.front().find( "Output" ), std::string::npos ) << diagnostics.front();
+    EXPECT_NE( diagnostics.front().find( "binding 0" ), std::string::npos ) << diagnostics.front();
+
+    // And the reason the refusal has to happen HERE: the layout on its own cannot say anything is
+    // wrong. Two declared resources, one slot — the shape a reviewer of either side would approve.
+    EXPECT_EQ( LayoutSlotCount( data ), 1u )
+         << "a same-bucket collision no longer loses a resource; if that changed, this test is asserting"
+            " the wrong half of the relation";
+}
+
+// Two resources of DIFFERENT kinds on one binding. Nothing is lost this time — and it is worse: the
+// layout keeps both, with the same binding number, which is not a VkDescriptorSetLayout Vulkan will
+// accept. The relation holds and the result is still invalid, so the count alone is not the guard.
+TEST( ShaderReflection, RefusesAUniformBufferAndASamplerOnOneBinding )
+{
+    const char* kCrossBucket = R"(#version 450
+#define FOG_PARAMS_BINDING 3
+layout(binding = FOG_PARAMS_BINDING) uniform FogParams { vec4 u_Fog; };
+layout(binding = 3) uniform sampler2D u_Depth;
+layout(location = 0) out vec4 o_Color;
+void main() { o_Color = u_Fog + texture(u_Depth, vec2(0.5)); }
+)";
+
+    const auto spirv = Compile( kCrossBucket, shaderc_glsl_fragment_shader );
+    ASSERT_FALSE( spirv.empty() );
+
+    ShaderResource::ReflectionData data;
+    const auto diagnostics = ShaderReflection::ReflectStage( spirv, ShaderStage::Fragment, data );
+
+    ASSERT_EQ( diagnostics.size(), 1u ) << FirstOr( diagnostics, "no diagnostic at all" );
+    EXPECT_NE( diagnostics.front().find( "FogParams" ), std::string::npos ) << diagnostics.front();
+    EXPECT_NE( diagnostics.front().find( "u_Depth" ), std::string::npos ) << diagnostics.front();
+    EXPECT_NE( diagnostics.front().find( "binding 3" ), std::string::npos ) << diagnostics.front();
+
+    const auto bindings = ShaderReflection::BuildLayoutBindings( data.ShaderDescriptorSets.at( 0 ) );
+    ASSERT_EQ( bindings.size(), 2u );
+    EXPECT_EQ( bindings[0].binding, bindings[1].binding )
+         << "two descriptors on one binding number — vkCreateDescriptorSetLayout rejects this, which is"
+            " why the refusal above must happen before it is ever built";
+}
+
+// The other direction, and the one a naive check gets wrong: a binding number is only claimed WITHIN
+// its set, and a resource shared by two stages is one resource seen twice, not two.
+TEST( ShaderReflection, ADescriptorSetAndAStageBoundaryAreNotCollisions )
+{
+    const char* kTwoSets = R"(#version 450
+layout(set = 0, binding = 0) uniform sampler2D u_Albedo;
+layout(set = 1, binding = 0) uniform sampler2D u_Normal;
+layout(location = 0) out vec4 o_Color;
+void main() { o_Color = texture(u_Albedo, vec2(0.5)) + texture(u_Normal, vec2(0.5)); }
+)";
+    const char* kVertexShare = R"(#version 450
+layout(set = 0, binding = 0) uniform sampler2D u_Albedo;
+void main() { gl_Position = texture(u_Albedo, vec2(0.5)); }
+)";
+
+    ShaderResource::ReflectionData data;
+    const auto twoSets = ShaderReflection::ReflectStage( Compile( kTwoSets, shaderc_glsl_fragment_shader ),
+                                                         ShaderStage::Fragment, data );
+    EXPECT_TRUE( twoSets.empty() ) << FirstOr( twoSets, "" );
+
+    // The same set-0 binding-0 sampler again, from a second stage: the merge path, which must stay silent.
+    const auto shared = ShaderReflection::ReflectStage( Compile( kVertexShare, shaderc_glsl_vertex_shader ),
+                                                        ShaderStage::Vertex, data );
+    EXPECT_TRUE( shared.empty() ) << FirstOr( shared, "" );
+
+    EXPECT_EQ( LayoutSlotCount( data ), 2u );
+}
+
+// The same loss across a STAGE boundary, which the two tests above cannot reach: each stage is valid on
+// its own and each is reflected by its own call, so the collision exists only in the merged data — and
+// the merge is exactly what a pipeline layout is built from.
+TEST( ShaderReflection, RefusesTwoStagesNamingDifferentResourcesOnOneSlot )
+{
+    const char* kVertex   = R"(#version 450
+layout(binding = 0) uniform Transform { mat4 u_ViewProjection; };
+void main() { gl_Position = u_ViewProjection[0]; }
+)";
+    const char* kFragment = R"(#version 450
+layout(binding = 0) uniform sampler2D u_Albedo;
+layout(location = 0) out vec4 o_Color;
+void main() { o_Color = texture(u_Albedo, vec2(0.5)); }
+)";
+
+    ShaderResource::ReflectionData data;
+    const auto first = ShaderReflection::ReflectStage( Compile( kVertex, shaderc_glsl_vertex_shader ),
+                                                       ShaderStage::Vertex, data );
+    ASSERT_TRUE( first.empty() ) << FirstOr( first, "" );
+
+    const auto second = ShaderReflection::ReflectStage( Compile( kFragment, shaderc_glsl_fragment_shader ),
+                                                        ShaderStage::Fragment, data );
+    ASSERT_EQ( second.size(), 1u ) << FirstOr( second, "no diagnostic at all" );
+    EXPECT_NE( second.front().find( "Transform" ), std::string::npos ) << second.front();
+    EXPECT_NE( second.front().find( "u_Albedo" ), std::string::npos ) << second.front();
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

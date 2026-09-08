@@ -908,10 +908,20 @@ namespace Desert::Core::Preprocess
         // STAGE" until 2026-09-08 and the code has never done that. AssembleStage translates the DSL `Include`
         // block and the stage body in TWO separate calls, and ShaderIncluder hands every `#include`d `.glslh`
         // its own call as well. So each of those texts starts counting from zero, and two auto declarations in
-        // two of them collide. Nothing in the tree does it today (no shipped shader uses an `Include` block and
-        // no `.glslh` declares an auto form), which is why it has never been seen — but the guarantee the old
-        // wording offered was not one this function can make. Anything SHARED — a resource an include declares,
-        // one a second stage also names, or one a C++ site binds by a fixed number — must keep its EXPLICIT (n).
+        // two of them collide. Nothing in the tree does it today (measured 2026-09-08: NO shipped `.shader` or
+        // `.glslh` uses ANY paren-less form, for a location or for a binding), which is why it has never been
+        // seen — but the guarantee the old wording offered was not one this function can make. Anything SHARED —
+        // a resource an include declares, one a second stage also names, or one a C++ site binds by a fixed
+        // number — must keep its EXPLICIT (n).
+        //
+        // AND THE SEED IS DIGITS, SO A MACRO IS INVISIBLE TOO. The occupancy scan below reads `binding = (\d+)`,
+        // and three shipped headers spell the number as a macro instead — Common/CloudAuthored.glslh,
+        // Common/CloudParams.glslh, Common/FogParams.glslh. An auto declaration added to one of those files
+        // would be handed a number that file has already spent. Widening the pattern does not fix it: the
+        // file-scope blindness above defeats any pattern, because the number an auto form collides with usually
+        // lives in a text this call never sees. It is caught after compilation instead, where a number is a
+        // number whatever spelled it — ShaderReflection::ReflectStage refuses a descriptor slot claimed twice
+        // and names both resources, and Tests/Engine/ShaderCacheKey asserts it over every shipped shader.
         //
         // Storage-image format qualifiers (`layout(binding=n, rgba32f) uniform imageCube`) and tessellation
         // layout (`layout(vertices=n) out`, `layout(quads,...) in`) are inherently GLSL-structural and stay

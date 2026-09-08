@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <format>
+#include <map>
+#include <utility>
 
 namespace Desert::Graphic::API::Vulkan::ShaderReflection
 {
@@ -98,6 +100,71 @@ namespace Desert::Graphic::API::Vulkan::ShaderReflection
 
         spirv_cross::CompilerGLSL    compiler( spirv );
         spirv_cross::ShaderResources resources = compiler.get_shader_resources();
+
+        // ONE DESCRIPTOR SLOT, ONE RESOURCE — asserted here because this is the only place that knows
+        // every occupied number, whatever spelled it.
+        //
+        // Nothing upstream can make that guarantee. The DSL's automatic binding allocator seeds itself
+        // by scanning ONE TEXT for `binding = <digits>` (DShaderParser.cpp, TranslateLayoutSugar), and it
+        // is blind twice over: a binding written as a MACRO is not digits (Common/CloudAuthored.glslh
+        // declares its buffer at `binding = CLOUD_AUTHORED_BUFFER_BINDING`), and a binding declared in an
+        // INCLUDED file is not in the text at all, because ShaderIncluder hands every `.glslh` its own
+        // separate translation call. Extending that scan is a race against whatever syntax arrives next.
+        // glslang does not close it either: two resources decorated with the same Binding compile clean,
+        // with no diagnostic, `-Werror` included (measured with glslc 2026-09-08).
+        //
+        // And the collision is INVISIBLE further down: the buckets below are keyed BY BINDING, so the
+        // second resource overwrites the first, BuildLayoutBindings emits one entry, and the layout this
+        // reflection produces is complete, plausible and wrong. Refusing by name beats that (Ф4) —
+        // VulkanShader::Reflect logs every message here and drops the shader.
+        //
+        // The occupancy starts from what EARLIER STAGES already put in `data`, because the same collision
+        // exists across a stage boundary: a vertex and a fragment stage naming two DIFFERENT resources on
+        // one slot merge into one bucket entry with exactly the same loss. Identity is the resource NAME —
+        // one resource declared by two stages is the merge this reflection is built to do (and is what
+        // FillResource's stage mask exists for), two names on one slot is the defect.
+        std::map<std::pair<uint32_t, uint32_t>, std::string> claimed;
+        for ( const auto& [set, descriptorSet] : data.ShaderDescriptorSets )
+        {
+            const auto remember = [&claimed, set = set]( const auto& bucket )
+            {
+                for ( const auto& [binding, resource] : bucket )
+                    claimed.emplace( std::pair{ set, binding }, resource.Name );
+            };
+            remember( descriptorSet.UniformBuffers );
+            remember( descriptorSet.Image2DSamplers );
+            remember( descriptorSet.Image3DSamplers );
+            remember( descriptorSet.ImageCubeSamplers );
+            remember( descriptorSet.StorageBuffers );
+            remember( descriptorSet.StorageImage2DSamplers );
+            remember( descriptorSet.StorageImage3DSamplers );
+        }
+
+        const auto claimSlot = [&]( const spirv_cross::Resource& resource )
+        {
+            const uint32_t set     = compiler.get_decoration( resource.id, spv::DecorationDescriptorSet );
+            const uint32_t binding = compiler.get_decoration( resource.id, spv::DecorationBinding );
+
+            const auto [it, inserted] = claimed.emplace( std::pair{ set, binding }, resource.name );
+            if ( !inserted && it->second != resource.name )
+            {
+                diagnostics.push_back( std::format(
+                     "set {}, binding {} is claimed by two resources: '{}' and '{}'; a descriptor slot holds "
+                     "one resource, so one of the two would be silently dropped. If either number was "
+                     "allocated automatically by the shader DSL, give that declaration an explicit binding",
+                     set, binding, it->second, resource.name ) );
+            }
+        };
+        // Every category that consumes a descriptor slot, in the order the buckets below read them, so a
+        // shader with two collisions reports them the same way twice.
+        for ( const auto& resource : resources.uniform_buffers )
+            claimSlot( resource );
+        for ( const auto& resource : resources.sampled_images )
+            claimSlot( resource );
+        for ( const auto& resource : resources.storage_buffers )
+            claimSlot( resource );
+        for ( const auto& resource : resources.storage_images )
+            claimSlot( resource );
 
         // Uniform Buffers
         for ( const auto& resource : resources.uniform_buffers )
