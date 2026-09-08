@@ -1,0 +1,376 @@
+// EVERY SCANNER THAT ENUMERATES CONTENT GOES THROUGH ONE ENUMERATION — now checked, not merely written.
+//
+// `Common::Utils::FileSystem::ListFilesRecursive` returns BOTH halves of the content world: the loose
+// files on disk and everything a mounted `.dpak` holds under the same root. Its own header states the
+// rule and the reason: "every scanner that enumerates content must go through this: the font and icon
+// services each used to walk only the disk half, so a packaged game — where the loose directories do not
+// exist at all — scanned nothing and no text could resolve its font."
+//
+// That sentence was a COMMENT, and a comment cannot see a second offender arrive. Two did.
+//
+//   * `EditorLayer::CollectAvailableScenes` walked the scenes root itself, so a packaged project had no
+//     levels in the Open Scene popup, in the palette's Scene group, or on the control channel;
+//   * `BuildSettingsPanel::RescanScenes` did the same over the whole content root — the THIRD list of
+//     this project's levels — and that one chooses which scenes go INTO a package. It would have shipped
+//     a game with no levels in it, successfully.
+//
+// Two instances of one shape is this project's own bar for making a rule enforceable, so here it is.
+//
+// ── WHAT THE REGISTER SAYS, AND WHY IT HAS TWO KINDS OF ROW ────────────────────────────────────────
+//
+// Not every directory walk is a content scanner, and a census that pretended otherwise would be noise
+// nobody could act on. A user's `~/.desertengine`, a machine-local thumbnail cache, the packager reading
+// the tree it is about to pack, an importer opening `.fbx` files that are never shipped, and the runtime
+// looking for the `.dpak` files themselves — none of those can go through a mount, and two of them
+// (the packager, the pak discovery) would be circular if they did.
+//
+// So a row is either NOT CONTENT, with the reason, or it is DEBT, with an owner. The debt rows are real
+// defects that are latent today because the editor does not yet mount a pak; they are listed rather than
+// fixed because they live in other people's files, and a register with owners is how this codebase
+// carries that (SettingConsumers does exactly the same and for the same reason).
+//
+// ── WHAT THIS SUITE ACTUALLY ENFORCES ──────────────────────────────────────────────────────────────
+//
+//   1. NO UNREGISTERED WALK. A file that starts walking a directory itself must be argued for here.
+//      This is the direction that matters: it is how a third `CollectAvailableScenes` gets caught the
+//      day it is written rather than the day somebody packages the game.
+//   2. NO STALE ROW. A row whose file no longer walks anything is removed, so the register describes the
+//      tree instead of the tree of some past afternoon.
+//   3. THE DEBT DOES NOT GROW. Its size is pinned. A new content scanner cannot be filed as debt to make
+//      this suite pass — adding a row to that list is a deliberate, visible act.
+//   4. EVERY DEBT ROW NAMES AN OWNER, because an exception with nobody's name on it is unreadable in a
+//      month.
+//
+// TOOLS/ ARE OUT OF SCOPE, and that is one decision rather than ten rows. `PakTool`, `DShaderTool`,
+// `SceneMigrator`, `ProjectHub` and the rest are offline programs over a source tree; there is no mount
+// in the process and no packaged case for them to be wrong about. Their walks are not content scanning.
+
+// The comment-and-literal blanker is SHARED with the settings census rather than rewritten here, and
+// the sharing is not thrift. This suite's first run failed on the two files it had just FIXED, because
+// their new comments say "this used to be a raw recursive_directory_iterator" — a checker that reads
+// comments as code is the same "a comment is not the code" defect, inverted, and the blanker is where
+// that lesson is already paid for (its own header lists a character literal that ate hundreds of lines).
+#include "../../Engine/SettingConsumers/setting_consumers_reader.hpp"
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <set>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace
+{
+    // ── THE REGISTER ────────────────────────────────────────────────────────────────────────────────
+
+    enum class Verdict
+    {
+        TheOneEnumeration, ///< the implementation every other scanner is supposed to call
+        NotContent,        ///< it walks something that is not this project's content
+        Debt,              ///< it walks content the raw way, and somebody owes the fix
+    };
+
+    struct ScannerRow
+    {
+        const char* File;
+        Verdict     What;
+        // Why it is not content, or — for a debt row — WHAT it walks. Never empty: a row nobody can read
+        // is a row that gets copied for the wrong reason.
+        const char* Reason;
+        // Debt rows only. Empty for the others.
+        const char* Owner;
+    };
+
+    // Filed by A6-2. Six content scanners were found the day this census was written; A6-2 fixed the two
+    // that were its own subject — the scene lists in EditorLayer and BuildSettingsPanel — and left the
+    // four below, which live in other people's files.
+    constexpr const char* kUnassigned = "unassigned - filed by A6-2, awaiting an owner";
+
+    constexpr ScannerRow kScanners[] = {
+         // ── the one implementation ──────────────────────────────────────────────────────────────────
+         { "Desert/Common/Source/Common/Utilities/FileSystem.cpp", Verdict::TheOneEnumeration,
+           "ListFilesRecursive itself: the disk half of the content world, merged with the pak half.", "" },
+
+         // ── not content ─────────────────────────────────────────────────────────────────────────────
+         { "Desert/Common/Source/Common/Utilities/ContentManifest.cpp", Verdict::NotContent,
+           "hashes a SOURCE tree to produce a release artifact. The manifest of a mounted archive comes "
+           "from FromPak, which reads the index instead of the bytes.",
+           "" },
+         { "Editor/Source/Editor/Core/CrashRecovery.cpp", Verdict::NotContent,
+           "the user's own ~/.desertengine session directory. Never packaged, never a project's content.", "" },
+         { "Editor/Source/Editor/Core/LayoutManager.cpp", Verdict::NotContent,
+           "~/.desertengine/Layouts - one person's saved window layouts, per the config-ownership rule.", "" },
+         { "Editor/Source/Editor/Packaging/GamePackager.cpp", Verdict::NotContent,
+           "reads the source tree it is about to PACK. Reading it through a mount would be circular: the "
+           "packager would pack the archive into itself.",
+           "" },
+         { "Editor/Source/Editor/Import/Blend/BlendImporter.hpp", Verdict::NotContent,
+           "source art (.blend) that exists only in an authoring tree and is never shipped.", "" },
+         { "Editor/Source/Editor/Import/ImportManager.cpp", Verdict::NotContent,
+           "source art (.fbx and friends) awaiting cook. A packaged game imports nothing.", "" },
+         { "Editor/Source/Editor/Import/MeshDnD.cpp", Verdict::NotContent, "same: source art, pre-cook.", "" },
+         { "Editor/Source/Editor/Import/MeshMaterial.cpp", Verdict::NotContent,
+           "same: textures beside a source mesh, resolved during import.", "" },
+         { "Editor/Source/Editor/Panels/Collections/CollectionsPanel.cpp", Verdict::NotContent,
+           "enumerates installed collection FOLDERS, not files - it looks for directories that contain a "
+           "collection.json. The shared enumeration returns files and cannot answer that question.",
+           "" },
+         { "Editor/Source/Editor/Widgets/ThumbnailCache.cpp", Verdict::NotContent,
+           "Cooked/Thumbnails, a machine-local cache this function also DELETES from. Not content, and "
+           "nothing a package contains.",
+           "" },
+         { "Runtime/Source/PackagedContent.cpp", Verdict::NotContent,
+           "finds the .dpak files THEMSELVES. It cannot go through the mount it is about to create.", "" },
+
+         // ── debt: these really do walk this project's content ───────────────────────────────────────
+         { "Editor/Source/Editor/Core/AssetReferencesScan.cpp", Verdict::Debt,
+           "walks ASSETS_PATH to index every asset reference. In a mounted project the index would be "
+           "empty and every reference would read as unused.",
+           kUnassigned },
+         { "Editor/Source/Editor/Panels/FileExplorer/FileExplorerPanel.cpp", Verdict::Debt,
+           "the content browser itself - the editor's own window onto the content world, showing only "
+           "the loose half of it.",
+           kUnassigned },
+         { "Editor/Source/Editor/Panels/NodeGraph/NodeGraphPanel.cpp", Verdict::Debt,
+           "walks ASSETS_PATH/ShaderGraphs for the Load popup; a mounted project would offer no graphs.",
+           kUnassigned },
+         { "Editor/Source/Editor/Panels/SceneProperties/ComponentEditorRegistrations.cpp", Verdict::Debt,
+           "the Lua script picker, and the worst of the set: it walks the literal relative path "
+           "\"Resources\" against the process's working directory, so it bypasses the PROJECT PATH census "
+           "as well as this one and finds nothing at all unless the editor happens to have been started "
+           "from the right folder.",
+           kUnassigned },
+    };
+
+    // PINNED. Point 3: a new content scanner must not be able to make this suite pass by joining the
+    // debt list. Moving one to NotContent, or fixing it away, is what makes this number go DOWN.
+    constexpr std::size_t kDebtRowCount = 4;
+
+    // ── FINDING THE TREE AND READING IT ─────────────────────────────────────────────────────────────
+
+    // Walk up from wherever the binary was started, exactly as SettingConsumers and the font-baker
+    // suite do, so this need not be run from one precise directory.
+    std::string RepoRoot()
+    {
+        std::string prefix = "./";
+        for ( int up = 0; up < 6; ++up )
+        {
+            std::ifstream probe( prefix + "Desert/Common/Source/Common/Utilities/FileSystem.cpp" );
+            if ( probe )
+                return prefix;
+            prefix += "../";
+        }
+        return {};
+    }
+
+    std::string ReadFile( const std::string& path )
+    {
+        std::ifstream in( path );
+        if ( !in )
+            return {};
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        return ss.str();
+    }
+
+    // Does this file construct a directory iterator, IN CODE?
+    //
+    // COMMENTS AND LITERALS ARE BLANKED FIRST, and that is not a refinement — it is what makes the
+    // answer mean anything. Written without it, this suite failed on the two files A6-2 had just fixed:
+    // both carry a comment saying "this used to be a raw recursive_directory_iterator", and the checker
+    // read the sentence about the defect as the defect. A census that cannot tell a description of a
+    // thing from the thing is the "a comment is not the code" failure with the reader on the wrong side.
+    bool WalksADirectory( const std::string& source )
+    {
+        const std::string code = Desert::Tests::ConsumerText::StripCommentsAndLiterals( source );
+        return code.find( "directory_iterator" ) != std::string::npos;
+    }
+
+    // The roots that hold code which RUNS - an editing session or a shipped game. Tools/ is excluded by
+    // the argument at the top of this file.
+    const std::vector<std::string>& ScannedRoots()
+    {
+        static const std::vector<std::string> roots = {
+             "Editor/Source",
+             "Runtime/Source",
+             "Desert/Desert/Source",
+             "Desert/Common/Source",
+        };
+        return roots;
+    }
+
+    std::vector<std::string> FilesThatWalkADirectory( const std::string& root )
+    {
+        std::vector<std::string> found;
+        std::error_code          ec;
+        for ( auto it = std::filesystem::recursive_directory_iterator( root + "/", ec );
+              it != std::filesystem::recursive_directory_iterator(); it.increment( ec ) )
+        {
+            if ( ec )
+                break;
+            if ( !it->is_regular_file( ec ) )
+                continue;
+
+            const std::string extension = it->path().extension().string();
+            if ( extension != ".cpp" && extension != ".hpp" )
+                continue;
+
+            if ( WalksADirectory( ReadFile( it->path().string() ) ) )
+                found.push_back( it->path().generic_string() );
+        }
+        return found;
+    }
+
+    // Everything under the scanned roots that walks a directory, as repo-relative generic paths.
+    std::vector<std::string> EveryWalkerInTheTree( const std::string& root )
+    {
+        std::vector<std::string> all;
+        for ( const std::string& sub : ScannedRoots() )
+        {
+            for ( std::string path : FilesThatWalkADirectory( root + sub ) )
+            {
+                // Strip the discovered prefix so the result is comparable with the register's rows.
+                const std::size_t at = path.find( sub );
+                if ( at != std::string::npos )
+                    path = path.substr( at );
+                all.push_back( path );
+            }
+        }
+        std::sort( all.begin(), all.end() );
+        return all;
+    }
+} // namespace
+
+// The suite is worthless if it cannot see the tree, and "saw nothing" would otherwise read as "nothing
+// walks a directory" - the §1.4 shape applied to a checker. Asserted first and separately.
+TEST( ContentScanners, TheSuiteCanSeeTheRepository )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() ) << "the repository root was not found from the working directory";
+    EXPECT_FALSE( ReadFile( root + "Desert/Common/Source/Common/Utilities/FileSystem.cpp" ).empty() );
+    EXPECT_FALSE( EveryWalkerInTheTree( root ).empty() ) << "no file in the whole tree walks a directory, "
+                                                            "which cannot be true while the shared "
+                                                            "enumeration is itself one";
+}
+
+// ── 1. No unregistered walk ────────────────────────────────────────────────────────────────────────
+//
+// THE DIRECTION THAT MATTERS. A file that starts walking the content root itself is exactly the defect
+// this rule exists for, and it arrived twice while the rule was only a sentence in a header.
+TEST( ContentScanners, EveryFileThatWalksADirectoryIsInTheRegister )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    std::set<std::string> registered;
+    for ( const ScannerRow& row : kScanners )
+        registered.insert( row.File );
+
+    for ( const std::string& walker : EveryWalkerInTheTree( root ) )
+    {
+        EXPECT_EQ( registered.count( walker ), 1u )
+             << walker
+             << " walks a directory itself and is not in the register.\n"
+                "If it enumerates this PROJECT'S CONTENT it must call "
+                "Common::Utils::FileSystem::ListFilesRecursive, which sees a mounted .dpak as well as "
+                "loose files; a packaged project's directories do not exist.\n"
+                "If it walks something else - a user directory, a source tree awaiting import, a cache - "
+                "add a NotContent row saying which.";
+    }
+}
+
+// ── 2. No stale row ────────────────────────────────────────────────────────────────────────────────
+TEST( ContentScanners, EveryRegisteredFileStillWalksADirectory )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    for ( const ScannerRow& row : kScanners )
+    {
+        const std::string source = ReadFile( root + row.File );
+        ASSERT_FALSE( source.empty() ) << row.File
+                                       << " is in the register and could not be read; it has "
+                                          "been moved or deleted and its row is stale.";
+        EXPECT_TRUE( WalksADirectory( source ) )
+             << row.File
+             << " no longer walks a directory. Delete its row - a register that describes a "
+                "past afternoon is worse than none, because it is read as current.";
+    }
+}
+
+// ── 3. The debt does not grow ──────────────────────────────────────────────────────────────────────
+TEST( ContentScanners, TheDebtIsExactlyWhatWasFiledAndNoMore )
+{
+    std::size_t debt = 0;
+    for ( const ScannerRow& row : kScanners )
+        if ( row.What == Verdict::Debt )
+            ++debt;
+
+    EXPECT_EQ( debt, kDebtRowCount )
+         << "the debt register changed size. Going DOWN is the point and the number moves with it. Going "
+            "UP means a new content scanner was filed as debt instead of calling ListFilesRecursive, and "
+            "that is the thing this suite exists to make somebody argue for out loud.";
+}
+
+// ── 4. Every exception is readable and owned ───────────────────────────────────────────────────────
+TEST( ContentScanners, EveryRowSaysWhyAndEveryDebtRowSaysWho )
+{
+    for ( const ScannerRow& row : kScanners )
+    {
+        EXPECT_STRNE( row.Reason, "" ) << row.File
+                                       << " has no reason; a row nobody can read gets copied "
+                                          "for the wrong reason.";
+
+        if ( row.What == Verdict::Debt )
+        {
+            EXPECT_STRNE( row.Owner, "" )
+                 << row.File
+                 << " is filed as debt with nobody's name on it, which is unreadable in a "
+                    "month (SettingConsumers refuses the same shape).";
+        }
+        else
+        {
+            EXPECT_STREQ( row.Owner, "" ) << row.File
+                                          << " is not debt and yet names an owner; the two "
+                                             "columns would stop meaning what they say.";
+        }
+    }
+}
+
+// THE ONE IMPLEMENTATION IS EXACTLY ONE. Two files answering "what content is there" is the shape the
+// whole rule is about, so the register may not contain a second row claiming to be it.
+TEST( ContentScanners, ThereIsExactlyOneSharedEnumeration )
+{
+    std::size_t implementations = 0;
+    for ( const ScannerRow& row : kScanners )
+        if ( row.What == Verdict::TheOneEnumeration )
+            ++implementations;
+
+    EXPECT_EQ( implementations, 1u );
+}
+
+// AND THE TWO LISTS A6-2 FIXED STAY FIXED. A regression witness, named: these two files walked the
+// content root themselves, and one of them decided which scenes went into a package.
+TEST( ContentScanners, TheTwoSceneListsGoThroughTheSharedEnumeration )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    for ( const char* file :
+          { "Editor/Source/EditorLayer.cpp", "Editor/Source/Editor/Panels/Build/BuildSettingsPanel.cpp" } )
+    {
+        const std::string source = ReadFile( root + file );
+        ASSERT_FALSE( source.empty() ) << file;
+        EXPECT_NE( source.find( "ListFilesRecursive" ), std::string::npos )
+             << file << " stopped using the shared enumeration; a packaged project would lose its levels.";
+    }
+}
+
+int main( int argc, char** argv )
+{
+    ::testing::InitGoogleTest( &argc, argv );
+    return RUN_ALL_TESTS();
+}

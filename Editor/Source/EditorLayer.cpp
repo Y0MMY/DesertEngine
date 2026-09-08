@@ -4271,23 +4271,30 @@ namespace Desert::Editor
     {
         std::vector<Common::Filepath> scenes;
 
-        const auto scenePath = Common::Constants::Path::SCENE_PATH;
-
-        // RECURSIVE: scenes live in subfolders (Levels/, Autosave/, per-feature folders), and a flat scan
-        // of the root simply did not list them — they were unreachable from this menu. The error_code
-        // overloads also make a missing scenes directory an empty list instead of a thrown exception.
-        std::error_code ec;
-        auto            it = std::filesystem::recursive_directory_iterator(
-             scenePath, std::filesystem::directory_options::skip_permission_denied, ec );
-        const auto end = std::filesystem::recursive_directory_iterator();
-        for ( ; !ec && it != end; it.increment( ec ) )
+        // THROUGH THE ONE CONTENT ENUMERATION, and this used to be a raw recursive_directory_iterator.
+        //
+        // FileSystem.hpp states the rule over ListFilesRecursive in as many words — "every scanner that
+        // enumerates content must go through this: the font and icon services each used to walk only the
+        // disk half, so a packaged game — where the loose directories do not exist at all — scanned
+        // nothing and no text could resolve its font." This was the same defect in the same shape, one
+        // list over: a project whose content is mounted from a .dpak had NO levels in the Open Scene
+        // popup, in the Scene group of the command palette, or on the control channel, because the only
+        // half this loop could see was the loose one.
+        //
+        // Latent today, because the editor never mounts a pak — and latency is not a mitigation. The
+        // shared function exists precisely so that the day it stops being latent is not the day somebody
+        // discovers it: a scanner that walks the disk itself is a second answer to "what content is
+        // there", and this is the second one found. A6-2 point 2. `Desert/Tests/Engine/ContentScanners`
+        // now holds the register, so a third has to be argued for rather than merely written.
+        //
+        // RECURSION AND THE MISSING-DIRECTORY CASE COME WITH IT: scenes live in subfolders (Levels/,
+        // Autosave/, per-feature folders), which a flat scan simply did not list, and a missing scenes
+        // directory contributes nothing rather than throwing.
+        for ( const std::filesystem::path& file :
+              Common::Utils::FileSystem::ListFilesRecursive( Common::Constants::Path::SCENE_PATH ) )
         {
-            if ( it->path().extension() != Common::Constants::Extensions::SCENE_EXTENSION )
-                continue;
-
-            std::error_code fileEc; // separate: a failed stat must not end the whole walk
-            if ( std::filesystem::is_regular_file( it->path(), fileEc ) )
-                scenes.push_back( it->path() );
+            if ( file.extension() == Common::Constants::Extensions::SCENE_EXTENSION )
+                scenes.push_back( file );
         }
 
         // Sorted by the label the list shows, which keeps every folder's scenes contiguous (they share the

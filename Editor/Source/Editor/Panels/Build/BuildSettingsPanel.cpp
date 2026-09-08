@@ -10,6 +10,7 @@
 
 #include <Common/Core/JobSystem.hpp>
 #include <Common/Core/Constants.hpp>
+#include <Common/Utilities/FileSystem.hpp>
 
 #include <algorithm>
 #include <cstdlib>
@@ -29,14 +30,29 @@ namespace Desert::Editor
         if ( !::Desert::Project::ProjectContext::HasProject() )
             return;
 
-        namespace fs               = std::filesystem;
-        const fs::path  projectDir = ::Desert::Project::ProjectContext::Directory();
-        const fs::path  assetsRoot = Common::Constants::Path::ASSETS_PATH;
-        std::error_code ec;
-        for ( const auto& entry : fs::recursive_directory_iterator( assetsRoot, ec ) )
+        // THROUGH THE ONE CONTENT ENUMERATION. This was a raw recursive_directory_iterator over the
+        // content root — the third list of this project's levels, after the Open Scene popup and the
+        // command palette's Scene group, and the second one that could see only the loose half of the
+        // content world. FileSystem.hpp states the rule over ListFilesRecursive: "every scanner that
+        // enumerates content must go through this", because a packaged project's directories do not
+        // exist and a scanner that walks them itself finds nothing.
+        //
+        // It matters MORE here than in the other two, not less: this panel chooses which scenes go INTO
+        // a package. A list that silently lost the levels of a project whose content is already mounted
+        // would ship a game with no levels in it, and the build would succeed.
+        //
+        // The extension stays spelled from the constant, not "..desce": Constants.hpp owns it and
+        // PathCensus guards it. See Desert/Tests/Common/ContentScanners for the register this row left.
+        namespace fs              = std::filesystem;
+        const fs::path projectDir = ::Desert::Project::ProjectContext::Directory();
+        for ( const fs::path& file :
+              Common::Utils::FileSystem::ListFilesRecursive( Common::Constants::Path::ASSETS_PATH ) )
         {
-            if ( entry.is_regular_file() && entry.path().extension() == ".desce" )
-                m_Scenes.push_back( fs::relative( entry.path(), projectDir, ec ).generic_string() );
+            if ( file.extension() != Common::Constants::Extensions::SCENE_EXTENSION )
+                continue;
+
+            std::error_code ec;
+            m_Scenes.push_back( fs::relative( file, projectDir, ec ).generic_string() );
         }
         std::sort( m_Scenes.begin(), m_Scenes.end() );
     }
