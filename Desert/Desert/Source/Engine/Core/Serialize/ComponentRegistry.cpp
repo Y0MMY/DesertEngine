@@ -1,4 +1,5 @@
 #include "ComponentRegistry.hpp"
+#include <Engine/Core/Serialize/AssetReferenceResolve.hpp>
 #include <Engine/Core/Serialize/TextureSlot.hpp>
 
 #include <Common/Core/AssetHandle.hpp>
@@ -21,6 +22,7 @@
 #include <Engine/Assets/Prefab/PrefabData.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Runtime/Services/AssetServiceRegistration.hpp>
 
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Reflection/ReflectionSerializer.hpp>
@@ -195,6 +197,15 @@ namespace Desert::Core::Serialize
             };
             return s;
         }
+
+        // THE THREE `Ensure*Registered` HELPERS THAT STOOD HERE NOW LIVE IN
+        // Engine/Runtime/Services/AssetServiceRegistration.hpp, unchanged in behaviour.
+        //
+        // They moved because two OTHER files had independently written the same find-else-create and each
+        // got a different part of it wrong (the import's reuse path registered nothing; the thumbnail's
+        // reuse path registered nothing AND then blamed the consequence on the wrong cause). A rule
+        // enforced by three careful copies is the shape Ф5 paid forty-four call sites for; this one is
+        // enforced by there being one implementation to call.
     } // namespace
 
     // Resolves reflected AssetHandle fields to/from on-disk PATHS (backward-compatible with the old
@@ -342,36 +353,21 @@ namespace Desert::Core::Serialize
                      named.is_absolute() ? named
                                          : ( Common::Constants::Path::ASSETS_PATH / named ).lexically_normal();
 
-                auto a = mgr.FindByPath<Assets::MaterialAsset>( full );
-                if ( !a )
-                {
-                    // Not preloaded (e.g. an editor .demat the preloader's .mat scan missed). Create +
-                    // load + register from the path so materials survive a cold restart, not just an
-                    // in-session reload.
-                    auto created =
-                         m.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, full );
-                    if ( created )
-                    {
-                        if ( !created->IsReadyForUse() )
-                            created->Load();
-                        if ( !Runtime::ResourceRegistry::GetMaterialService()->Get(
-                                  created->GetMetadata().Handle ) )
-                        {
-                            if ( const auto registered =
-                                      Runtime::ResourceRegistry::GetMaterialService()->Register( created );
-                                 !registered )
-                            {
-                                // DC 1.4: the slot is about to fall back to the default material, and
-                                // the reason (another `.demat` already holds this MaterialId) is only
-                                // knowable here.
-                                LOG_ERROR( "[Materials] Material '{}' named by the scene could not be "
-                                           "registered: {}",
-                                           full.string(), registered.GetError() );
-                            }
-                        }
-                        a = created;
-                    }
-                }
+                // FIND, ELSE CREATE, THEN REGISTER — and the "then" is outside both branches on purpose.
+                // Registering only what this parse CREATED is the defect this shape retires; see
+                // AssetReferenceResolve.hpp for why the two routes are asserted to agree rather than
+                // asserted one at a time. The create-on-miss is still needed: an editor `.demat` outside
+                // the Materials root is not preloaded, and it must survive a cold restart rather than only
+                // an in-session reload.
+                const auto a = ResolveSceneReference(
+                     [&] { return mgr.FindByPath<Assets::MaterialAsset>( full ); },
+                     [&]
+                     {
+                         return Assets::Asset<Assets::MaterialAsset>(
+                              m.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, full ) );
+                     },
+                     []( const Assets::Asset<Assets::MaterialAsset>& material, ReferenceOrigin )
+                     { Runtime::EnsureMaterialRegistered( material ); } );
                 return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
             }
             if ( type == "TextureAsset" )
@@ -385,16 +381,7 @@ namespace Desert::Core::Serialize
                 if ( resolved == 0 )
                     return 0;
 
-                // The SHELL only, and unconditionally: RegisterAsset is an idempotent map write, while
-                // the `Get`-first spelling used elsewhere in this file would BUILD the GPU texture
-                // here — during scene parsing, for every slot — which is exactly the upload
-                // AssetPreloader defers to the first draw. This step stays at the call site because it
-                // is the one part of the round trip that needs the renderer.
-                if ( auto* svc = Runtime::ResourceRegistry::GetTextureService() )
-                {
-                    if ( auto a = mgr.FindByHandle<Assets::TextureAsset>( Common::UUID( resolved ) ) )
-                        svc->RegisterAsset( a );
-                }
+                Runtime::EnsureTextureRegistered( mgr, resolved );
                 return resolved;
             }
             // The read side of the volume branch is gone with the write side above, and for the same
@@ -448,39 +435,27 @@ namespace Desert::Core::Serialize
             // Meshes: find, else cook-create as the concrete type + register + load.
             if ( type == "StaticMeshAsset" || type == "SkinnedMeshAsset" || type == "MeshAsset" )
             {
-                auto a = mgr.FindByPath<Assets::MeshAsset>( path );
-                if ( !a )
-                {
-                    Assets::Asset<Assets::MeshAsset> created;
-                    if ( type == "SkinnedMeshAsset" )
-                        created = m.CreateAsset<Assets::SkinnedMeshAsset>( Assets::AssetPriority::High, path );
-                    else
-                        created = m.CreateAsset<Assets::StaticMeshAsset>( Assets::AssetPriority::High, path );
-                    if ( created )
-                    {
-                        // NO `Load()` AFTER THIS, AND THAT ORDER WAS THE DEFECT. `CreateAsset` deduplicates
-                        // on a spelling-independent key, so a scene naming `Cooked/Meshes/base.stmesh`
-                        // receives AssetPreloader's UNPARSED shell for the absolute spelling of that same
-                        // file — `Register` then built a mesh out of nothing and cached it, and the
-                        // `created->Load()` that used to stand here filled the ASSET while the cached MESH
-                        // stayed empty for the life of the process. Register parses first now.
-                        //
-                        // This branch is REACHED LESS OFTEN than it was, and `Register` parsing first is
-                        // still what makes it correct. The `FindByPath` above no longer misses on a
-                        // spelling, so the preloaded shell is now returned by the lookup instead of
-                        // arriving here dressed as something freshly created — but a mesh that the
-                        // preloader genuinely never saw still comes through here as a shell, and eager
-                        // registration of an unparsed shell is a defect independently of how it got here.
-                        if ( const auto registered =
-                                  Runtime::ResourceRegistry::GetMeshService()->Register( created );
-                             !registered )
-                        {
-                            LOG_ERROR( "[Mesh] '{}' named by the scene could not be built: {}", path,
-                                       registered.GetError() );
-                        }
-                        a = created;
-                    }
-                }
+                // FIND, ELSE CREATE, THEN REGISTER — the same shape as the material branch above and for
+                // the same reason. What the found route USED to skip is the whole of this task: Ф5 made
+                // `FindByPath` answer on the spelling-independent identity, so the preloaded shell is now
+                // RETURNED BY THE LOOKUP instead of arriving through create dressed as something fresh —
+                // which moved the common case onto the one route that registered nothing.
+                //
+                // NO `Load()` ANYWHERE HERE, and that order was a defect of its own. `MeshService::Register`
+                // parses before it builds (Г15), so a `Load()` after it could only ever run once an empty
+                // mesh had been cached under a live handle for the life of the process.
+                const auto a = ResolveSceneReference(
+                     [&] { return mgr.FindByPath<Assets::MeshAsset>( path ); },
+                     [&]
+                     {
+                         return type == "SkinnedMeshAsset"
+                                     ? Assets::Asset<Assets::MeshAsset>( m.CreateAsset<Assets::SkinnedMeshAsset>(
+                                            Assets::AssetPriority::High, path ) )
+                                     : Assets::Asset<Assets::MeshAsset>( m.CreateAsset<Assets::StaticMeshAsset>(
+                                            Assets::AssetPriority::High, path ) );
+                     },
+                     [&m]( const Assets::Asset<Assets::MeshAsset>& mesh, ReferenceOrigin )
+                     { Runtime::EnsureMeshRegistered( mesh, m ); } );
                 return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
             }
             return 0;
@@ -501,14 +476,21 @@ namespace Desert::Core::Serialize
                 auto a = mgr.FindByHandle<Assets::MaterialAsset>( handle );
                 if ( !a )
                     return 0;
-                if ( auto* svc = Runtime::ResourceRegistry::GetMaterialService(); svc && !svc->Get( handle ) )
-                    svc->Register( a );
+                // The SAME registration the path branch performs, through the SAME helper: a reference is
+                // registered whichever spelling the scene used to make it. This is also where the old
+                // `!svc->Get( handle )` guard lived, which BUILT the runtime material for every material a
+                // scene named, during parsing, to decide whether it needed registering.
+                Runtime::EnsureMaterialRegistered( a );
                 return guid;
             }
             if ( type == "TextureAsset" )
             {
                 if ( mgr.FindByHandle<Assets::TextureAsset>( handle ) )
+                {
+                    // The SAME registration the path branch performs. It was absent here entirely.
+                    Runtime::EnsureTextureRegistered( mgr, guid );
                     return guid;
+                }
 
                 // DC §1.4. A path that will not resolve breaks LOUDLY and with the filename in it
                 // (TextureSlotFromPath prints the name, its expansion and the roots it searched); an
@@ -530,17 +512,12 @@ namespace Desert::Core::Serialize
                 auto a = mgr.FindByHandle<Assets::MeshAsset>( handle );
                 if ( !a )
                     return 0;
-                if ( auto* svc = Runtime::ResourceRegistry::GetMeshService(); svc && !svc->GetAsset( handle ) )
-                {
-                    // Same inverted order as the FromPath branch above, and the same removal: Register
-                    // parses before it builds, so the `a->Load()` that stood here could only ever run after
-                    // the empty mesh had already been cached.
-                    if ( const auto registered = svc->Register( a ); !registered )
-                    {
-                        LOG_ERROR( "[Mesh] handle {} named by a component could not be built: {}", guid,
-                                   registered.GetError() );
-                    }
-                }
+                // The SAME registration the path branch performs, through the SAME helper. The guard that
+                // stood here was `!svc->GetAsset( handle )`, which PARSES the `.stmesh` through
+                // EnsureLoaded before answering — asking "is it registered?" at the price of registering.
+                // The const_cast is the same one `FromPath` makes at its head and for the same reason: a
+                // resolver is handed the registry as const, and registering against it is a write.
+                Runtime::EnsureMeshRegistered( a, const_cast<Assets::AssetManager&>( mgr ) );
                 return guid;
             }
             if ( type == "SkyboxAsset" )

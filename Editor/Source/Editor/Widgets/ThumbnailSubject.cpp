@@ -9,6 +9,7 @@
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Core/Formats/ShaderProgramMeta.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Runtime/Services/AssetServiceRegistration.hpp>
 
 #include <filesystem>
 
@@ -67,8 +68,11 @@ namespace Desert::Editor::ThumbnailSubject
             }
         }
 
-        if ( !Runtime::ResourceRegistry::GetMaterialService()->Get( asset->GetMetadata().Handle ) )
-            Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
+        // Was `if ( !GetMaterialService()->Get( h ) ) Register( a )`. `Get` BUILDS the runtime material on a
+        // miss, so the question and the answer were the same call — and the sweep asks it about every
+        // material in the project. The registration is a map write now; the build happens when the capture
+        // shades with it, which is one frame later and only for the materials actually photographed.
+        Runtime::EnsureMaterialRegistered( asset );
 
         Material out;
         out.Handle = asset->GetMetadata().Handle;
@@ -95,29 +99,26 @@ namespace Desert::Editor::ThumbnailSubject
         auto asset = manager.FindByPath<Assets::MeshAsset>( cooked );
         if ( !asset )
         {
-            auto created = manager.CreateAsset<Assets::StaticMeshAsset>( Assets::AssetPriority::High, cooked );
-            if ( !created )
+            asset = manager.CreateAsset<Assets::StaticMeshAsset>( Assets::AssetPriority::High, cooked );
+            if ( !asset )
                 return Common::MakeFormattedError<Mesh>( "'{}' could not be created as a static mesh", cooked );
-
-            // REGISTER PARSES BEFORE IT BUILDS (Г15), so this is also the load — and its answer is READ.
-            // A `Register` whose result is dropped is how an empty cooked mesh came to be cached as a
-            // built one: the caller believed "registered" meant "usable" and nothing said otherwise.
-            if ( const auto registered = Runtime::ResourceRegistry::GetMeshService()->Register( created );
-                 !registered )
-            {
-                return Common::MakeFormattedError<Mesh>( "cooked mesh '{}' could not be built: {}", cooked,
-                                                         registered.GetError() );
-            }
-            asset = created;
         }
 
-        const auto* runtimeMesh = Runtime::ResourceRegistry::GetMeshService()->Get( asset->GetMetadata().Handle );
-        if ( !runtimeMesh || runtimeMesh->GetSubmeshes().empty() )
+        // REGISTER AND BUILD, ON BOTH ROUTES. The registration used to live inside the `if` above, so a
+        // cooked mesh the manager ALREADY held — which is every mesh, once AssetPreloader has run — reached
+        // the line below having never been offered to the mesh service at all.
+        //
+        // AND THE REFUSAL NAMES THE CONDITION THAT HELD. What stood here was one message for three
+        // different facts, and the words it chose were the rarest one's: a mesh nothing had registered
+        // produced "built no drawable geometry (a skinned mesh's static buffer is empty by design)", which
+        // sends the next reader to look at rigs. This header's own doc block already promised three
+        // distinct refusals; it is the code that had two.
+        const auto readiness = Runtime::EnsureMeshDrawable( asset, manager );
+        if ( readiness != Runtime::MeshReadiness::Drawable )
         {
             return Common::MakeFormattedError<Mesh>(
-                 "'{}' built no drawable geometry (a skinned mesh's static buffer is empty by design), so "
-                 "a capture would photograph empty sky and file it as the asset",
-                 cooked );
+                 "{}, so a capture would photograph empty sky and file it as the asset",
+                 Runtime::ExplainMeshReadiness( readiness, cooked ) );
         }
 
         Mesh out;

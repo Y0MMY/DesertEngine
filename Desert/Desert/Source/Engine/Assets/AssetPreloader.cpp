@@ -111,6 +111,22 @@ namespace Desert::Assets
 
         if ( auto manager = m_AssetManager.lock() )
         {
+            // WHAT THESE THREE LOOPS ARE FOR, now that it is no longer "so that scene loading works".
+            //
+            // They register EVERY asset under the two content roots, including the great majority no scene
+            // references: that is what the Content Browser, the thumbnail sweep, the material and mesh
+            // pickers and the drag-and-drop targets read. A scene's OWN references are registered by the
+            // scene parse itself (Engine/Core/Serialize/ComponentRegistry.cpp — search
+            // EnsureMeshRegistered), which is where they belong, because that is the only place that knows
+            // a scene asked for them.
+            //
+            // IT USED TO BE BOTH, AND ONLY ONE OF THE TWO JOBS WAS WRITTEN DOWN. The parse registered a
+            // reference only when it CREATED the record, so every reference to an asset these loops had
+            // already created was resolved to a live handle no service could answer for — and nothing
+            // broke, only because `EditorLayer::OnUpdate` holds every scene load until these stages have
+            // run. That ordering is still true and still wanted; it is no longer LOAD-BEARING, and a
+            // safety net nobody can see is a safety net somebody removes.
+            //
             // Register SHELLS only — the GPU build (texture upload / mesh buffers / material instance) is
             // deferred to the first Get (lazy, cascades from a spawned entity). Textures/materials are
             // loaded first (cheap metadata) so their stored handle / external id is known for the map key.
