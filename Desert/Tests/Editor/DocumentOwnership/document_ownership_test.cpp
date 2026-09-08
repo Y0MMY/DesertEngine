@@ -902,8 +902,7 @@ TEST( PathOpening, ARegistryWithNoOpenersClaimsNothing )
 TEST( PathOpening, TheClaimedExtensionsAreTheUnionOfEveryOpenersOwnDeclaration )
 {
     SubjectEditorRegistry registry;
-    registry.RegisterPathOpener( { ".demat" },
-                                 []( const std::string& ) { return PathOpenOutcome::Requested; } );
+    registry.RegisterPathOpener( { ".demat" }, []( const std::string& ) { return PathOpenOutcome::Requested; } );
     registry.RegisterPathOpener( { ".dcnv", ".decloudtype", ".dcmv", ".dclayout" },
                                  []( const std::string& ) { return PathOpenOutcome::Requested; } );
 
@@ -917,8 +916,7 @@ TEST( PathOpening, TheClaimedExtensionsAreTheUnionOfEveryOpenersOwnDeclaration )
 TEST( PathOpening, AFormatClaimedTwiceIsListedOnce )
 {
     SubjectEditorRegistry registry;
-    registry.RegisterPathOpener( { ".demat" },
-                                 []( const std::string& ) { return PathOpenOutcome::Requested; } );
+    registry.RegisterPathOpener( { ".demat" }, []( const std::string& ) { return PathOpenOutcome::Requested; } );
     registry.RegisterPathOpener( { ".demat", ".dcnv" },
                                  []( const std::string& ) { return PathOpenOutcome::Requested; } );
 
@@ -962,7 +960,8 @@ TEST( PathOpening, EveryClaimedExtensionIsActuallyClaimedByAnOpener )
          { ".demat" }, []( const std::string& path )
          { return path.ends_with( ".demat" ) ? PathOpenOutcome::Requested : PathOpenOutcome::NotMine; } );
     registry.RegisterPathOpener( { ".dcnv", ".decloudtype" },
-                                 []( const std::string& path ) {
+                                 []( const std::string& path )
+                                 {
                                      return ( path.ends_with( ".dcnv" ) || path.ends_with( ".decloudtype" ) )
                                                  ? PathOpenOutcome::Requested
                                                  : PathOpenOutcome::NotMine;

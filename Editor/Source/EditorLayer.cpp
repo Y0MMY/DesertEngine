@@ -752,38 +752,37 @@ namespace Desert::Editor
         // AND WHICH EXTENSIONS EACH ONE ANSWERS FOR. Taken from the format's own constant, never spelled
         // again here: the palette ENUMERATES the project's openable files against this list, so a literal
         // that drifted from the resolver's would produce a list of entries the resolver then refuses.
-        m_SubjectEditors.RegisterPathOpener(
-             { std::string( Common::Constants::Extensions::MATERIAL_EXTENSION ) },
-             [this]( const std::string& path )
-             {
-                 switch ( RequestMaterialDocument( m_AssetManager.get(), path ) )
-                 {
-                     case MaterialDocumentRequest::NotAMaterialPath:
-                         return SubjectEditorRegistry::PathOpenOutcome::NotMine;
-                     case MaterialDocumentRequest::Failed:
-                         return SubjectEditorRegistry::PathOpenOutcome::Failed;
-                     case MaterialDocumentRequest::Requested:
-                         return SubjectEditorRegistry::PathOpenOutcome::Requested;
-                 }
-                 return SubjectEditorRegistry::PathOpenOutcome::NotMine;
-             } );
-        m_SubjectEditors.RegisterPathOpener(
-             { std::string( Assets::kCloudNoiseVolumeExtension ), std::string( Assets::kCloudTypeExtension ),
-               std::string( Assets::kCloudModellingVolumeExtension ),
-               std::string( Assets::kCloudLayoutExtension ) },
-             [this]( const std::string& path )
-             {
-                 switch ( RequestCloudDocument( m_AssetManager.get(), path ) )
-                 {
-                     case CloudDocumentRequest::NotACloudPath:
-                         return SubjectEditorRegistry::PathOpenOutcome::NotMine;
-                     case CloudDocumentRequest::Failed:
-                         return SubjectEditorRegistry::PathOpenOutcome::Failed;
-                     case CloudDocumentRequest::Requested:
-                         return SubjectEditorRegistry::PathOpenOutcome::Requested;
-                 }
-                 return SubjectEditorRegistry::PathOpenOutcome::NotMine;
-             } );
+        m_SubjectEditors.RegisterPathOpener( { std::string( Common::Constants::Extensions::MATERIAL_EXTENSION ) },
+                                             [this]( const std::string& path )
+                                             {
+                                                 switch ( RequestMaterialDocument( m_AssetManager.get(), path ) )
+                                                 {
+                                                     case MaterialDocumentRequest::NotAMaterialPath:
+                                                         return SubjectEditorRegistry::PathOpenOutcome::NotMine;
+                                                     case MaterialDocumentRequest::Failed:
+                                                         return SubjectEditorRegistry::PathOpenOutcome::Failed;
+                                                     case MaterialDocumentRequest::Requested:
+                                                         return SubjectEditorRegistry::PathOpenOutcome::Requested;
+                                                 }
+                                                 return SubjectEditorRegistry::PathOpenOutcome::NotMine;
+                                             } );
+        m_SubjectEditors.RegisterPathOpener( { std::string( Assets::kCloudNoiseVolumeExtension ),
+                                               std::string( Assets::kCloudTypeExtension ),
+                                               std::string( Assets::kCloudModellingVolumeExtension ),
+                                               std::string( Assets::kCloudLayoutExtension ) },
+                                             [this]( const std::string& path )
+                                             {
+                                                 switch ( RequestCloudDocument( m_AssetManager.get(), path ) )
+                                                 {
+                                                     case CloudDocumentRequest::NotACloudPath:
+                                                         return SubjectEditorRegistry::PathOpenOutcome::NotMine;
+                                                     case CloudDocumentRequest::Failed:
+                                                         return SubjectEditorRegistry::PathOpenOutcome::Failed;
+                                                     case CloudDocumentRequest::Requested:
+                                                         return SubjectEditorRegistry::PathOpenOutcome::Requested;
+                                                 }
+                                                 return SubjectEditorRegistry::PathOpenOutcome::NotMine;
+                                             } );
 
         // NOTHING OPENS A PANEL AT BOOT ANY MORE, and the absence is the point.
         //
@@ -1816,9 +1815,9 @@ namespace Desert::Editor
         const glm::vec3 position = ( which.GetValue() == ViewportCameraWrite::Position )
                                         ? glm::vec3( request.Value[0], request.Value[1], request.Value[2] )
                                         : camera->GetPosition();
-        const glm::vec3 forward = ( which.GetValue() == ViewportCameraWrite::Direction )
-                                       ? glm::vec3( request.Value[0], request.Value[1], request.Value[2] )
-                                       : camera->GetDirection();
+        const glm::vec3 forward  = ( which.GetValue() == ViewportCameraWrite::Direction )
+                                        ? glm::vec3( request.Value[0], request.Value[1], request.Value[2] )
+                                        : camera->GetDirection();
 
         PlaceEditorCamera( *camera, position, forward );
 
@@ -3237,11 +3236,9 @@ namespace Desert::Editor
         //
         // See Editor/Core/OpenableAssets.hpp for the labelling rule and the three `model.demat` that
         // motivated it.
-        for ( const OpenableAsset& asset :
-              CollectOpenableAssets( Common::Utils::FileSystem::ListFilesRecursive(
-                                          Common::Constants::Path::ASSETS_PATH ),
-                                     m_SubjectEditors.ClaimedExtensions(),
-                                     Common::Constants::Path::ASSETS_PATH ) )
+        for ( const OpenableAsset& asset : CollectOpenableAssets(
+                   Common::Utils::FileSystem::ListFilesRecursive( Common::Constants::Path::ASSETS_PATH ),
+                   m_SubjectEditors.ClaimedExtensions(), Common::Constants::Path::ASSETS_PATH ) )
         {
             const std::string path = asset.Path;
             commands.push_back( { "Open", asset.Label, [this, path]

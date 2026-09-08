@@ -102,8 +102,8 @@ TEST( OpenableAssets, DistinctFilesNeverShareALabel )
 // also exactly the key form a content manifest uses, which keeps one spelling of "where a file is".
 TEST( OpenableAssets, ALabelIsWrittenWithForwardSlashesWhateverThePlatformUses )
 {
-    const auto assets = CollectOpenableAssets( { kRoot / "Clouds" / "Types" / "Cirrus.decloudtype" },
-                                               Claimed(), kRoot );
+    const auto assets =
+         CollectOpenableAssets( { kRoot / "Clouds" / "Types" / "Cirrus.decloudtype" }, Claimed(), kRoot );
 
     ASSERT_EQ( assets.size(), 1u );
     EXPECT_EQ( assets[0].Label, "Clouds/Types/Cirrus.decloudtype" );

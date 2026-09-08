@@ -97,8 +97,7 @@ namespace Desert::Editor
      */
     [[nodiscard]] inline std::vector<OpenableAsset>
     CollectOpenableAssets( const std::vector<std::filesystem::path>& files,
-                           const std::vector<std::string>&           claimed,
-                           const std::filesystem::path&              contentRoot )
+                           const std::vector<std::string>& claimed, const std::filesystem::path& contentRoot )
     {
         std::vector<OpenableAsset> openable;
 
@@ -116,8 +115,8 @@ namespace Desert::Editor
                  OpenableAsset{ outside ? file.generic_string() : relative, file.generic_string() } );
         }
 
-        std::sort( openable.begin(), openable.end(), []( const OpenableAsset& a, const OpenableAsset& b )
-                   { return a.Label < b.Label; } );
+        std::sort( openable.begin(), openable.end(),
+                   []( const OpenableAsset& a, const OpenableAsset& b ) { return a.Label < b.Label; } );
         return openable;
     }
 } // namespace Desert::Editor

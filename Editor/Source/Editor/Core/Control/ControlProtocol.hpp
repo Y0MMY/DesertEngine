@@ -435,8 +435,8 @@ namespace Desert::Editor::Control
                 if ( subject == nullptr )
                 {
                     return Common::MakeFormattedError<Request>(
-                         "'{}' is not something this editor has properties for. Known subjects: {}.",
-                         subjectName, KnownSubjectList() );
+                         "'{}' is not something this editor has properties for. Known subjects: {}.", subjectName,
+                         KnownSubjectList() );
                 }
                 request.Whose = subject->Which;
             }

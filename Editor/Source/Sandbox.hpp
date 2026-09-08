@@ -67,8 +67,7 @@ std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char**
     // comments were all about unattended runs and none about capture — so a control-channel run, which is
     // the unattended path that no longer needs `--shot` at all, escaped every one of them and filed a
     // throwaway worktree in the developer's registries. See CommandLine.hpp::IsUnattendedSession.
-    const bool unattended =
-         Desert::Editor::IsUnattendedSession( options.Shot, !options.ControlSocket.empty() );
+    const bool unattended = Desert::Editor::IsUnattendedSession( options.Shot, !options.ControlSocket.empty() );
 
     // The editor is PROJECT-DRIVEN: `--project <path/to/.deproj>` is REQUIRED. Picking/creating projects
     // is the Project Hub's job (Tools/ProjectHub, scripts/MacOS/RunProjectHub.sh) — the editor itself

@@ -551,7 +551,7 @@ namespace Desert::Editor
         // a start timestamp: a stage runs one per FRAME, so wall clock between the first and the last also
         // counts the frames in between, and the number that answers "which stage is spending the boot" is
         // the sum of the stages themselves.
-        long long m_StartupElapsedMs = 0;
+        long long                 m_StartupElapsedMs = 0;
         bool                      StartupLoading() const
         {
             return m_StartupNext < m_StartupStages.size();

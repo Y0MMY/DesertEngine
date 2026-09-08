@@ -61,15 +61,19 @@ namespace
 TEST( ViewportCamera, TheCameraLandsExactlyWhereItWasAskedForEveryPoseTried )
 {
     const std::vector<glm::vec3> positions = {
-         { 0.0f, 200.0f, 0.0f },      { -1500.0f, 30.0f, 900.0f }, { 0.0f, 20000.0f, 0.0f },
-         { 12.5f, -4.25f, 0.125f },   { 0.0f, 0.0f, 0.0f },
+         { 0.0f, 200.0f, 0.0f },    { -1500.0f, 30.0f, 900.0f }, { 0.0f, 20000.0f, 0.0f },
+         { 12.5f, -4.25f, 0.125f }, { 0.0f, 0.0f, 0.0f },
     };
     const std::vector<glm::vec3> forwards = {
-         { 0.0f, 0.0f, -1.0f },  { 0.0f, 0.9f, -1.0f },   { 0.0f, -1.0f, 0.0f },
-         { 1.0f, 0.0f, 1.0f },   { -0.3f, 0.2f, 0.93f },
+         { 0.0f, 0.0f, -1.0f },
+         { 0.0f, 0.9f, -1.0f },
+         { 0.0f, -1.0f, 0.0f },
+         { 1.0f, 0.0f, 1.0f },
+         { -0.3f, 0.2f, 0.93f },
          // Deliberately unnormalized and deliberately tiny: the caller is not required to normalize, and
          // the aim must not depend on the magnitude it was handed.
-         { 0.0f, 0.0f, -1000.0f }, { 0.0f, 0.0f, -0.0001f },
+         { 0.0f, 0.0f, -1000.0f },
+         { 0.0f, 0.0f, -0.0001f },
     };
 
     for ( const glm::vec3& position : positions )
