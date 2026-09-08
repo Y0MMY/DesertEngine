@@ -134,5 +134,18 @@ namespace Desert::Editor
         /// slots; requesting once and saying what happened is the honest version.
         SubjectId m_Requested;
         uint32_t  m_FramesSinceRequest = 0;
+
+        /// The subject this pane HAS BEEN SHOWING. Its whole job is to make a close mean a close.
+        ///
+        /// Without it the window re-opens whatever it is pointed at the moment the document goes away —
+        /// so closing the material's tab in the document well, or running Close from the palette, put it
+        /// straight back and the close read as a button that does nothing. MEASURED, not imagined: the
+        /// close was logged and the document was open again in the same reply.
+        ///
+        /// With it, a document that WAS here and is not any more is a thing the user did, and the pane
+        /// says so and offers to open it again rather than deciding for them. Cleared whenever the stage
+        /// or the selection inside it moves, because that is a new question and the answer to the old one
+        /// no longer applies.
+        SubjectId m_Showed;
     };
 } // namespace Desert::Editor

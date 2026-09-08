@@ -73,6 +73,20 @@ namespace Desert::Editor
         {
             return static_cast<uint64_t>( handle ) == 0u;
         }
+
+        // WHICH AssetTypeID EACH STAGE RESOLVES TO, stated once. Two readers — the rail and the pane — and
+        // they must agree: a rail row that named a `.dclayout` while the pane opened it as a material would
+        // be two answers to one question, which is the shape this whole window was built to remove.
+        // CloudStages.hpp takes them as plain numbers so it stays clear of Engine/Assets; the suite
+        // (Desert/Tests/Editor/CloudStages) asserts they are the ones the editors are registered under.
+        [[nodiscard]] CloudStageAssetTypes StageAssetTypes()
+        {
+            return CloudStageAssetTypes{ static_cast<uint32_t>( Assets::AssetTypeID::Material ),
+                                         static_cast<uint32_t>( Assets::AssetTypeID::CloudLayout ),
+                                         static_cast<uint32_t>( Assets::AssetTypeID::CloudType ),
+                                         static_cast<uint32_t>( Assets::AssetTypeID::CloudNoiseVolume ),
+                                         static_cast<uint32_t>( Assets::AssetTypeID::CloudModellingVolume ) };
+        }
     } // namespace
 
     void CloudsPanel::OpenAt( const CloudStage stage )
@@ -99,6 +113,7 @@ namespace Desert::Editor
         m_Hero               = 0;
         m_Requested          = SubjectId{};
         m_FramesSinceRequest = 0;
+        m_Showed             = SubjectId{};
     }
 
     std::string CloudsPanel::AssetLabel( const Common::AssetHandle& handle ) const
@@ -227,6 +242,7 @@ namespace Desert::Editor
             // stage's open request is no longer what this pane is waiting for.
             m_Requested          = SubjectId{};
             m_FramesSinceRequest = 0;
+            m_Showed             = SubjectId{};
         }
 
         const CloudChain chain = GatherChain();
@@ -281,11 +297,7 @@ namespace Desert::Editor
         ImGui::TextDisabled( "THE SKY, IN BUILD ORDER" );
         ImGui::Spacing();
 
-        const CloudStageAssetTypes types{ static_cast<uint32_t>( Assets::AssetTypeID::Material ),
-                                          static_cast<uint32_t>( Assets::AssetTypeID::CloudLayout ),
-                                          static_cast<uint32_t>( Assets::AssetTypeID::CloudType ),
-                                          static_cast<uint32_t>( Assets::AssetTypeID::CloudNoiseVolume ),
-                                          static_cast<uint32_t>( Assets::AssetTypeID::CloudModellingVolume ) };
+        const CloudStageAssetTypes types = StageAssetTypes();
 
         for ( uint32_t i = 0; i < kCloudStageCount; ++i )
         {
@@ -299,6 +311,7 @@ namespace Desert::Editor
                 m_Stage              = stage;
                 m_Requested          = SubjectId{};
                 m_FramesSinceRequest = 0;
+                m_Showed             = SubjectId{};
             }
 
             // The subtitle is drawn INSIDE the selectable's rectangle rather than after it, so the whole
@@ -348,11 +361,7 @@ namespace Desert::Editor
 
     void CloudsPanel::DrawStagePane( const CloudChain& chain )
     {
-        const CloudStageAssetTypes types{ static_cast<uint32_t>( Assets::AssetTypeID::Material ),
-                                          static_cast<uint32_t>( Assets::AssetTypeID::CloudLayout ),
-                                          static_cast<uint32_t>( Assets::AssetTypeID::CloudType ),
-                                          static_cast<uint32_t>( Assets::AssetTypeID::CloudNoiseVolume ),
-                                          static_cast<uint32_t>( Assets::AssetTypeID::CloudModellingVolume ) };
+        const CloudStageAssetTypes types = StageAssetTypes();
 
         const SubjectId subject = CloudStageSubject( m_Stage, chain, types );
 
@@ -390,6 +399,7 @@ namespace Desert::Editor
                     m_TypeSlot           = i;
                     m_Requested          = SubjectId{};
                     m_FramesSinceRequest = 0;
+                    m_Showed             = SubjectId{};
                 }
             }
             ImGui::TextDisabled( "Which kind of cloud sits in a slot is bound in the material's own Inputs "
@@ -410,6 +420,7 @@ namespace Desert::Editor
                     m_Hero               = i;
                     m_Requested          = SubjectId{};
                     m_FramesSinceRequest = 0;
+                    m_Showed             = SubjectId{};
                 }
             }
         }
@@ -548,6 +559,20 @@ namespace Desert::Editor
 
         if ( !document )
         {
+            // A CLOSE MEANS A CLOSE. If this pane HAD the document and no longer does, somebody closed it —
+            // from the well's tab, from the palette, or because its subject went away — and reopening it
+            // behind them would make the close a button that does nothing. Measured before it was fixed:
+            // Close was accepted, logged, and the document was open again in the same reply.
+            if ( m_Showed == subject )
+            {
+                ImGui::TextWrapped( "You closed this editor. The sky still names it \xe2\x80\x94 stage %u "
+                                    "is unchanged; only its window is gone.",
+                                    static_cast<uint32_t>( m_Stage ) + 1u );
+                if ( ImGui::Button( "Open it again" ) )
+                    m_Showed = SubjectId{}; // the request below runs on the next frame
+                return;
+            }
+
             // ASKED ONCE, NOT EVERY FRAME. An open is queued and serviced between frames, so a request per
             // frame would be collapsed by the queue — but a REFUSED open (the six renderer slots are spoken
             // for) never resolves, and re-requesting it would re-raise the refusal dialog for ever.
@@ -586,6 +611,7 @@ namespace Desert::Editor
 
         m_Requested          = SubjectId{};
         m_FramesSinceRequest = 0;
+        m_Showed             = subject;
 
         // ── DRAWN HERE AND, IF ITS TAB IS UP, IN THE WELL TOO — IN THE SAME FRAME ─────────────────────
         //
