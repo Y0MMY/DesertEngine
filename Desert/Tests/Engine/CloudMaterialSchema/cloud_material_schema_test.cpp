@@ -117,7 +117,10 @@ namespace
          { "DetailStrength", 1, false },
          { "DensityScale", 1, false },
          { "ExtinctionScale", 1, false },
-         { "ScatteringAlbedo", 1, false },
+         // THREE, since the Volume domain's output contract landed: the scattering albedo is the medium's
+         // own colour. A `.demat` written while it was one is raised by
+         // Migration::MigrateCloudMaterialAlbedoToColour, not papered over by the reader.
+         { "ScatteringAlbedo", 3, false },
          { "PhaseG", 1, false },
          { "PhaseGBackward", 1, false },
          { "PhaseBlend", 1, false },
@@ -226,7 +229,9 @@ TEST( CloudMaterialSchema, TheSchemaDefaultsAreTheMirrorsToTheDigit )
     EXPECT_FLOAT_EQ( def( "DetailStrength" ).x, mirror.DetailStrength );
     EXPECT_FLOAT_EQ( def( "DensityScale" ).x, mirror.DensityScale );
     EXPECT_FLOAT_EQ( def( "ExtinctionScale" ).x, mirror.ExtinctionScale );
-    EXPECT_FLOAT_EQ( def( "ScatteringAlbedo" ).x, mirror.ScatteringAlbedo );
+    EXPECT_FLOAT_EQ( def( "ScatteringAlbedo" ).x, mirror.ScatteringAlbedo.x );
+    EXPECT_FLOAT_EQ( def( "ScatteringAlbedo" ).y, mirror.ScatteringAlbedo.y );
+    EXPECT_FLOAT_EQ( def( "ScatteringAlbedo" ).z, mirror.ScatteringAlbedo.z );
     EXPECT_FLOAT_EQ( def( "PhaseG" ).x, mirror.PhaseG );
     EXPECT_FLOAT_EQ( def( "PhaseGBackward" ).x, mirror.PhaseGBackward );
     EXPECT_FLOAT_EQ( def( "PhaseBlend" ).x, mirror.PhaseBlend );
@@ -314,6 +319,31 @@ TEST( CloudMaterialSchema, BuildAppliesSchemaThenOverridesAndSkipsWhatItDoesNotK
     // above proves is the same sky.
     const CloudMaterialValues noSchema = BuildCloudMaterialValues( nullptr, overrides );
     EXPECT_FLOAT_EQ( noSchema.Coverage, 0.25f );
+}
+
+// THE ALBEDO IS READ AS THREE COMPONENTS AND NOT REPAIRED ON THE WAY IN — which is what makes the
+// migration necessary rather than optional, and it is asserted here so nobody makes the reader "helpful".
+//
+// The tempting leniency is "if y and z are zero, broadcast x": it would make every unmigrated `.demat`
+// render correctly. It is refused twice over. It makes (0.98, 0, 0) — a legal authored colour now that the
+// slot has three components — inexpressible; and it hides an unraised file for ever, so the corpus would
+// carry two shapes of the same value indefinitely and the next person to touch either end would meet both.
+// Migration::MigrateCloudMaterialAlbedoToColour raises the file ONCE instead, and the SceneCloudMaterial-
+// Migration suite is where that is tested.
+TEST( CloudMaterialSchema, TheAlbedoIsAColourAndAnOldScalarIsNotQuietlyRepaired )
+{
+    MaterialOverrides scalarAsWritten;
+    scalarAsWritten.Params.emplace_back( "ScatteringAlbedo", glm::vec4( 0.98f, 0.0f, 0.0f, 0.0f ) );
+
+    const CloudMaterialValues stale = BuildCloudMaterialValues( &Schema(), scalarAsWritten );
+    EXPECT_EQ( stale.ScatteringAlbedo, glm::vec3( 0.98f, 0.0f, 0.0f ) )
+         << "the reader broadcast a scalar albedo into a colour. That makes an authored (0.98, 0, 0) "
+            "impossible to express and lets an unmigrated .demat live for ever; the migrator raises the "
+            "file instead.";
+
+    MaterialOverrides authored;
+    authored.Params.emplace_back( "ScatteringAlbedo", glm::vec4( 0.9f, 0.72f, 0.55f, 0.0f ) );
+    EXPECT_EQ( BuildCloudMaterialValues( &Schema(), authored ).ScatteringAlbedo, glm::vec3( 0.9f, 0.72f, 0.55f ) );
 }
 
 // THE PROTOCOL SCENES' MATERIALS ARE FULLY EXPLICIT, which is the §PR instrument-property continued

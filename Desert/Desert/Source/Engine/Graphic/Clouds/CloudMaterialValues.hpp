@@ -82,7 +82,10 @@ namespace Desert::Graphic
         float ExtinctionScale = 8.0f; // per km
 
         // ---- Lighting -------------------------------------------------------------------------------
-        float     ScatteringAlbedo         = 0.98f;
+        // PER COLOUR since the Volume domain's output contract was implemented (O1_DESIGN §3.3, §9 п.2).
+        // Grey is water and is the default; a tint makes the MEDIUM something else, and it compounds
+        // through the scattering series rather than sitting on the frame as a filter.
+        glm::vec3 ScatteringAlbedo         = { 0.98f, 0.98f, 0.98f };
         float     PhaseG                   = 0.8f;
         float     PhaseGBackward           = 0.1667f;
         float     PhaseBlend               = 0.575f;
@@ -145,8 +148,14 @@ namespace Desert::Graphic
                 v.DensityScale = p.x;
             else if ( name == "ExtinctionScale" )
                 v.ExtinctionScale = p.x;
+            // THREE COMPONENTS, AND A `.demat` WRITTEN BEFORE THE CHANGE CARRIES ONE. `[0.98, 0, 0, 0]` read
+            // as a colour is a RED cloud, which is why Migration::MigrateCloudMaterialAlbedoToColour exists
+            // and why it is content-detected: this reader deliberately does NOT paper over the old shape by
+            // broadcasting p.x when p.y and p.z are zero. Doing so would make (0.98, 0, 0) — a legal
+            // authored colour once the slot is three-component — unexpressible, and it would hide an
+            // unmigrated file for ever instead of letting the migrator find it once.
             else if ( name == "ScatteringAlbedo" )
-                v.ScatteringAlbedo = p.x;
+                v.ScatteringAlbedo = { p.x, p.y, p.z };
             else if ( name == "PhaseG" )
                 v.PhaseG = p.x;
             else if ( name == "PhaseGBackward" )

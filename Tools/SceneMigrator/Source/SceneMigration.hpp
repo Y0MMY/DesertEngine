@@ -716,6 +716,44 @@ namespace Desert::Migration
     // `.demat` naming `CloudLayout` remains anywhere it could be run.
     CloudMaterialLayoutReport MigrateCloudMaterialLayoutInputs( Assets::MaterialData& material );
 
+    // What MigrateCloudMaterialAlbedoToColour did to one `.demat`.
+    struct CloudMaterialAlbedoReport
+    {
+        int Broadcast = 0; // scalar `ScatteringAlbedo` values turned into a neutral colour
+
+        bool Changed() const
+        {
+            return Broadcast > 0;
+        }
+    };
+
+    // O1: the cloud material's `ScatteringAlbedo` becomes a COLOUR — the Volume domain's output contract
+    // carries a per-channel albedo (O1_DESIGN.md §3.3, §9 п.2), so the shader now reads three components
+    // where it read one.
+    //
+    // THIS IS DATA LOSS IF IT IS NOT RUN, and that is why it exists rather than being handled by a lenient
+    // reader. A `.demat` stores every parameter as a vec4 with the tail zeroed, which is the format's own
+    // convention for a scalar — so `ScatteringAlbedo: [0.98, 0, 0, 0]`, read as a colour, is a cloud whose
+    // medium scatters red and absorbs green and blue entirely. Not a subtle drift: a RED sky.
+    //
+    // PURE — a MaterialData in, the same struct raised, no filesystem and no global state.
+    //
+    // CONTENT-DETECTED AND IDEMPOTENT BY SHAPE, not by a version field, for the reason
+    // MigrateCloudMaterialLayoutInputs gives: a `.demat` has no version. The trigger is
+    // `y == 0 && z == 0`, which is what EVERY file written while the slot was scalar carries and what no
+    // file written after this can carry unless the author really did ask for pure red — and the second run
+    // then finds `y == x != 0` and does nothing. The one degenerate input, `[0, 0, 0, 0]`, comes out
+    // unchanged, and that is CORRECT rather than lucky: a zero albedo is black in one component and black
+    // in three.
+    //
+    // WHY THE READER IS NOT LENIENT INSTEAD. Broadcasting x when y and z are zero inside
+    // Graphic::Detail::ApplyCloudOverride would make `(0.98, 0, 0)` — a legal authored colour now that the
+    // slot has three components — inexpressible, and it would hide an unmigrated file for ever instead of
+    // letting the migrator find it once and say so.
+    //
+    // SHELF LIFE: this raises materials authored before the albedo became a colour, and nothing else.
+    CloudMaterialAlbedoReport MigrateCloudMaterialAlbedoToColour( Assets::MaterialData& material );
+
     // THE TEN KEYS a scene no longer states, in the order they are reported. Stated ONCE, here, because
     // three things have to agree about the set — this migration, the census that keeps them out of
     // Core::SceneSettings and out of every .desce on disk (Desert/Tests/Engine/SceneDebugFields), and the

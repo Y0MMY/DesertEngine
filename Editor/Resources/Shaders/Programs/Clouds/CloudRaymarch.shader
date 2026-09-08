@@ -68,7 +68,7 @@ Shader "CloudRaymarch"
         Float DensityScale ("Density Scale", Range(0.0, 2.0), Category("Detail"), Timing(Immediate), Tooltip("Multiplies the eroded density, for the LAYER. Below 1 the whole layer thins toward haze; above 1 the thin edges fill in. The cloud type multiplies this by how much water that kind of cloud is made of, so 1 keeps meaning 'this type as it is' whichever type is in the slot.")) = 1.0
         Float ExtinctionScale ("Extinction Scale (/km)", Range(0.5, 60.0), Category("Detail"), Timing(Immediate), Tooltip("How strongly the medium absorbs and scatters, per kilometre at full density. This is what makes a cloud opaque rather than merely visible. The cloud type multiplies it: ice at a quarter of a cumulus, a storm at a third above it. Eight is the approximation's own calibration, not physics - a real cumulus extinguishes at roughly 45/km, and Р18 measured that raising it moves five of six protocol points by less than 0.01 while re-authoring every scene (D-32).")) = 8.0
 
-        Float ScatteringAlbedo ("Scattering Albedo", Range(0.0, 1.0), Category("Lighting"), Timing(Immediate), Tooltip("Fraction of extinguished light that is scattered rather than absorbed. Water droplets barely absorb at all, which is why clouds are white; values much below 1 read as smoke.")) = 0.98
+        Color3 ScatteringAlbedo ("Scattering Albedo", Category("Lighting"), Timing(Immediate), Tooltip("Fraction of extinguished light that is scattered rather than absorbed, PER COLOUR. Water droplets barely absorb at all and absorb every wavelength alike, which is why a cloud is white and why the default is a neutral 0.98 - keep it grey for water. Tinting it is how the medium itself becomes something other than water: a warm cast for dust or smoke, a cold one for ice haze. It is the MEDIUM's colour and not a filter over the frame, so the tint compounds through multiple scattering exactly as it would in the real thing, and the deep interior of a body ends up further from white than its edge. Values much below 1 in every channel read as smoke.")) = (0.98, 0.98, 0.98)
         Float PhaseG ("Phase G", Range(-0.9, 0.9), Category("Lighting"), Timing(Immediate), Tooltip("Asymmetry of the Henyey-Greenstein phase function. Positive scatters forward, which is what puts the bright rim on a cloud you are looking at through the sun.")) = 0.8
         Float PhaseGBackward ("Phase G Backward", Range(-0.9, 0.9), Category("Lighting"), Timing(Immediate), Tooltip("Asymmetry of the SECOND phase lobe. Near zero it is almost isotropic, which is what carries the body of the cloud while the first lobe carries the bright rim against the sun. One lobe cannot do both: strong enough for the rim leaves the body black, weak enough for the body loses the rim.")) = 0.1667
         Float PhaseBlend ("Phase Blend", Range(0.0, 1.0), Category("Lighting"), Timing(Immediate), Tooltip("How much of the second lobe is mixed in. UE's shipped instance weights it toward the BODY at 0.575, so more than half the answer is the near-isotropic lobe and the sharp one is a highlight on top.")) = 0.575
@@ -495,7 +495,10 @@ Shader "CloudRaymarch"
             float phase        = CloudPhaseDualLobe(dot(rayDir, toSun), u_CloudWind.w,
                                                     u_CloudPhase.x, u_CloudPhase.y);
             float extinction   = max(u_CloudMarch.w, 0.0f);
-            float albedo       = clamp(u_CloudDetail.z, 0.0f, 1.0f);
+            // PER COLOUR. Clamped here as well as in the packer, on the terms every other clamp in this
+            // file is: this is the side that decides what the loop does, and a channel above one makes the
+            // scattering series diverge rather than converge.
+            vec3  albedo       = clamp(u_CloudAlbedo.rgb, vec3(0.0f), vec3(1.0f));
             float lightMarchKm = max(u_CloudSun.w, 0.0f);
             // SIXTY-FOUR, and it must equal ECS::kCloudLightMarchMaxSamples. This clamp cannot include the
             // C++ constant, so Desert/Tests/Engine/SettingConsumers reads this line's text and fails if the

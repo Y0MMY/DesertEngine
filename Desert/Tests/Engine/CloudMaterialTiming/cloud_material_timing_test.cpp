@@ -188,12 +188,15 @@ namespace
             return value;
         }
 
-        const float lo   = *p.Min;
-        const float hi   = *p.Max;
-        const float here = p.Default.x;
-        const float far  = ( here - lo ) >= ( hi - here ) ? lo : hi;
+        // `farthest` AND NOT `far`: windef.h #defines `far` away, so MSVC would read the type with no
+        // variable after it and report a syntax error nowhere near the cause. Named by
+        // Desert/Tests/Common/ReservedIdentifiers, which caught this one before it reached a Windows job.
+        const float lo       = *p.Min;
+        const float hi       = *p.Max;
+        const float here     = p.Default.x;
+        const float farthest = ( here - lo ) >= ( hi - here ) ? lo : hi;
         for ( int c = 0; c < 4; ++c )
-            value[c] = far;
+            value[c] = farthest;
         return value;
     }
 

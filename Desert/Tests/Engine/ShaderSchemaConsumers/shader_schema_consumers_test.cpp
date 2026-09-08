@@ -305,21 +305,19 @@ namespace
          { "ShaderParam", "Name", kParamRow, nullptr },
          { "ShaderParam", "DisplayName", kMatEdit, nullptr },
 
-         // THE ONE DEAD ROW, AND IT IS NOT A SMALL ONE. Fifty-two `Category("…")` are authored across the
-         // shipped shaders — "Surface", "Textures", "Glass", "Weather", "Placement", "Layout" — and the
-         // Material Editor draws every parameter into ONE flat two-column table
-         // (MaterialEditorPanel.cpp: `for ( const auto& p : schema.Params )` inside a single
-         // BeginTable). The grouping a shader author writes is read by nobody, which is why the cloud
-         // material's thirty-four parameters arrive as one undivided list. `CloudMaterialSchema` even
-         // asserts every cloud param HAS a category "so it lands in an unnamed group" — an assertion
-         // about a value with no consumer.
-         //
-         // OWNER DECIDES + FENCED: the fix is per-category collapsing headers in MaterialEditorPanel.cpp,
-         // which М9 does not own (the cloud-editor task holds that file). Filed, with the count, so the
-         // decision is about a measured thing.
-         { "ShaderParam", "Category", nullptr,
-           "OWNER DECIDES / FENCED (MaterialEditor): 52 authored categories, and the panel draws one "
-           "flat table. Grouping the Details rows by this is the fix; the file belongs to another task." },
+         // THE ROW THAT WAS DEAD AND IS NOT ANY MORE. It read "OWNER DECIDES / FENCED: 52 authored
+         // categories, and the panel draws one flat table" — true when it was written, and stale since О9:
+         // MaterialEdit::PlanParameterGroups reads this field and the Material Editor draws the parameter
+         // table in the author's own groups, in the shader file's declaration order. Rewired rather than
+         // deleted, because the two states of the row are the whole record of the fix.
+         { "ShaderParam", "Category", kMatEditStates, nullptr },
+
+         // WHEN AN EDIT TO THIS PARAMETER REACHES THE PICTURE (O1). Read by
+         // MaterialEdit::FoldGroupTiming, which gives every parameter group's heading its cost, and by
+         // DescribeProperties, which puts it on the control channel — a `Rebake` write is seconds away
+         // from being visible, and a client that does not know which kind it wrote reads the unchanged
+         // frame as a failure.
+         { "ShaderParam", "Timing", kMatEditStates, nullptr },
 
          { "ShaderParam", "Tooltip", kMatEdit, nullptr },
          { "ShaderParam", "Type", kMatEditStates, nullptr },
@@ -537,16 +535,21 @@ TEST( ShaderSchemaConsumers, EveryFieldIsActuallyFilledByTheParser )
 
 TEST( ShaderSchemaConsumers, TheDeadCountIsStatedSoAShrinkageIsVisible )
 {
-    // TWO, and it was THREE when М9 counted: `ShaderParam::DefaultTexture` got its first reader with that
-    // task. `Category` and `DShaderParseResult::Name` are what is left. Up is a regression; down is
-    // welcome, and this line moves with it — a per-row diff never says "there are two more of these now".
+    // ONE, and it was THREE when М9 counted, then TWO. `ShaderParam::DefaultTexture` got its first reader
+    // with М9; `ShaderParam::Category` got one with О9, which built the Material Editor's parameter groups
+    // out of it — its row read "OWNER DECIDES / FENCED: 52 authored categories, and the panel draws one
+    // flat table", true when written and stale ever since, and the ROW is what recorded that the fix
+    // landed. `DShaderParseResult::Name` is what is left. Up is a regression; down is welcome, and this
+    // line moves with it — a per-row diff never says "there are two more of these now".
     std::size_t dead = 0;
     for ( const auto& row : k_Census )
         dead += row.Dead != nullptr ? 1u : 0u;
 
-    EXPECT_EQ( dead, 2u ) << "the number of shader-schema fields the parser fills and nothing reads has "
+    EXPECT_EQ( dead, 1u ) << "the number of shader-schema fields the parser fills and nothing reads has "
                              "changed";
-    EXPECT_EQ( std::size( k_Census ), 39u )
+    // FORTY since O1 added `ShaderParam::Timing` — when an edit to a parameter reaches the picture, read
+    // by the Material Editor's group headings and put on the control channel.
+    EXPECT_EQ( std::size( k_Census ), 40u )
          << "the shader schema gained or lost a field; the count is quoted so that is a reviewable edit";
 }
 

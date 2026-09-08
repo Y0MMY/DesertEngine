@@ -179,6 +179,14 @@ TEST( SceneCloudMaterialMigration, EveryStatedLookKeyMovesVerbatimAndTheRestStay
             "loses its painting";
     // Empty slots produced NO entry: absent and empty spell the same null handle.
     EXPECT_EQ( material.GetTexture( "CloudType2" ), 0u );
+
+    // AND THE ALBEDO COMES OUT AS A COLOUR, from ONE run. The scene field it was taken from is a float, so
+    // this function writes (0.98, 0, 0, 0) — the shape a `.demat` authored before the albedo became a
+    // colour carries, and the shape the shader reads as pure red. It is raised here rather than left to
+    // the material pass so that a v11 scene needs the tool once and not twice.
+    EXPECT_EQ( material.GetParam( "ScatteringAlbedo" ), glm::vec4( 0.98f, 0.98f, 0.98f, 0.0f ) )
+         << "a v11 raise produced a SCALAR albedo, so the sky this scene renders after one run of the "
+            "migrator is red";
 }
 
 // D-37 (teamlead, 2026-09-06): an empty Material slot was rejected as a second source of truth for
@@ -337,6 +345,84 @@ TEST( SceneCloudMaterialMigration, MigrateSceneRunsItLastAndStampsTheFileSoItNev
     const auto again = MigrateScene( scene );
     EXPECT_FALSE( again.Changed() );
     EXPECT_TRUE( again.CloudMaterial.Materials.empty() );
+}
+
+// ───────────────────────────────────────────────────────────────────────────────────────────────────────
+// THE ALBEDO BECAME A COLOUR, AND EVERY `.demat` ON DISK STATES IT AS A SCALAR (O1)
+// ───────────────────────────────────────────────────────────────────────────────────────────────────────
+//
+// WHY THIS IS DATA LOSS AND NOT COSMETICS. A `.demat` stores every parameter as a vec4 with the tail
+// zeroed — the format's own convention for a scalar — so `ScatteringAlbedo: [0.98, 0, 0, 0]` read by a
+// shader that now wants three components is a medium which scatters red and absorbs green and blue
+// outright. Fourteen material files in this repository carry it in that shape. Unraised, they render a
+// RED sky, which is not a subtle drift anybody would argue about; it is the whole point of running the
+// tool over the corpus in the same change that moves the shader.
+//
+// CONTENT-DETECTED, because a `.demat` has no version field — the same arrangement, and the same reason,
+// as the O-4 layout split beside it.
+TEST( SceneCloudMaterialAlbedo, AScalarAlbedoIsBroadcastToANeutralColour )
+{
+    Desert::Assets::MaterialData material;
+    material.ShaderName = "CloudRaymarch";
+    material.SetParam( "ScatteringAlbedo", glm::vec4( 0.98f, 0.0f, 0.0f, 0.0f ) );
+    material.SetParam( "Coverage", glm::vec4( 0.45f, 0.0f, 0.0f, 0.0f ) );
+
+    const auto report = Desert::Migration::MigrateCloudMaterialAlbedoToColour( material );
+
+    EXPECT_TRUE( report.Changed() );
+    EXPECT_EQ( report.Broadcast, 1 );
+    EXPECT_EQ( material.GetParam( "ScatteringAlbedo" ), glm::vec4( 0.98f, 0.98f, 0.98f, 0.0f ) );
+    // Its neighbours are scalars too and must NOT be touched: the step is about one parameter whose TYPE
+    // changed, not about every value that happens to have zeroes after it.
+    EXPECT_EQ( material.GetParam( "Coverage" ), glm::vec4( 0.45f, 0.0f, 0.0f, 0.0f ) );
+}
+
+TEST( SceneCloudMaterialAlbedo, ItIsIdempotentByShapeRatherThanByAFlag )
+{
+    Desert::Assets::MaterialData material;
+    material.SetParam( "ScatteringAlbedo", glm::vec4( 0.98f, 0.0f, 0.0f, 0.0f ) );
+
+    EXPECT_EQ( Desert::Migration::MigrateCloudMaterialAlbedoToColour( material ).Broadcast, 1 );
+
+    const glm::vec4 afterFirst = material.GetParam( "ScatteringAlbedo" );
+    EXPECT_FALSE( Desert::Migration::MigrateCloudMaterialAlbedoToColour( material ).Changed() )
+         << "a second run found something to do, so the step is not idempotent and running the tool twice "
+            "over a repository would keep rewriting files";
+    EXPECT_EQ( material.GetParam( "ScatteringAlbedo" ), afterFirst );
+}
+
+TEST( SceneCloudMaterialAlbedo, AnAuthoredColourIsLeftExactlyAlone )
+{
+    Desert::Assets::MaterialData material;
+    material.SetParam( "ScatteringAlbedo", glm::vec4( 0.9f, 0.72f, 0.55f, 0.0f ) );
+
+    EXPECT_FALSE( Desert::Migration::MigrateCloudMaterialAlbedoToColour( material ).Changed() );
+    EXPECT_EQ( material.GetParam( "ScatteringAlbedo" ), glm::vec4( 0.9f, 0.72f, 0.55f, 0.0f ) );
+}
+
+// THE DEGENERATE INPUT, and it is correct rather than lucky. Black is black in one component and in
+// three, so (0,0,0,0) comes out unchanged and reports no change — which is ALSO what makes the shape test
+// above safe, because the one value that cannot be told apart before and after is the one where the two
+// answers agree.
+TEST( SceneCloudMaterialAlbedo, AZeroAlbedoIsAlreadyTheColourItWouldBecome )
+{
+    Desert::Assets::MaterialData material;
+    material.SetParam( "ScatteringAlbedo", glm::vec4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+
+    EXPECT_FALSE( Desert::Migration::MigrateCloudMaterialAlbedoToColour( material ).Changed() );
+    EXPECT_EQ( material.GetParam( "ScatteringAlbedo" ), glm::vec4( 0.0f ) );
+}
+
+// A material that never stated the parameter keeps not stating it: an absent override means "the schema's
+// default", and inventing an entry here would turn every silent material into one that pins a value.
+TEST( SceneCloudMaterialAlbedo, AMaterialThatDoesNotStateItIsNotGivenOne )
+{
+    Desert::Assets::MaterialData material;
+    material.SetParam( "Coverage", glm::vec4( 0.45f, 0.0f, 0.0f, 0.0f ) );
+
+    EXPECT_FALSE( Desert::Migration::MigrateCloudMaterialAlbedoToColour( material ).Changed() );
+    EXPECT_EQ( material.Params.size(), 1u );
+    EXPECT_EQ( material.GetParam( "ScatteringAlbedo" ), glm::vec4( 0.0f ) );
 }
 
 int main( int argc, char** argv )

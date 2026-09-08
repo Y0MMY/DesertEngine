@@ -145,11 +145,19 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   un-owed pointer would otherwise have slipped in unremarked. The answer is the easy kind (a string
     //   literal in a `static const` table, so the language closes both questions), which is the point: the
     //   gate does not care whether the answer is hard, only that one exists.
-    EXPECT_EQ( CountOf( Form::Raw ), 323 );
+    //
+    //   784 -> 786, and it earned its keep a second time in the same way. O1 added
+    //   Graphic::kCloudUnreadSlots — the register of cloud parameter-block slots no shader reads, one row
+    //   per slot with the reason in it — and its row type carries two `const char*`. This suite named both
+    //   with their file and line before anyone thought about them; the answer is again the easy kind
+    //   (string literals in an `inline constexpr std::array`), and again the value is that a raw pointer
+    //   could not be ADDED without someone being asked. Note the shape of the thing it caught: a table
+    //   written to make an exception explainable, which would itself have been an unexplained pointer.
+    EXPECT_EQ( CountOf( Form::Raw ), 325 );
     EXPECT_EQ( CountOf( Form::Shared ), 317 );
     EXPECT_EQ( CountOf( Form::Unique ), 110 );
     EXPECT_EQ( CountOf( Form::Weak ), 34 );
-    EXPECT_EQ( (int)Members().size(), 784 )
+    EXPECT_EQ( (int)Members().size(), 786 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }

@@ -912,9 +912,12 @@ namespace
 
             // Unit sun radiance and no ambient: the series is being measured against a reference that has
             // no ambient either, and a term neither side carries can only blur the comparison.
+            // A NEUTRAL vec3 albedo, so this arm measures exactly what it measured while the albedo was a
+            // scalar: the reference below is a grey medium, and the comparison would say nothing about
+            // the series if the two sides stopped describing the same one.
             const vec3 step =
                  CloudMultiScatterStep( series, vec3( 1.0f ), vec3( 0.0f ), od, phase, sigmaT,
-                                        static_cast<float>( lobe.Albedo ), static_cast<float>( stepKm ) );
+                                        vec3( static_cast<float>( lobe.Albedo ) ), static_cast<float>( stepKm ) );
 
             radiance += transmittance * static_cast<double>( step.x );
             transmittance *= std::exp( -lobe.SigmaPerKm * stepKm );
@@ -1104,16 +1107,16 @@ TEST( CloudMultiScatterSeries, AStepCannotScatterMoreLightThanTheSourceItIntegra
         for ( const float od : { 0.0f, 0.5f, 5.0f, 45.0f } )
             for ( const float stepKm : { 0.001f, 0.02f, 0.2f, 2.0f } )
             {
-                const vec3  sun( 3.0f, 2.0f, 1.0f );
-                const vec3  ambient( 0.4f, 0.5f, 0.6f );
-                const float albedo = 0.98f;
+                const vec3 sun( 3.0f, 2.0f, 1.0f );
+                const vec3 ambient( 0.4f, 0.5f, 0.6f );
+                const vec3 albedo( 0.98f );
 
                 const vec3 value = CloudMultiScatterStep( series, sun, ambient, od, phase, sigma, albedo, stepKm );
 
                 // The most any octave can present to the integral, before its own weight: the sun at full
                 // visibility through the most forward the phase ever gets, plus the whole ambient.
                 const double perOctave = static_cast<double>( sun.x ) * maxPhase + ambient.x;
-                const double bound     = perOctave * albedo * sigma * weights * stepKm;
+                const double bound     = perOctave * albedo.x * sigma * weights * stepKm;
 
                 EXPECT_LE( static_cast<double>( value.x ), bound * ( 1.0 + 1e-5 ) + 1e-9 )
                      << "sigma " << sigma << ", optical depth " << od << ", step " << stepKm
@@ -1122,6 +1125,69 @@ TEST( CloudMultiScatterSeries, AStepCannotScatterMoreLightThanTheSourceItIntegra
                 EXPECT_GE( value.x, 0.0f );
                 EXPECT_TRUE( std::isfinite( value.x ) );
             }
+}
+
+// A COLOURED ALBEDO IS EXACTLY THREE INDEPENDENT GREY RUNS — the relation that makes the medium's colour
+// a physical quantity rather than a tint applied to the answer.
+//
+// WHY THIS IS THE STRONGEST ASSERTION IN THE FILE ABOUT THE CHANGE. Scattering does not mix wavelengths:
+// a photon that leaves as red arrived as red, so the red channel of the result may depend on the red
+// channel of the source and of the albedo and on NOTHING else. That property is invisible in a frame — a
+// coupled implementation produces a plausible tint — and it is exactly what a `dot()`, a `length()`, a
+// luminance or an accidental `.x` broadcast inside the series would destroy. Asserted to the BIT rather
+// than within a tolerance, because there is no arithmetic reason for the two paths to differ: the same
+// operations happen in the same order either way, only three at a time instead of one.
+//
+// It also pins the OTHER direction, which is the one the migration exists for: a grey colour must be the
+// same answer the scalar gave, so every scene raised from a scalar albedo renders the sky it rendered
+// before. That half is what the six protocol points then confirm on a real frame.
+TEST( CloudMultiScatterSeries, AColouredAlbedoIsThreeIndependentGreyRuns )
+{
+    const CloudScatterSeries series = ShippedSeries();
+    const float              phase  = CloudPhaseDualLobe( 0.85f, 0.8f, 0.1667f, 0.575f );
+
+    // A DELIBERATELY LOPSIDED SOURCE. With sun and ambient equal across the channels, a series that
+    // collapsed the albedo to its luminance would still agree with the grey runs at a grey albedo, and
+    // this test would pass over the very defect it is here for.
+    const vec3 sun( 3.0f, 2.0f, 1.0f );
+    const vec3 ambient( 0.4f, 0.5f, 0.6f );
+
+    int compared = 0;
+    for ( const vec3 albedo : { vec3( 0.98f, 0.98f, 0.98f ), vec3( 0.98f, 0.72f, 0.55f ),
+                                vec3( 0.20f, 0.90f, 0.05f ), vec3( 0.0f, 0.5f, 1.0f ) } )
+        for ( const float sigma : { 0.5f, 8.0f, 45.0f } )
+            for ( const float od : { 0.0f, 0.5f, 5.0f, 45.0f } )
+                for ( const float stepKm : { 0.001f, 0.02f, 0.2f, 2.0f } )
+                {
+                    const vec3 coloured =
+                         CloudMultiScatterStep( series, sun, ambient, od, phase, sigma, albedo, stepKm );
+
+                    // Each channel run on its own, through the same function, with every vector quantity
+                    // reduced to that one channel. Reusing the function rather than restating its maths is
+                    // the point: a reference written out here would be a second implementation, and the
+                    // two agreeing would say nothing about the one that ships.
+                    for ( int c = 0; c < 3; ++c )
+                    {
+                        const vec3 grey = CloudMultiScatterStep( series, vec3( sun[c] ), vec3( ambient[c] ), od,
+                                                                 phase, sigma, vec3( albedo[c] ), stepKm );
+
+                        EXPECT_FLOAT_EQ( coloured[c], grey[c] )
+                             << "channel " << c << " of a coloured albedo " << albedo[c]
+                             << " differs from the same channel run alone, at sigma " << sigma
+                             << ", optical depth " << od << ", step " << stepKm
+                             << ". Scattering does not mix wavelengths, so this is a cross-channel term "
+                                "that has no physical meaning — look for a dot(), a length(), a luminance "
+                                "or a broadcast of .x inside the series.";
+                        ++compared;
+                    }
+                }
+
+    // QUOTED, because the loops above are vacuously green over an empty parameter set and a census that
+    // stopped counting is exactly how one silently becomes a no-op.
+    std::printf( "[CloudMultiScatterSeries] %d channel comparisons across 4 albedos x 3 extinctions x 4 "
+                 "optical depths x 4 steps\n",
+                 compared );
+    EXPECT_EQ( compared, 4 * 3 * 4 * 4 * 3 );
 }
 
 TEST( CloudMultiScatterSeries, MoreCloudBetweenTheSampleAndTheSunMeansLessLightArrives )
@@ -1143,9 +1209,9 @@ TEST( CloudMultiScatterSeries, MoreCloudBetweenTheSampleAndTheSunMeansLessLightA
             for ( int i = 0; i <= 120; ++i )
             {
                 const float od = 0.5f * static_cast<float>( i );
-                const float value =
-                     CloudMultiScatterStep( series, vec3( 1.0f ), vec3( 0.0f ), od, phase, sigma, 0.98f, stepKm )
-                          .x;
+                const float value = CloudMultiScatterStep( series, vec3( 1.0f ), vec3( 0.0f ), od, phase, sigma,
+                                                           vec3( 0.98f ), stepKm )
+                                         .x;
 
                 EXPECT_LE( value, previous ) << "sigma " << sigma << ", step " << stepKm << ": optical depth "
                                              << od << " delivers MORE light than " << od - 0.5f << " did";
