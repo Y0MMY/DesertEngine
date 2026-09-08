@@ -1,11 +1,13 @@
 // WHEN A CLOUD PARAMETER'S EDIT BECOMES VISIBLE — declared in the schema, MEASURED here.
 //
-// THE FACT THIS SUITE IS ABOUT. Twenty of the volumetric cloud material's thirty-four parameters are
+// THE FACT THIS SUITE IS ABOUT. Twenty of the volumetric cloud material's thirty-five parameters are
 // inputs to a CPU bake of a 256x32x256 volume over several thousand cloud bodies. Moving one of them
 // re-runs that bake — 3.3 s to 14.1 s measured on the development machine (task O8) — and the sky goes on
-// showing the PREVIOUS volume until the new one lands. The other fourteen are read per sample by the march
-// and answer in the frame that is drawn next. The owner reported the layer as "not updating" twice, and
-// both times nothing was broken: what was missing was any way to tell the two kinds of knob apart.
+// showing the PREVIOUS volume until the new one lands. The other fifteen answer in the frame that is drawn
+// next: fourteen are read per sample by the march, and the fifteenth is the authored Medium, which is
+// COMPILED INTO it rather than read by it and still lands in the next frame (O1-E). The owner reported the
+// layer as "not updating" twice, and both times nothing was broken: what was missing was any way to tell
+// the two kinds of knob apart.
 //
 // The Material Editor now says which is which, in the heading of every parameter group and in every row's
 // tooltip, from ShaderParam::Timing — the `Timing(Immediate)` / `Timing(Rebake)` attribute of the shader's
@@ -102,7 +104,7 @@ namespace
     // Repeats on an unpainted layer would stall the editor for a slider that provably changes nothing).
     // Measuring those five against an unpainted base would therefore report them as instant, and they are
     // not. So the base state used below has a painting in BOTH slots, which is the state in which every one
-    // of the thirty-four parameters means something.
+    // of the thirty-five parameters means something.
     std::shared_ptr<Assets::CloudLayoutData> Painting( uint32_t hash )
     {
         auto data         = std::make_shared<Assets::CloudLayoutData>();
@@ -204,7 +206,7 @@ namespace
     // function over the renderer's own bake-parameter application, with one parameter changed.
     //
     // The three families exist because the three kinds of parameter reach the bake by three different
-    // routes, and pretending otherwise would leave six of the thirty-four untested:
+    // routes, and pretending otherwise would leave six of the thirty-five untested:
     //
     //   VALUES        through the same by-name setter BuildCloudMaterialValues uses for a `.demat` override;
     //   CloudType1..4 through the resolved SHAPES, because the renderer resolves the four handles in
@@ -313,13 +315,23 @@ TEST( CloudMaterialTiming, TheDeclaredTimingIsTheOneTheBakeActuallyHas )
         measured ? ++rebake : ++immediate;
     }
 
-    // QUOTED, so a schema that silently shrank is visible: the loop above is vacuously green over an empty
-    // parameter list, which is exactly how a census stops counting anything without going red.
+    // PRINTED AND NOT PINNED, and the two literals that used to stand here (20 and 15) are the reason.
+    //
+    // The hazard they guarded is real: the loop above is vacuously green over an empty parameter list,
+    // which is exactly how a census stops counting anything without going red. The guard for that is the
+    // assertion below — the schema parsed, and it parsed to something.
+    //
+    // What the literals ADDED was a gate satisfied by editing a number. Adding a parameter reddened this
+    // line, and the cheapest way to make it green again was to type 21 — no name, no reason, nothing said
+    // about the parameter itself. That is the shape this project has paid for repeatedly, and the split is
+    // pinned properly in two places that name every member: CloudMaterialSchema asserts the schema and the
+    // C++ mirror hold the same properties BY NAME, and CloudControlCensus demands a measured frame movement
+    // for each of them. Neither can be satisfied by arithmetic.
+    ASSERT_FALSE( Schema().Params.empty() )
+         << "the cloud material schema parsed to nothing, so the loop above asserted nothing at all";
     std::printf( "[CloudMaterialTiming] %u of %u parameters rebuild the cloud volume; %u reach the march in "
                  "the same frame\n",
                  rebake, rebake + immediate, immediate );
-    EXPECT_EQ( rebake, 20u );
-    EXPECT_EQ( immediate, 15u );
 }
 
 // ── 3. THE HEADING MAY SPEAK FOR ITS GROUP ─────────────────────────────────────────────────────────────
