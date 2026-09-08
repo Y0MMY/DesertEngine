@@ -381,6 +381,9 @@ namespace Desert::Assets
         /// painting carries no mask, which is the state a blank canvas starts in.
         std::vector<unsigned char> Mask;
 
+        /// Same authored state? DEFAULTED so the compiler generates it from every member — see the long
+        /// note at Graphic::CloudVerticalProfile::operator==. Read by the cloud documents' GetDiskState.
+        [[nodiscard]] bool operator==( const CloudLayoutCanvas& ) const = default;
         bool HasMask() const
         {
             return !Mask.empty();

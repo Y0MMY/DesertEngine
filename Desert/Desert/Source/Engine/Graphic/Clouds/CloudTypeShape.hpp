@@ -93,6 +93,18 @@ namespace Desert::Graphic
      */
     struct CloudVerticalProfile
     {
+
+        // ── IS THIS THE SAME AUTHORED STATE? ──────────────────────────────────────────────────────────
+        //
+        // DEFAULTED, and that is the whole point of it rather than laziness: the compiler generates the
+        // comparison from EVERY member, so a field added tomorrow is compared tomorrow. A hand-written
+        // operator== over these fields would be a census kept by hand beside a struct, and the failure
+        // when it fell behind would be a document that reports itself CLEAN while holding an unsaved edit
+        // — the "middle link drops a property" shape, with a person's work as the cost.
+        //
+        // Its reader is ISubjectDocument::GetDiskState: a cloud document keeps a copy of what it loaded or
+        // last wrote and compares the working state against it. Cheap because these are small.
+        [[nodiscard]] bool                      operator==( const CloudVerticalProfile& ) const = default;
         std::array<float, kCloudProfileSamples> HalfWidth;
     };
 
@@ -334,6 +346,10 @@ namespace Desert::Graphic
         // made of: fibrous cirrus is ice falling through a shear, and the streak lies along the flow by
         // construction. A separate angle would be a second statement of a direction the layer already
         // carries — two values that can disagree, the §2.3.1 defect class.
+
+        /// Same authored state? DEFAULTED so the compiler generates it from every member — see the long
+        /// note at CloudVerticalProfile::operator==. Read by the cloud documents' GetDiskState.
+        [[nodiscard]] bool operator==( const CloudTypeShape& ) const = default;
         float PlacementAnisotropy;
     };
 

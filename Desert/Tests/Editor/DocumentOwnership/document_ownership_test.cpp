@@ -19,12 +19,17 @@
 //      hidden panel still owns its renderer, so the lease is only returned by destruction.
 //   4. Closing is not hiding: a closed document is GONE from the well and REOPENABLE from what the well
 //      remembered, which is what the old visibility flag could not offer.
+//   5. ONE INSTANCE PER SUBJECT, WHICHEVER VIEW ASKS. Since the Clouds window there are TWO views over the
+//      open documents, and a second view that could build its own would give a `.demat` two working copies
+//      -- the defect Desert/Tests/Editor/MaterialEditStates exists to prevent, one Apply from a mesh in the
+//      level being drawn with the preview's material. Section 7.
 //
 // Why these live in headers at all: EditorLayer.cpp is one of the editor translation units no suite compiles
 // (scripts/CI/UnreachedSources.sh), so a rule written there is a rule nothing can assert.
 
 #include <Editor/Core/SubjectEditorRegistry.hpp>
 #include <Editor/Core/DocumentWell.hpp>
+#include <Editor/Core/OpenDocuments.hpp>
 #include <Editor/Core/PanelRegistry.hpp>
 #include <Editor/Panels/IPanel.hpp>
 
@@ -33,6 +38,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -41,14 +47,17 @@ using Desert::Assets::AssetHandle;
 using Desert::Assets::AssetTypeID;
 using Desert::Editor::AssetSubject;
 using Desert::Editor::CensusOfDocumentEditors;
+using Desert::Editor::CensusOfDocumentIdentity;
 using Desert::Editor::CensusOfPanels;
 using Desert::Editor::ClosedDocument;
 using Desert::Editor::ComponentSubject;
 using Desert::Editor::DocumentDisplayName;
+using Desert::Editor::DocumentOpenOutcome;
 using Desert::Editor::DocumentTitle;
 using Desert::Editor::DocumentWell;
 using Desert::Editor::IPanel;
 using Desert::Editor::ISubjectDocument;
+using Desert::Editor::OpenDocuments;
 using Desert::Editor::PanelRegistry;
 using Desert::Editor::PendingRendererSlotDemand;
 using Desert::Editor::RendererSlotsHeldByDocuments;
@@ -157,6 +166,88 @@ namespace
     {
         return std::make_unique<FakeDocument>( name, subject, pool );
     }
+
+    // ── THE EDITOR'S OWN PAIR: the owner, and one view of it ───────────────────────────────────────────
+    //
+    // OpenDocuments owns the documents; DocumentWell is a VIEW that keeps the Ctrl+Tab ring and the
+    // recently-closed list. They used to be one class, and this struct is not a way of putting them back
+    // together — it is EditorLayer's two members and the ORDER IT DRIVES THEM IN, written once so every
+    // test below exercises the real sequence rather than inventing its own.
+    //
+    // The order is the part worth stating. A close is `Store.Release()` and THEN `View.NoteClosed()`, and
+    // it has to be that way round: NoteClosed reads the display name off the object, so a view told after
+    // the destruction would have nothing to remember (EditorLayer::ServiceDocumentCloses).
+    struct EditorDocuments
+    {
+        OpenDocuments Store;
+        DocumentWell  View{ Store };
+
+        ISubjectDocument* Add( std::unique_ptr<ISubjectDocument> document )
+        {
+            const auto opened = Store.Open( std::move( document ) );
+            if ( opened.Document )
+                View.Touch( opened.Document->Subject() );
+            return opened.Document;
+        }
+
+        [[nodiscard]] std::unique_ptr<ISubjectDocument> Release( const SubjectId& subject )
+        {
+            std::unique_ptr<ISubjectDocument> released = Store.Release( subject );
+            if ( released )
+                View.NoteClosed( *released );
+            return released;
+        }
+
+        [[nodiscard]] std::vector<std::unique_ptr<ISubjectDocument>> ReleaseAll()
+        {
+            auto released = Store.ReleaseAll();
+            for ( const auto& document : released )
+                View.NoteClosed( *document );
+            return released;
+        }
+
+        [[nodiscard]] ISubjectDocument* Find( const SubjectId& s ) const
+        {
+            return Store.Find( s );
+        }
+        [[nodiscard]] std::size_t Count() const
+        {
+            return Store.Count();
+        }
+        [[nodiscard]] bool Empty() const
+        {
+            return Store.Empty();
+        }
+        [[nodiscard]] const std::vector<std::unique_ptr<ISubjectDocument>>& Documents() const
+        {
+            return Store.Documents();
+        }
+        void Touch( const SubjectId& s )
+        {
+            View.Touch( s );
+        }
+        [[nodiscard]] std::optional<SubjectId> NextMostRecent( const SubjectId& s ) const
+        {
+            return View.NextMostRecent( s );
+        }
+        [[nodiscard]] const std::vector<SubjectId>& MostRecentOrder() const
+        {
+            return View.MostRecentOrder();
+        }
+        [[nodiscard]] const std::vector<ClosedDocument>& RecentlyClosed() const
+        {
+            return View.RecentlyClosed();
+        }
+
+        [[nodiscard]] auto begin() const
+        {
+            return Store.begin();
+        }
+        [[nodiscard]] auto end() const
+        {
+            return Store.end();
+        }
+    };
 } // namespace
 
 // =================================================================================================
@@ -208,7 +299,7 @@ TEST( PanelCensusRelation, ToolsPlusDocumentsAccountForEveryPanel )
     registry.Add<FakeTool>( std::string( "Scene Outliner" ) );
     registry.Add<FakeTool>( std::string( "Assets" ) );
 
-    DocumentWell well;
+    EditorDocuments well;
     well.Add( MakeDocument( DocumentTitle( "M_Crate_Painted", Asset( 11 ) ), Asset( 11 ) ) );
     well.Add( MakeDocument( DocumentTitle( "CT_Cumulus_Fair", Asset( 12 ) ), Asset( 12 ) ) );
 
@@ -232,7 +323,7 @@ TEST( PanelCensusRelation, TheCensusNoticesADocumentAmongTheTools )
     mixed.emplace_back( std::make_unique<FakeTool>( "Details" ) );
     mixed.emplace_back( MakeDocument( DocumentTitle( "M_Crate_Painted", Asset( 11 ) ), Asset( 11 ) ) );
 
-    DocumentWell empty;
+    EditorDocuments empty;
     const auto   census = CensusOfPanels( mixed, empty );
 
     EXPECT_EQ( census.Total, 2u );
@@ -244,7 +335,7 @@ TEST( PanelCensusRelation, ClosingADocumentMovesItOutOfTheTotal )
     PanelRegistry registry;
     registry.Add<FakeTool>( std::string( "Details" ) );
 
-    DocumentWell well;
+    EditorDocuments well;
     well.Add( MakeDocument( DocumentTitle( "M_Crate_Painted", Asset( 11 ) ), Asset( 11 ) ) );
     well.Add( MakeDocument( DocumentTitle( "M_Sand_Dune", Asset( 12 ) ), Asset( 12 ) ) );
 
@@ -270,7 +361,7 @@ TEST( DocumentSlotLease, ClosingADocumentReturnsItsSlot )
     const uint32_t   viewport = pool.Claim(); // the main viewport holds one for the whole session
     ASSERT_NE( viewport, RendererSlotPool::kNoFreeSlot );
 
-    DocumentWell well;
+    EditorDocuments well;
     well.Add( MakeDocument( DocumentTitle( "M_Crate_Painted", Asset( 11 ) ), Asset( 11 ), &pool ) );
     well.Add( MakeDocument( DocumentTitle( "M_Sand_Dune", Asset( 12 ) ), Asset( 12 ), &pool ) );
 
@@ -297,7 +388,7 @@ TEST( DocumentSlotLease, ClosingEveryDocumentLeavesOnlyTheViewport )
     const uint32_t   viewport = pool.Claim();
     ASSERT_NE( viewport, RendererSlotPool::kNoFreeSlot );
 
-    DocumentWell well;
+    EditorDocuments well;
     for ( uint64_t i = 1; i <= 4; ++i )
         well.Add( MakeDocument( DocumentTitle( "M_" + std::to_string( i ), Asset( i ) ), Asset( i ), &pool ) );
 
@@ -316,10 +407,10 @@ TEST( DocumentSlotLease, ACpuDrawnDocumentIsNotPendingDemand )
     // The four cloud documents bake on the CPU: they hold no slot and never will, so counting them as
     // claims would refuse a window that costs nothing. The rule lives in SubjectEditorRegistry.hpp and is
     // asserted here against the OWNER the editor now asks, rather than against the panel list it used to.
-    DocumentWell well;
-    auto&        cpu = static_cast<FakeDocument&>(
-         well.Add( MakeDocument( DocumentTitle( "CT_Cumulus_Fair", Asset( 21, AssetTypeID::CloudType ) ),
-                                        Asset( 21, AssetTypeID::CloudType ) ) ) );
+    EditorDocuments well;
+    auto&           cpu = static_cast<FakeDocument&>(
+         *well.Add( MakeDocument( DocumentTitle( "CT_Cumulus_Fair", Asset( 21, AssetTypeID::CloudType ) ),
+                                            Asset( 21, AssetTypeID::CloudType ) ) ) );
     cpu.m_ClaimsSlot = false;
 
     well.Add( MakeDocument( DocumentTitle( "M_Crate_Painted", Asset( 22 ) ), Asset( 22 ) ) );
@@ -335,7 +426,7 @@ TEST( DocumentSlotLease, ACpuDrawnDocumentIsNotPendingDemand )
 
 TEST( DocumentClose, AClosedDocumentIsGoneAndReopenable )
 {
-    DocumentWell well;
+    EditorDocuments well;
     well.Add( MakeDocument( DocumentTitle( "M_Crate_Painted", Asset( 11 ) ), Asset( 11 ) ) );
 
     ASSERT_NE( well.Find( Asset( 11 ) ), nullptr );
@@ -363,14 +454,14 @@ TEST( DocumentClose, AClosedDocumentIsGoneAndReopenable )
 
 TEST( DocumentClose, ClosingAnUnknownSubjectIsNotAnError )
 {
-    DocumentWell well;
+    EditorDocuments well;
     EXPECT_EQ( well.Release( Asset( 99 ) ), nullptr );
     EXPECT_TRUE( well.RecentlyClosed().empty() );
 }
 
 TEST( DocumentClose, TheRecentlyClosedListIsCappedAndCarriesNoDuplicates )
 {
-    DocumentWell well;
+    EditorDocuments well;
 
     // One asset, opened and closed three times, is one entry -- not three copies of the same row.
     //
@@ -402,7 +493,7 @@ TEST( DocumentClose, TheRecentlyClosedListIsCappedAndCarriesNoDuplicates )
 
 TEST( DocumentRing, MostRecentlyUsedOrderFollowsFocusAndNotCreation )
 {
-    DocumentWell well;
+    EditorDocuments well;
     well.Add( MakeDocument( DocumentTitle( "A", Asset( 1 ) ), Asset( 1 ) ) );
     well.Add( MakeDocument( DocumentTitle( "B", Asset( 2 ) ), Asset( 2 ) ) );
     well.Add( MakeDocument( DocumentTitle( "C", Asset( 3 ) ), Asset( 3 ) ) );
@@ -419,7 +510,7 @@ TEST( DocumentRing, MostRecentlyUsedOrderFollowsFocusAndNotCreation )
 
 TEST( DocumentRing, CtrlTabWalksEveryDocumentAndWrapsRoundOnce )
 {
-    DocumentWell well;
+    EditorDocuments well;
     well.Add( MakeDocument( DocumentTitle( "A", Asset( 1 ) ), Asset( 1 ) ) );
     well.Add( MakeDocument( DocumentTitle( "B", Asset( 2 ) ), Asset( 2 ) ) );
     well.Add( MakeDocument( DocumentTitle( "C", Asset( 3 ) ), Asset( 3 ) ) );
@@ -437,7 +528,7 @@ TEST( DocumentRing, CtrlTabWalksEveryDocumentAndWrapsRoundOnce )
 
 TEST( DocumentRing, TabbingFromOutsideTheDocumentsLandsOnTheMostRecent )
 {
-    DocumentWell well;
+    EditorDocuments well;
     well.Add( MakeDocument( DocumentTitle( "A", Asset( 1 ) ), Asset( 1 ) ) );
     well.Add( MakeDocument( DocumentTitle( "B", Asset( 2 ) ), Asset( 2 ) ) );
 
@@ -448,7 +539,7 @@ TEST( DocumentRing, TabbingFromOutsideTheDocumentsLandsOnTheMostRecent )
 
 TEST( DocumentRing, NothingToSwitchToIsSaidRatherThanGuessed )
 {
-    DocumentWell well;
+    EditorDocuments well;
     EXPECT_FALSE( well.NextMostRecent( Asset( 0 ) ).has_value() );
 
     well.Add( MakeDocument( DocumentTitle( "A", Asset( 1 ) ), Asset( 1 ) ) );
@@ -459,7 +550,7 @@ TEST( DocumentRing, NothingToSwitchToIsSaidRatherThanGuessed )
 
 TEST( DocumentRing, AClosedDocumentLeavesTheRing )
 {
-    DocumentWell well;
+    EditorDocuments well;
     well.Add( MakeDocument( DocumentTitle( "A", Asset( 1 ) ), Asset( 1 ) ) );
     well.Add( MakeDocument( DocumentTitle( "B", Asset( 2 ) ), Asset( 2 ) ) );
     well.Add( MakeDocument( DocumentTitle( "C", Asset( 3 ) ), Asset( 3 ) ) );
@@ -516,7 +607,7 @@ TEST( SubjectIdentity, TwoDocumentsOverOneNumberAreTwoDocuments )
     EXPECT_NE( DocumentTitle( "Hero", asset ), DocumentTitle( "Hero", anim ) );
     EXPECT_NE( DocumentTitle( "Hero", anim ), DocumentTitle( "Hero", particles ) );
 
-    DocumentWell well;
+    EditorDocuments well;
     well.Add( MakeDocument( DocumentTitle( "Hero", asset ), asset ) );
     well.Add( MakeDocument( DocumentTitle( "Hero", anim ), anim ) );
     well.Add( MakeDocument( DocumentTitle( "Hero", particles ), particles ) );
@@ -537,7 +628,7 @@ TEST( SubjectIdentity, TheSameSubjectIsTheSameDocument )
     EXPECT_EQ( DocumentTitle( "Hero", Component( 7, "AnimationComponent" ) ),
                DocumentTitle( "Hero", Component( 7, "AnimationComponent" ) ) );
 
-    DocumentWell    well;
+    EditorDocuments well;
     const SubjectId anim = Component( 7, "AnimationComponent" );
     well.Add( MakeDocument( DocumentTitle( "Hero", anim ), anim ) );
     EXPECT_NE( well.Find( Component( 7, "AnimationComponent" ) ), nullptr )
@@ -554,7 +645,7 @@ TEST( SubjectIdentity, NothingIsNotASubject )
     EXPECT_TRUE( Component( 0, "AnimationComponent" ).IsNull() ) << "the null UUID is 'no entity'";
     EXPECT_FALSE( Asset( 11 ).IsNull() );
 
-    DocumentWell well;
+    EditorDocuments well;
     well.Add( MakeDocument( DocumentTitle( "A", Asset( 11 ) ), Asset( 11 ) ) );
     EXPECT_EQ( well.Find( SubjectId{} ), nullptr );
 }
@@ -604,7 +695,7 @@ TEST( DocumentEditorCensus, EveryOpenDocumentHasARegisteredEditor )
     registry.Register( Asset( 1 ).Type(), FakeEditor( "Material" ) );
     registry.Register( Component( 1, "AnimationComponent" ).Type(), FakeEditor( "AnimationComponent" ) );
 
-    DocumentWell well;
+    EditorDocuments well;
     well.Add( registry.Create( Asset( 11 ) ) );
     well.Add( registry.Create( Component( 12, "AnimationComponent" ) ) );
     well.Add( registry.Create( Asset( 13 ) ) );
@@ -625,7 +716,7 @@ TEST( DocumentEditorCensus, ADocumentFromSomewhereElseIsCounted )
     SubjectEditorRegistry registry;
     registry.Register( Asset( 1 ).Type(), FakeEditor( "Material" ) );
 
-    DocumentWell well;
+    EditorDocuments well;
     well.Add( registry.Create( Asset( 11 ) ) );
     well.Add( MakeDocument( DocumentTitle( "smuggled", Component( 12, "UICanvasComponent" ) ),
                             Component( 12, "UICanvasComponent" ) ) );
@@ -723,12 +814,12 @@ TEST( DocumentEditorCensus, AnUnregisteredKindOpensNothingRatherThanSomethingEls
 
 TEST( DocumentLiveness, TheSweepFindsExactlyTheDeadOnes )
 {
-    DocumentWell well;
-    auto&        alive =
-         static_cast<FakeDocument&>( well.Add( MakeDocument( DocumentTitle( "A", Asset( 11 ) ), Asset( 11 ) ) ) );
+    EditorDocuments well;
+    auto&           alive =
+         static_cast<FakeDocument&>( *well.Add( MakeDocument( DocumentTitle( "A", Asset( 11 ) ), Asset( 11 ) ) ) );
     auto& doomed = static_cast<FakeDocument&>(
-         well.Add( MakeDocument( DocumentTitle( "Hero", Component( 12, "AnimationComponent" ) ),
-                                 Component( 12, "AnimationComponent" ) ) ) );
+         *well.Add( MakeDocument( DocumentTitle( "Hero", Component( 12, "AnimationComponent" ) ),
+                                  Component( 12, "AnimationComponent" ) ) ) );
 
     const auto deadSubjects = [&well]
     {
@@ -772,9 +863,9 @@ TEST( DocumentSlotLease, ReleasingTheSlotOfAHiddenDocumentDoesNotCloseIt )
     const uint32_t   viewport = pool.Claim();
     ASSERT_NE( viewport, RendererSlotPool::kNoFreeSlot );
 
-    DocumentWell well;
-    auto&        hidden = static_cast<FakeDocument&>(
-         well.Add( MakeDocument( DocumentTitle( "A", Asset( 11 ) ), Asset( 11 ), &pool ) ) );
+    EditorDocuments well;
+    auto&           hidden = static_cast<FakeDocument&>(
+         *well.Add( MakeDocument( DocumentTitle( "A", Asset( 11 ) ), Asset( 11 ), &pool ) ) );
     well.Add( MakeDocument( DocumentTitle( "B", Asset( 12 ) ), Asset( 12 ), &pool ) );
 
     EXPECT_EQ( pool.InUseCount(), 3u );
@@ -803,9 +894,9 @@ TEST( DocumentSlotLease, ReleasingTwiceIsNotAnError )
     // The sweep runs every frame while a document stays hidden. A second release must not hand a slot back
     // to the pool twice — that would free somebody else's.
     RendererSlotPool pool;
-    DocumentWell     well;
+    EditorDocuments  well;
     auto&            hidden = static_cast<FakeDocument&>(
-         well.Add( MakeDocument( DocumentTitle( "A", Asset( 11 ) ), Asset( 11 ), &pool ) ) );
+         *well.Add( MakeDocument( DocumentTitle( "A", Asset( 11 ) ), Asset( 11 ), &pool ) ) );
 
     EXPECT_EQ( pool.InUseCount(), 1u );
     hidden.ReleaseRendererSlot();
@@ -886,6 +977,159 @@ TEST( PathOpening, ARegistryWithNoOpenersClaimsNothing )
 {
     SubjectEditorRegistry registry;
     EXPECT_EQ( registry.OpenPath( "M_Crate.demat" ), PathOpenOutcome::NotMine );
+}
+
+// =================================================================================================
+// 12. TWO VIEWS, ONE DOCUMENT  (task O9-2)
+// =================================================================================================
+//
+// THE DEFECT THIS SECTION CLOSES, stated before the tests because the tests are short and the reason is
+// not. The Clouds window gathers the six stages the sky is built from into one window and embeds the
+// editor for the selected stage on its right. Stage 2 is the cloud MATERIAL, and a `.demat` is already
+// editable in the document well. If the Clouds window built its own document for it, the material would
+// have TWO WORKING COPIES -- and the Material Editor's whole point is that WORKING, APPLIED and ON DISK
+// are three different states (ISubjectDocument::EditModel). Two working copies means Apply from one of
+// them publishes an edit the other one does not have, and Desert/Tests/Editor/MaterialEditStates is the
+// suite that exists because that class of defect is expensive.
+//
+// The fix is not "each view remembers to check first". It is that only OpenDocuments can make a document
+// and it REFUSES a second one for a subject, so a view has nothing to reach for but Find().
+//
+// Two rejected alternatives, recorded so they are not re-proposed: "the window asks the well to draw it"
+// (a view depending on another view -- and Details is already asking to be a third), and "the window
+// keeps its own" (the two working copies above).
+
+TEST( DocumentIdentity, TwoViewsOfOneSubjectAreOneObject )
+{
+    EditorDocuments editor;
+
+    // The well's route: the editor opens the document, the well is told to touch it.
+    ISubjectDocument* opened =
+         editor.Add( MakeDocument( DocumentTitle( "M_Clouds_Protocol_Clouds", Asset( 11 ) ), Asset( 11 ) ) );
+    ASSERT_NE( opened, nullptr );
+
+    // The Clouds window's route: a second view, holding NOTHING but a reference to the same owner, asks
+    // for the document that edits the subject its selected stage names.
+    const DocumentWell secondView{ editor.Store };
+
+    EXPECT_EQ( editor.View.Showing( Asset( 11 ) ), opened );
+    EXPECT_EQ( secondView.Showing( Asset( 11 ) ), opened )
+         << "a second view built its own document instead of asking the owner for the one that exists";
+
+    // ONE OBJECT, not two that agree. Identity is stronger than agreement, and it is the only form of the
+    // claim that survives an edit nobody told the other view about.
+    EXPECT_EQ( editor.View.Showing( Asset( 11 ) ), secondView.Showing( Asset( 11 ) ) );
+}
+
+TEST( DocumentIdentity, AnEditThroughOneViewIsVisibleThroughTheOther )
+{
+    EditorDocuments editor;
+    editor.Add( MakeDocument( DocumentTitle( "M_Clouds_Protocol_Clouds", Asset( 11 ) ), Asset( 11 ) ) );
+
+    const DocumentWell wellView{ editor.Store };
+    const DocumentWell cloudsView{ editor.Store };
+
+    // The stand-in for "the artist moved a slider in the Clouds window". FakeDocument's m_Alive is the one
+    // piece of mutable state this suite has on a document, and what it stands for does not matter -- what
+    // matters is that a write through one view is READ through the other, which can only be true of one
+    // object.
+    auto* throughClouds = static_cast<FakeDocument*>( cloudsView.Showing( Asset( 11 ) ) );
+    ASSERT_NE( throughClouds, nullptr );
+    throughClouds->m_Alive = false;
+
+    const auto* throughWell = wellView.Showing( Asset( 11 ) );
+    ASSERT_NE( throughWell, nullptr );
+    EXPECT_FALSE( throughWell->IsSubjectAlive() )
+         << "the two views are looking at two different objects: an edit made in one is invisible in the other";
+}
+
+TEST( DocumentIdentity, ASecondDocumentForOneSubjectIsRefusedRatherThanAppended )
+{
+    OpenDocuments store;
+
+    const auto first = store.Open( MakeDocument( DocumentTitle( "M_Crate", Asset( 11 ) ), Asset( 11 ) ) );
+    ASSERT_EQ( first.Outcome, DocumentOpenOutcome::Opened );
+
+    // What a second view that built its own would have done. The container answers with the one that is
+    // already open and says so -- it does not append, and it does not silently succeed either, because
+    // "opened" and "there was already one" are two facts a caller has to be able to tell apart (§1.4).
+    const auto second = store.Open( MakeDocument( DocumentTitle( "M_Crate", Asset( 11 ) ), Asset( 11 ) ) );
+    EXPECT_EQ( second.Outcome, DocumentOpenOutcome::AlreadyOpen );
+    EXPECT_EQ( second.Document, first.Document );
+    EXPECT_EQ( store.Count(), 1u ) << "a second working copy of one subject reached the owner";
+}
+
+TEST( DocumentIdentity, NothingAndANamelessSubjectAreRefusedAndSaidToBe )
+{
+    OpenDocuments store;
+
+    EXPECT_EQ( store.Open( nullptr ).Outcome, DocumentOpenOutcome::Refused );
+    // A default SubjectId names no domain, no facet and no owner. A document over it would be findable by
+    // any other unset subject, which is the collision Find() refuses at the other end.
+    EXPECT_EQ( store.Open( MakeDocument( "nothing", SubjectId{} ) ).Outcome, DocumentOpenOutcome::Refused );
+    EXPECT_TRUE( store.Empty() );
+}
+
+TEST( DocumentIdentityCensusRelation, EveryOpenSubjectResolvesToOneObjectInBothViews )
+{
+    EditorDocuments editor;
+    editor.Add( MakeDocument( DocumentTitle( "M_Clouds_Protocol_Clouds", Asset( 11 ) ), Asset( 11 ) ) );
+    editor.Add( MakeDocument( DocumentTitle( "PTP_LetterP", Asset( 12, AssetTypeID::CloudLayout ) ),
+                              Asset( 12, AssetTypeID::CloudLayout ) ) );
+    editor.Add( MakeDocument( DocumentTitle( "Cumulus_Congestus", Asset( 13, AssetTypeID::CloudType ) ),
+                              Asset( 13, AssetTypeID::CloudType ) ) );
+
+    const DocumentWell wellView{ editor.Store };
+    const DocumentWell cloudsView{ editor.Store };
+
+    const auto census = CensusOfDocumentIdentity(
+         editor.Store, [&]( const SubjectId& s ) { return wellView.Showing( s ); },
+         [&]( const SubjectId& s ) { return cloudsView.Showing( s ); } );
+
+    EXPECT_EQ( census.Subjects, 3u );
+    EXPECT_EQ( census.Disagreements, 0u );
+    EXPECT_EQ( census.Unreachable, 0u );
+    EXPECT_TRUE( census.EveryViewShowsOneObject() );
+}
+
+TEST( DocumentIdentityCensusRelation, AViewWithItsOwnDocumentsIsCaughtByTheCensus )
+{
+    // The census going RED, on purpose. Without this the three greens above prove only that a correct
+    // arrangement passes; what has to be shown is that the WRONG one fails, because the wrong one is the
+    // arrangement somebody will write the day a third view is added in a hurry.
+    EditorDocuments editor;
+    editor.Add( MakeDocument( DocumentTitle( "M_Clouds_Protocol_Clouds", Asset( 11 ) ), Asset( 11 ) ) );
+
+    const DocumentWell wellView{ editor.Store };
+
+    // A view that keeps its own copy of the document rather than asking the owner. This is exactly the
+    // shape the Clouds window would have had, and the two working copies are visible from here.
+    OpenDocuments rogue;
+    (void)rogue.Open( MakeDocument( DocumentTitle( "M_Clouds_Protocol_Clouds", Asset( 11 ) ), Asset( 11 ) ) );
+
+    const auto census = CensusOfDocumentIdentity(
+         editor.Store, [&]( const SubjectId& s ) { return wellView.Showing( s ); },
+         [&]( const SubjectId& s ) { return rogue.Find( s ); } );
+
+    EXPECT_EQ( census.Subjects, 1u );
+    EXPECT_EQ( census.Disagreements, 1u );
+    EXPECT_FALSE( census.EveryViewShowsOneObject() );
+}
+
+TEST( DocumentIdentity, ClosingThroughTheOwnerEmptiesBothViewsAtOnce )
+{
+    EditorDocuments editor;
+    editor.Add( MakeDocument( DocumentTitle( "M_Clouds_Protocol_Clouds", Asset( 11 ) ), Asset( 11 ) ) );
+
+    const DocumentWell cloudsView{ editor.Store };
+    ASSERT_NE( cloudsView.Showing( Asset( 11 ) ), nullptr );
+
+    (void)editor.Release( Asset( 11 ) );
+
+    // A view holds no pointer of its own, so there is nothing left in it to dangle. This is the other half
+    // of what moving ownership out bought: a view cannot outlive the document it was showing.
+    EXPECT_EQ( cloudsView.Showing( Asset( 11 ) ), nullptr );
+    EXPECT_EQ( editor.View.Showing( Asset( 11 ) ), nullptr );
 }
 
 int main( int argc, char** argv )

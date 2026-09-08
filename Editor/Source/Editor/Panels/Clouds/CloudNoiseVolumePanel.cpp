@@ -68,6 +68,40 @@ namespace Desert::Editor
             }
             return "Cloud Noise Volume";
         }
+
+        // -- EVERY NUMBER OF THE RECIPE, ONCE ----------------------------------------------------------
+        //
+        // TWO READERS AND ONE LIST, for the reason CloudTypePanel's kShapeFields carries at length: the
+        // controls this panel draws and the properties the control channel offers are the same rows with
+        // the same clamps, because neither is written out twice.
+        //
+        // RESOLUTION IS NOT HERE. It is one of exactly two legal values and the panel draws it as a combo;
+        // SetEditableProperty handles it by name and refuses anything that is not 64 or 128, which is a
+        // different refusal from "outside a range" and reads as one.
+        struct RecipeField
+        {
+            const char* Name;
+            const char* Label;
+            float Assets::CloudNoiseVolumeParams::*Member;
+            float                                  Min;
+            float                                  Max;
+        };
+
+        constexpr RecipeField kRecipeFields[] = {
+             { "CurlStrength", "Curl Strength", &Assets::CloudNoiseVolumeParams::CurlStrength, 0.0f, 0.5f },
+             { "WispyPeriodLowFrequency", "Wispy Period LF",
+               &Assets::CloudNoiseVolumeParams::WispyPeriodLowFrequency, 1.0f, 32.0f },
+             { "WispyPeriodHighFrequency", "Wispy Period HF",
+               &Assets::CloudNoiseVolumeParams::WispyPeriodHighFrequency, 1.0f, 32.0f },
+             { "BillowPeriodLowFrequency", "Billow Period LF",
+               &Assets::CloudNoiseVolumeParams::BillowPeriodLowFrequency, 1.0f, 32.0f },
+             { "BillowPeriodHighFrequency", "Billow Period HF",
+               &Assets::CloudNoiseVolumeParams::BillowPeriodHighFrequency, 1.0f, 32.0f },
+        };
+
+        /// The one sentence a client has to be told and the type cannot carry: these are the BAKE's
+        /// inputs, so setting one changes nothing until the volume is baked again.
+        constexpr const char* kRecipeGroup = "Recipe (applied at the next Bake)";
     } // namespace
 
     CloudNoiseVolumePanel::CloudNoiseVolumePanel( const Assets::AssetHandle& subject,
@@ -87,6 +121,19 @@ namespace Desert::Editor
 
         const auto asset =
              assets->FindByHandle<Assets::CloudNoiseVolumeAsset>( Assets::AssetHandle( Subject().Owner ) );
+
+        // REGISTERED IS NOT LOADED, and this window used to read the two as one. An asset the manager knows
+        // about but has not read yet answers false to IsReadyForUse, and the panel gave up on it — so a
+        // `.dcnv` opened from the command palette (which asks for the SUBJECT, not for a path) came up as
+        // an empty editor with a status line nobody was looking at, and Save from it would have written a
+        // volume that was never the file's. Found by GetDiskState answering "untracked" for a document
+        // whose file is plainly there.
+        //
+        // Loading it here is what CloudTypePanel::OpenType already does for the same situation; the
+        // difference between the two panels was an accident of how each was written, not a decision.
+        if ( asset && !asset->IsReadyForUse() )
+            asset->Load();
+
         if ( !asset || !asset->IsReadyForUse() )
         {
             // NAMED rather than left as an empty panel. The opener (CloudDocumentOpen.hpp) refuses to queue
@@ -97,8 +144,11 @@ namespace Desert::Editor
             return;
         }
 
-        m_Volume      = asset->GetVolume();
+        AdoptVolume( Assets::CloudNoiseVolumeData( asset->GetVolume() ) );
         m_Params      = m_Volume.Params;
+        // Read off disk, so the document starts CLEAN against the file it is a window over.
+        m_SavedRevision = m_VolumeRevision;
+        m_Tracked       = true;
         m_HasVolume   = true;
         m_SubjectPath = asset->GetMetadata().Filepath;
         m_SourceName  = m_SubjectPath.filename().string();
@@ -159,7 +209,7 @@ namespace Desert::Editor
             m_BakeRunning = false;
             if ( result )
             {
-                m_Volume        = result.ExtractValue();
+                AdoptVolume( result.ExtractValue() );
                 m_HasVolume     = true;
                 m_SourceName    = "(baked, unsaved)";
                 m_SliceIndex    = static_cast<int>( m_Volume.Params.Resolution ) / 2;
@@ -440,7 +490,7 @@ namespace Desert::Editor
             return;
         }
 
-        m_Volume    = imported.ExtractValue();
+        AdoptVolume( imported.ExtractValue() );
         m_HasVolume = true;
 
         // The PARAMETERS PANEL IS NOT UPDATED FROM AN IMPORT, and that is deliberate. m_Params drives the
@@ -597,25 +647,47 @@ namespace Desert::Editor
 
         // Compared before the write, because after it the file exists and the two paths would be
         // indistinguishable by anything on disk.
-        const bool isCopy = target != m_SubjectPath;
+        (void)WriteTo( target, /*isCopy=*/target != m_SubjectPath );
+    }
 
+    void CloudNoiseVolumePanel::AdoptVolume( Assets::CloudNoiseVolumeData&& volume )
+    {
+        // THE ONE PLACE THE VOXELS CHANGE. Everything that follows a new volume lives here so that no
+        // caller can do half of it: the buffer, the count that makes GetDiskState answerable, the slice
+        // index that must be inside the new resolution, and the stale preview.
+        m_Volume = std::move( volume );
+        ++m_VolumeRevision;
+        m_SliceIndex = static_cast<int>( m_Volume.Params.Resolution ) / 2;
+        m_SliceDirty = true;
+    }
+
+    bool CloudNoiseVolumePanel::WriteTo( const std::filesystem::path& target, const bool isCopy )
+    {
+        // LIFTED OUT OF THE BUTTON so SaveDocument runs it too. The whole sequence and not just the write:
+        // the file, the re-registration that makes the component's slot show the new bytes without a
+        // restart, and the copy's own document.
         const auto written = Assets::CloudNoiseVolumeAsset::Save( target, m_Volume );
         if ( !written )
         {
             m_Status        = "Save failed: " + written.GetError();
             m_StatusIsError = true;
-            return;
+            return false;
         }
 
         if ( !isCopy )
+        {
             m_SourceName = target.filename().string();
+            // These voxels are what the file holds now.
+            m_SavedRevision = m_VolumeRevision;
+            m_Tracked       = true;
+        }
         m_Status        = "Saved to " + target.string();
         m_StatusIsError = false;
 
         // Re-registered straight away so the component's slot shows the new bytes without a restart. A tool
         // whose output only appears after the editor is reopened is a tool nobody iterates in.
         if ( !m_Assets )
-            return;
+            return true;
 
         auto asset = m_Assets->FindByPath<Assets::CloudNoiseVolumeAsset>( target );
         if ( asset )
@@ -624,14 +696,17 @@ namespace Desert::Editor
             asset = m_Assets->CreateAsset<Assets::CloudNoiseVolumeAsset>( Assets::AssetPriority::Medium, target );
 
         if ( !asset )
-            return;
+            return true;
 
         if ( const auto uploaded = Runtime::ResourceRegistry::GetCloudNoiseService()->Register( asset );
              !uploaded )
         {
+            // THE FILE IS ON DISK, so the document is clean — an upload failure is about the running sky
+            // and not about what was written, and reporting the save as failed would make "Save All" try
+            // again for ever.
             m_Status        = "Saved, but the volume could not be uploaded: " + uploaded.GetError();
             m_StatusIsError = true;
-            return;
+            return true;
         }
 
         if ( isCopy )
@@ -643,6 +718,126 @@ namespace Desert::Editor
             m_Status        = "Saved a copy to " + target.string() + " - it has opened in its own window.";
             m_StatusIsError = false;
         }
+        return true;
+    }
+
+    ISubjectDocument::DiskState CloudNoiseVolumePanel::GetDiskState() const
+    {
+        if ( !m_Tracked )
+            return DiskState::Untracked;
+        return m_VolumeRevision == m_SavedRevision ? DiskState::Clean : DiskState::Dirty;
+    }
+
+    bool CloudNoiseVolumePanel::SaveDocument()
+    {
+        // A document with no file of its own reports false rather than inventing a path; Save As is a
+        // gesture with a dialog behind it and is not what "Save the focused document" means. A window
+        // whose asset would not load has no volume to write either, and saying so is better than writing
+        // an empty one over the file.
+        if ( m_SubjectPath.empty() || !m_HasVolume )
+            return false;
+
+        return WriteTo( m_SubjectPath, /*isCopy=*/false );
+    }
+
+    std::vector<EditableProperty> CloudNoiseVolumePanel::EditableProperties() const
+    {
+        std::vector<EditableProperty> properties;
+        properties.reserve( std::size( kRecipeFields ) + 2u );
+
+        EditableProperty resolution;
+        resolution.Name       = "Resolution";
+        resolution.Label      = "Resolution";
+        resolution.Group      = kRecipeGroup;
+        resolution.Type       = "int";
+        resolution.Components = 1;
+        resolution.Min        = 64.0f;
+        resolution.Max        = 128.0f;
+        resolution.Value[0]   = static_cast<float>( m_Params.Resolution );
+        properties.push_back( std::move( resolution ) );
+
+        EditableProperty seed;
+        seed.Name       = "Seed";
+        seed.Label      = "Seed";
+        seed.Group      = kRecipeGroup;
+        seed.Type       = "int";
+        seed.Components = 1;
+        seed.Min        = 0.0f;
+        // The panel's own field is an int; the ceiling is what a float can still carry exactly, so a value
+        // a client sends and reads back cannot differ from the one it meant.
+        seed.Max      = 16777216.0f;
+        seed.Value[0] = static_cast<float>( m_Params.Seed );
+        properties.push_back( std::move( seed ) );
+
+        for ( const RecipeField& field : kRecipeFields )
+        {
+            EditableProperty property;
+            property.Name       = field.Name;
+            property.Label      = field.Label;
+            property.Group      = kRecipeGroup;
+            property.Type       = "float";
+            property.Components = 1;
+            property.Min        = field.Min;
+            property.Max        = field.Max;
+            property.Value[0]   = m_Params.*field.Member;
+            properties.push_back( std::move( property ) );
+        }
+
+        return properties;
+    }
+
+    Common::BoolResultStr CloudNoiseVolumePanel::SetEditableProperty( const std::string&        name,
+                                                                      const std::vector<float>& value )
+    {
+        if ( value.size() != 1u )
+        {
+            return Common::MakeFormattedError<bool>(
+                 "every property of a cloud noise volume is a single number and {} were sent for '{}'.",
+                 value.size(), name );
+        }
+
+        if ( name == "Resolution" )
+        {
+            // TWO LEGAL VALUES, not a range, and the refusal says both of them. 64 and 128 are the sizes
+            // the format and the sheet layout are defined for; a clamp into "the nearest legal one" would
+            // hand a caller a volume of a size it did not ask for.
+            const int wanted = static_cast<int>( value[0] );
+            if ( wanted != 64 && wanted != 128 )
+            {
+                return Common::MakeFormattedError<bool>(
+                     "'Resolution' is 64 or 128 and nothing between; {} is neither.", wanted );
+            }
+            m_Params.Resolution = static_cast<uint32_t>( wanted );
+            return BOOLSUCCESS;
+        }
+
+        if ( name == "Seed" )
+        {
+            if ( value[0] < 0.0f )
+                return Common::MakeFormattedError<bool>( "'Seed' cannot be negative; {} was sent.", value[0] );
+            m_Params.Seed = static_cast<uint32_t>( value[0] );
+            return BOOLSUCCESS;
+        }
+
+        for ( const RecipeField& field : kRecipeFields )
+        {
+            if ( name != field.Name )
+                continue;
+
+            // REFUSED RATHER THAN CLAMPED: a value silently moved is a value the caller reads back as its
+            // own and then cannot explain.
+            if ( value[0] < field.Min || value[0] > field.Max )
+            {
+                return Common::MakeFormattedError<bool>( "'{}' takes {} to {}; {} is outside it.", name, field.Min,
+                                                         field.Max, value[0] );
+            }
+            m_Params.*field.Member = value[0];
+            return BOOLSUCCESS;
+        }
+
+        return Common::MakeFormattedError<bool>(
+             "this cloud noise volume has no property called '{}'. Ask 'properties' for the ones it offers.",
+             name );
     }
 
     bool CloudNoiseVolumePanel::IsSubjectAlive() const

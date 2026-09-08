@@ -102,6 +102,14 @@ namespace Desert::Editor
 
         const auto painting =
              m_Assets->FindByHandle<Assets::CloudLayoutAsset>( Assets::AssetHandle( Subject().Owner ) );
+
+        // REGISTERED IS NOT LOADED — see the identical note in CloudNoiseVolumePanel::LoadSubject. A
+        // painting the manager knows about but has not read yet answers false to IsReadyForUse, and this
+        // window gave up on it: the canvas came up blank and a Bake from it would have written an empty
+        // layout over the artist's file. CloudTypePanel has always recovered from this; these two did not.
+        if ( painting && !painting->IsReadyForUse() )
+            painting->Load();
+
         if ( !painting || !painting->IsReadyForUse() )
         {
             m_Status        = "This painting is not loaded - the log says why.";
@@ -134,6 +142,16 @@ namespace Desert::Editor
         }
 
         m_Canvas           = canvas.ExtractValue();
+
+        // WHAT THE FILE HOLDS, kept so GetDiskState has something to be clean against. Taken
+
+        // here rather than derived later: after this line the canvas starts being painted on, and a
+
+        // snapshot taken at the first stroke would already be one stroke late.
+
+        m_OnDiskCanvas = m_Canvas;
+
+        m_Tracked          = true;
         m_CanvasImageDirty = true;
         m_PreviewDirty     = true;
     }
@@ -1664,25 +1682,36 @@ namespace Desert::Editor
 
         // Compared before the write, because after it the file exists and the two paths would be
         // indistinguishable by anything on disk.
-        const bool isCopy = target != m_SubjectPath;
+        (void)WriteTo( target, /*isCopy=*/target != m_SubjectPath );
+    }
 
+    bool CloudLayoutPanel::WriteTo( const std::filesystem::path& target, const bool isCopy )
+    {
+        // LIFTED OUT OF THE BUTTON so SaveDocument runs it too. The whole sequence and not just the write:
+        // the file, the re-registration that makes the material's slot show the new pixels without a
+        // restart, and the copy's own document.
         const auto written = Assets::CloudLayoutAsset::Save( target, m_Layout );
         if ( !written )
         {
             m_Status        = "Bake failed: " + written.GetError();
             m_StatusIsError = true;
-            return;
+            return false;
         }
 
         if ( !isCopy )
+        {
             m_SourceName = target.filename().string();
+            // These pixels are what the file holds now.
+            m_OnDiskCanvas = m_Canvas;
+            m_Tracked      = true;
+        }
         m_Status        = "Baked to " + target.string();
         m_StatusIsError = false;
 
-        // Re-registered straight away so the cloud component's slot shows the new pixels without a restart.
+        // Re-registered straight away so the cloud material's slot shows the new pixels without a restart.
         // A tool whose output only appears after the editor is reopened is a tool nobody iterates in.
         if ( !m_Assets )
-            return;
+            return true;
 
         auto painting = m_Assets->FindByPath<Assets::CloudLayoutAsset>( target );
         if ( painting )
@@ -1691,14 +1720,16 @@ namespace Desert::Editor
             painting = m_Assets->CreateAsset<Assets::CloudLayoutAsset>( Assets::AssetPriority::Medium, target );
 
         if ( !painting )
-            return;
+            return true;
 
         if ( const auto registered = Runtime::ResourceRegistry::GetCloudLayoutService()->Register( painting );
              !registered )
         {
+            // THE FILE IS ON DISK, so the document is clean — a registration failure is about the running
+            // sky and not about what was written.
             m_Status        = "Baked, but the painting could not be registered: " + registered.GetError();
             m_StatusIsError = true;
-            return;
+            return true;
         }
 
         if ( isCopy )
@@ -1710,6 +1741,99 @@ namespace Desert::Editor
             m_Status        = "Baked a copy to " + target.string() + " - it has opened in its own window.";
             m_StatusIsError = false;
         }
+        return true;
+    }
+
+    ISubjectDocument::DiskState CloudLayoutPanel::GetDiskState() const
+    {
+        if ( !m_Tracked )
+            return DiskState::Untracked;
+        return m_Canvas == m_OnDiskCanvas ? DiskState::Clean : DiskState::Dirty;
+    }
+
+    bool CloudLayoutPanel::SaveDocument()
+    {
+        // A document with no file of its own reports false rather than inventing a path, and a canvas that
+        // carries neither table has nothing to bake — writing an empty layout over the subject would be a
+        // save that destroys the thing it claims to have saved.
+        if ( m_SubjectPath.empty() || !m_HasLayout )
+            return false;
+
+        return WriteTo( m_SubjectPath, /*isCopy=*/false );
+    }
+
+    // -- WHAT A CHANNEL THAT CARRIES NUMBERS CAN DO WITH A PAINTING ---------------------------------
+    //
+    // A MEASURED REFUSAL, REPORTED ROW BY ROW RATHER THAN AS AN EMPTY CENSUS. The authored state of a
+    // `.dclayout` is two PICTURES — four planes of placement and one of mask, 1.3 MiB at the shipped 512
+    // side. Nothing about that fits in a channel whose unit is "up to four floats", and the honest answer
+    // is not an empty list: an empty census reads as "this document exposes nothing", which is what a
+    // document with no properties AT ALL answers, and those are different facts (contract §1.4).
+    //
+    // So every authored thing is named, its size is stated, and the reason it cannot be set is the reason
+    // rather than a shrug. What a client CAN do with a painting is import and export it as a picture,
+    // which is a path and not a value — the panel's own buttons.
+    std::vector<EditableProperty> CloudLayoutPanel::EditableProperties() const
+    {
+        std::vector<EditableProperty> properties;
+
+        EditableProperty side;
+        side.Name       = "Side";
+        side.Label      = "Side (texels)";
+        side.Group      = "Painting";
+        side.Type       = "int";
+        side.Components = 1;
+        side.Value[0]   = static_cast<float>( m_Canvas.Side );
+        side.Settable   = false;
+        side.NotSettableReason =
+             "'Side' is the size of the painting that is loaded. Changing it is starting a new canvas or "
+             "importing a different picture, not writing a number - a resize would have to invent or throw "
+             "away texels an artist painted.";
+        properties.push_back( std::move( side ) );
+
+        const auto picture = [&]( const char* name, const char* label, const std::size_t bytes, const char* what )
+        {
+            EditableProperty property;
+            property.Name       = name;
+            property.Label      = label;
+            property.Group      = "Painting";
+            property.Type       = "image";
+            property.Components = 1;
+            property.Value[0]   = static_cast<float>( bytes );
+            property.Settable   = false;
+            property.NotSettableReason =
+                 std::string( "'" ) + name + "' is " + what + " - " + std::to_string( bytes ) +
+                 " bytes of picture. This channel carries at most four numbers, so it cannot express one; "
+                 "the panel imports and exports it as a file.";
+            return property;
+        };
+        properties.push_back( picture( "Pattern", "Pattern (4 species planes)", m_Canvas.Pattern.size(),
+                                       "the map of where each cloud species may appear" ) );
+        properties.push_back( picture( "Mask", "Mask (add / remove)", m_Canvas.Mask.size(),
+                                       "the map of where cloud is added and taken away" ) );
+
+        return properties;
+    }
+
+    Common::BoolResultStr CloudLayoutPanel::SetEditableProperty( const std::string&        name,
+                                                                 const std::vector<float>& value )
+    {
+        (void)value;
+
+        // NAMED REFUSALS FOR THE ROWS THE CENSUS OFFERS, so a client that read the census and tried anyway
+        // gets the same sentence twice rather than a generic "no such property" that would read as the
+        // census having been wrong.
+        if ( name == "Side" || name == "Pattern" || name == "Mask" )
+        {
+            for ( const EditableProperty& property : EditableProperties() )
+                if ( property.Name == name )
+                    return Common::MakeError<bool>( property.NotSettableReason );
+        }
+
+        return Common::MakeFormattedError<bool>(
+             "this cloud layout has no property called '{}'. Ask 'properties' for the ones it offers - and "
+             "note that all of them are pictures, which this channel cannot carry.",
+             name );
     }
 
     bool CloudLayoutPanel::IsSubjectAlive() const

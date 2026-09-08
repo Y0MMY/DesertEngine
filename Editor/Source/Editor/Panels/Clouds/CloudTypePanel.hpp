@@ -77,6 +77,38 @@ namespace Desert::Editor
             return false;
         }
 
+        // ── WHAT AN EDIT HAS REACHED ───────────────────────────────────────────────────────────────────
+        //
+        // WRITE-THROUGH IS THE FACT HERE, not a default standing in for one, and it is worth saying why it
+        // differs from the Material Editor next door. A material has a WORKING copy and an APPLIED one
+        // because the thing it edits is already in the level and an accidental drag would otherwise reach
+        // every mesh using it. A cloud type reaches the sky only through the CloudTypeService, and the
+        // service is re-registered by Save — so nothing this window changes is in any scene until the file
+        // is written. There is no third state to stage, and offering Apply/Discard here would be two
+        // buttons that do nothing (§1.3).
+        //
+        // WHICH MAKES THE DISK STATE THE ONLY QUESTION WORTH ASKING of this document, and it is the one
+        // that was missing: the tab had no dirty dot, "Save All" could not see it, and a close threw the
+        // edit away without asking. It is answered by comparing the working data against a COPY of what
+        // was loaded or last written — not by a flag each edit path has to remember to set, because the
+        // flag is the thing that falls behind (Assets::CloudTypeData::operator== is defaulted for exactly
+        // this).
+        [[nodiscard]] DiskState GetDiskState() const override;
+
+        // Writes the working data to the SUBJECT'S OWN FILE. The same call the Save button makes — not a
+        // second route to the same bytes, which would be the second execution path §1.3 forbids and would
+        // drift the day somebody adds a step (the re-register, the re-read, the status line).
+        bool SaveDocument() override;
+
+        // ── THE NUMBERS A CLIENT CAN DRAG ──────────────────────────────────────────────────────────────
+        //
+        // The shape's own scalars, derived from CloudTypeShape rather than typed twice: the same table
+        // drives the sliders this panel draws and the properties the control channel offers, so a channel
+        // that could set a value the panel cannot show, or the reverse, is not expressible.
+        [[nodiscard]] std::vector<EditableProperty> EditableProperties() const override;
+        [[nodiscard]] Common::BoolResultStr         SetEditableProperty( const std::string&        name,
+                                                                         const std::vector<float>& value ) override;
+
     private:
         void DrawLibrarySection();
         void DrawShapeSection();
@@ -99,7 +131,22 @@ namespace Desert::Editor
 
         Assets::AssetManager* m_Assets = nullptr;
 
+        // Writes @p target and re-registers the asset. The body of the Save button, lifted out so that
+        // SaveDocument (the command palette, "Save All", the control channel) and the button run the SAME
+        // sequence. Returns whether the file was written; @p isCopy is a Save As to a different file,
+        // which becomes its own document rather than repointing this one.
+        bool WriteTo( const Common::Filepath& target, bool isCopy );
+
         Assets::CloudTypeData m_Data = Assets::CloudTypeDefault();
+        // WHAT THE FILE HOLDS, as of the last open or the last write to this document's own file. The
+        // other side of the comparison GetDiskState makes; a copy and not a hash, because CloudTypeData is
+        // small and a defaulted operator== cannot fall behind the struct the way a digest of hand-listed
+        // fields would.
+        Assets::CloudTypeData m_OnDisk;
+        // UNTRACKED IS NOT CLEAN. False until this document has actually read its subject off disk — a
+        // window that fell back to the built-in default has no file to be clean against, and drawing "no
+        // dot" for it would assert the file is up to date on no evidence (ISubjectDocument::DiskState).
+        bool                  m_Tracked = false;
         Common::Filepath      m_SourcePath;                        // empty until saved or opened
         std::string           m_SourceName = "(built-in default)"; // what is in the buffer, for the header
 

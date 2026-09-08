@@ -1,19 +1,20 @@
--- "A tool and a document are owned by different things, and the difference is enforced."
+-- "The rail of the Clouds window names the six stages in build order, and each of them resolves to the
+-- subject the editor for that kind of thing is registered under."
 --
--- The units under test are header-only and free of the renderer: Editor/Core/PanelRegistry.hpp carries the
--- container that refuses a document, Editor/Core/OpenDocuments.hpp the OWNER that holds one and refuses a
--- second for the same subject, Editor/Core/DocumentWell.hpp one VIEW over that owner, and
--- Engine/Core/RendererSlotPool.hpp the lease a closed document has to give back. They sit in headers for the
--- reason Editor/Core/SceneViewIdentity.hpp and Editor/Core/SubjectEditorRegistry.hpp do -- EditorLayer.cpp is
--- compiled by no suite (scripts/CI/UnreachedSources.sh), so anything assertable has to be lifted out of it.
--- Nothing to link from the engine or the editor; the ImGui and glm include paths are here because IPanel.hpp
--- declares ImVec2 members, not because any ImGui function is called.
+-- The unit under test is Editor/Panels/Clouds/CloudStages.hpp, which is header-only and deliberately free
+-- of the engine: it carries the stage list, the order, and the mapping stage -> SubjectId, so that the
+-- mapping can be asserted without a scene, an asset manager or a Vulkan device. CloudsPanel.cpp draws it
+-- and is compiled by no suite (scripts/CI/UnreachedSources.sh), which is exactly why the rule was lifted
+-- out of it.
 --
--- ONE EDITOR .cpp IS COMPILED IN: SubjectEditorRegistry.cpp. The registry is the seam this suite is about
--- ("the set of open documents is the set of registered editors"), and its Register/Create carry the refusals
--- that make the rule hold -- an empty factory, a missing icon, a digest collision under one key. Those are
--- statements, not templates, so they cannot live in the header; compiling the one file is what makes them
--- assertable rather than merely written down. It pulls in Common's logger and nothing else.
+-- ONE EDITOR .cpp IS COMPILED IN: SubjectEditorRegistry.cpp. The census this suite runs asks the real
+-- registry whether a stage's subject type has an editor -- "a rail row is not a dead end" is a relation
+-- between two things and asserting it against a stub registry would assert nothing. It pulls in Common's
+-- logger and nothing else.
+--
+-- Nothing to link from the engine or the editor; the ImGui and glm include paths are here because
+-- IPanel.hpp (reached through EditorSubject.hpp's consumers) declares ImVec2 members, not because any
+-- ImGui function is called.
 local deps = dofile(_MAIN_SCRIPT_DIR .. '/Desert/Dependencies.lua')
 
 local test_name = path.getname(_SCRIPT_DIR)

@@ -7,6 +7,7 @@
 #include <Editor/Core/DragPayloads.hpp>
 #include <Editor/Core/SubjectOpenRequest.hpp>
 #include <Editor/Panels/PanelContext.hpp>
+#include <Editor/Panels/Clouds/CloudsPanel.hpp>
 #include <Editor/Panels/Particles/ParticleEditorPanel.hpp>
 
 #include <Engine/Core/Scene.hpp>
@@ -678,7 +679,7 @@ namespace Desert::Editor
     // authors one on the cloud shader, Edit opens the Material Editor window; nothing edits a material
     // here. An EMPTY slot is a working sky: the CloudRaymarch schema's own defaults.
     static void DrawCloudMaterialRow( ::Desert::ECS::VolumetricCloudData& cloud, const std::string& entityName,
-                                      ::Desert::Assets::AssetManager* assetMgr )
+                                      ::Desert::Assets::AssetManager* assetMgr, const bool allowPanelJumps )
     {
         namespace ImGui = ::ImGui;
 
@@ -771,11 +772,28 @@ namespace Desert::Editor
         }
         else
         {
-            const float half = ( ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x ) * 0.5f;
-            if ( ImGui::Button( "Edit", ImVec2( half, 0.0f ) ) )
+            // ROUTE B OF THE ROUND TRIP: the material slot is stage 2 of the Clouds window, and stage 2 is
+            // the hub the other four hang off. Edit opens the material's own document window as it always
+            // did; "In Clouds" opens the SAME document embedded in the Clouds window, beside the layout,
+            // the types and the noise it names. Two routes to one document, never two documents — the one
+            // instance belongs to Editor/Core/OpenDocuments.hpp.
+            const int   buttons = allowPanelJumps ? 3 : 2;
+            const float width   = ( ImGui::GetContentRegionAvail().x -
+                                  ImGui::GetStyle().ItemSpacing.x * static_cast<float>( buttons - 1 ) ) /
+                                static_cast<float>( buttons );
+            if ( ImGui::Button( "Edit", ImVec2( width, 0.0f ) ) )
                 OpenMaterialEditorFor( cloud.Material, assetMgr, "[Clouds]" );
+            if ( allowPanelJumps )
+            {
+                ImGui::SameLine();
+                if ( ImGui::Button( "In Clouds", ImVec2( width, 0.0f ) ) )
+                    ::Desert::Editor::CloudsPanel::OpenAt( ::Desert::Editor::CloudStage::Material );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Open this material as stage 2 of the Clouds window, beside the "
+                                       "layout, the cloud types and the noise volume it names." );
+            }
             ImGui::SameLine();
-            if ( ImGui::Button( "Clear", ImVec2( half, 0.0f ) ) )
+            if ( ImGui::Button( "Clear", ImVec2( width, 0.0f ) ) )
                 cloud.Material = ::Desert::Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
         }
         ImGui::EndTable();
@@ -785,7 +803,10 @@ namespace Desert::Editor
     static ComponentEditorEntry MakeVolumetricCloudEntry()
     {
         ComponentEditorEntry e;
-        e.Name      = "Volumetric Cloud";
+        // The name is a REGISTRY KEY now, not just a caption: the Clouds window's first stage looks this
+        // entry up by it so that the layer's fields are drawn by the same code Details runs rather than by
+        // a second copy of them. Hence one constant with two readers.
+        e.Name      = kVolumetricCloudComponentEditor;
         e.CanRemove = true;
         e.Has       = []( ::Desert::ECS::Entity& en )
         { return en.HasComponent<::Desert::ECS::VolumetricCloudComponent>(); };
@@ -795,10 +816,30 @@ namespace Desert::Editor
         e.Draw = []( ::Desert::ECS::Entity& en, ::Desert::Core::Scene*, const ComponentEditContext& ctx )
         {
             auto& c = en.GetComponent<::Desert::ECS::VolumetricCloudComponent>();
+
+            // ROUTE A OF THE ROUND TRIP the owner asked for: from the component to the window that shows
+            // the whole sky, landing on stage 1 — which IS this component, so the landing is not arbitrary.
+            //
+            // ONLY TWO OF THE SIX STAGES ARE REACHABLE FROM HERE, and that is a property of the O1 split
+            // rather than a shortfall: the layout, the four cloud types and the noise volume are MATERIAL
+            // parameters now, and this component names exactly one asset — its material. A button here that
+            // opened stage 5 would have to invent a noise volume the entity does not name.
+            if ( ctx.AllowPanelJumps )
+            {
+                if ( ::ImGui::Button( ICON_MDI_WEATHER_CLOUDY "  Open in Clouds", ImVec2( -FLT_MIN, 0.0f ) ) )
+                    ::Desert::Editor::CloudsPanel::OpenAt( ::Desert::Editor::CloudStage::Layer );
+                if ( ::ImGui::IsItemHovered() )
+                    ::ImGui::SetTooltip( "One window for the whole sky: this layer, its material, the "
+                                         "painted layout, the cloud types, the noise they are cut from and "
+                                         "the hero bodies \xe2\x80\x94 in the order the sky is built." );
+                ::ImGui::Separator();
+            }
+
             PropertyEditorBuilder::Draw( &c.Data, "VolumetricCloudData", ctx.AssetMgr(), ctx.UIHelper );
 
             ::ImGui::Separator();
-            DrawCloudMaterialRow( c.Data, en.GetComponent<::Desert::ECS::TagComponent>().Tag, ctx.AssetMgr() );
+            DrawCloudMaterialRow( c.Data, en.GetComponent<::Desert::ECS::TagComponent>().Tag, ctx.AssetMgr(),
+                                  ctx.AllowPanelJumps );
         };
         return e;
     }

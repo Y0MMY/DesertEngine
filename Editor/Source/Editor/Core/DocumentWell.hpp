@@ -5,6 +5,7 @@
 // render-system headers, which spell Desert::Core::Scene as an unqualified `Core::Scene` from inside
 // Desert::Editor. Make Desert::Editor::Core visible before them and every one of those names silently
 // rebinds to the wrong namespace.
+#include <Editor/Core/OpenDocuments.hpp>
 #include <Editor/Panels/IPanel.hpp>
 
 #include <algorithm>
@@ -16,22 +17,30 @@
 
 namespace Desert::Editor
 {
-    // THE OPEN DOCUMENTS, AND ONLY THE DOCUMENTS.
+    // ONE VIEW OF THE OPEN DOCUMENTS — the tabbed well and the index beside it. NOT their owner.
     //
-    // The other half of the split PanelRegistry describes: tools live there, documents live here, and
-    // nothing lives in both. A tool is a setting the user keeps; a document is a window over one asset that
-    // exists only while that asset is being edited, and closing it is a DESTRUCTION — that is what returns
-    // its Scene, its SceneRenderer and one of the six renderer slots.
+    // THE OWNERSHIP MOVED OUT OF HERE, and the move is the point rather than tidying. This class used to
+    // hold the `vector<unique_ptr<ISubjectDocument>>` itself, which was indistinguishable from being the
+    // model while it was the only view. It is not any more: the Clouds window (Editor/Panels/Clouds) shows
+    // the editor for whichever stage of the sky is selected, and a second view that built its OWN documents
+    // would have given a `.demat` two working copies — the defect Desert/Tests/Editor/MaterialEditStates
+    // exists to prevent. Editor/Core/OpenDocuments.hpp now owns them and the two views are equal over it;
+    // this one does not know the other exists.
+    //
+    // WHAT IS LEFT HERE IS VIEW STATE, and it is view state precisely because the OTHER view does not want
+    // it: the Ctrl+Tab ring is about the tab strip, and the recently-closed list is what THIS window offers
+    // in place of being blank. The Clouds window has a rail of six stages instead and neither would mean
+    // anything there.
+    //
+    // The other half of the split PanelRegistry describes: tools live there, documents live in
+    // OpenDocuments, and nothing lives in both. A tool is a setting the user keeps; a document is a window
+    // over one subject that exists only while that subject is being edited, and closing it is a DESTRUCTION
+    // — that is what returns its Scene, its SceneRenderer and one of the six renderer slots.
     //
     // Because the two are separate owners, the View menu, the command palette and `--open-panel` cannot
     // list a document: they are loops over the registry, and there are no documents in it. That is the
     // point. The alternative on offer was a predicate on each of those loops, which would have left the same
     // trap in three places at once and made every later loop responsible for knowing about it.
-    //
-    // WHAT THIS CLASS DOES NOT DO. It does not destroy anything on its own. Release() hands the document
-    // back to the caller, because destruction has to happen behind a device-idle wait and between frames —
-    // the ordering ~PreviewViewport and CloseSceneView both established. The well knows WHICH document is
-    // going and what to remember about it; the editor knows WHEN it is safe to let go.
     //
     // Nothing here touches ImGui, the renderer or a global, so the whole thing is drivable by a test with a
     // stub document — which is the only way a rule in this editor gets asserted at all (EditorLayer.cpp is
@@ -65,57 +74,20 @@ namespace Desert::Editor
         // short enough that the list is read rather than scanned.
         static constexpr std::size_t kRecentlyClosedLimit = 6;
 
-        [[nodiscard]] std::size_t Count() const noexcept
+        // A VIEW IS CONSTRUCTED OVER ITS MODEL, and the reference is not optional: a well with no documents
+        // to show is a different object from a well that has lost track of where they are. Held by pointer
+        // rather than by reference only so the class stays assignable, which the editor's member ordering
+        // wants.
+        explicit DocumentWell( const OpenDocuments& documents ) noexcept : m_Documents( &documents )
         {
-            return m_Documents.size();
         }
 
-        [[nodiscard]] bool Empty() const noexcept
+        // The document this view would draw for @p subject: the ONE instance, asked of its owner. Every
+        // view answers this question the same way, and CensusOfDocumentIdentity (OpenDocuments.hpp)
+        // asserts that they agree.
+        [[nodiscard]] ISubjectDocument* Showing( const SubjectId& subject ) const
         {
-            return m_Documents.empty();
-        }
-
-        [[nodiscard]] const std::vector<std::unique_ptr<ISubjectDocument>>& Documents() const noexcept
-        {
-            return m_Documents;
-        }
-
-        [[nodiscard]] auto begin() noexcept
-        {
-            return m_Documents.begin();
-        }
-        [[nodiscard]] auto end() noexcept
-        {
-            return m_Documents.end();
-        }
-        [[nodiscard]] auto begin() const noexcept
-        {
-            return m_Documents.begin();
-        }
-        [[nodiscard]] auto end() const noexcept
-        {
-            return m_Documents.end();
-        }
-
-        // The open document for @p subject, or nullptr. The null handle is "no asset" and never a document.
-        [[nodiscard]] ISubjectDocument* Find( const SubjectId& subject ) const
-        {
-            if ( subject.IsNull() )
-                return nullptr;
-
-            for ( const auto& document : m_Documents )
-                if ( document->Subject() == subject )
-                    return document.get();
-            return nullptr;
-        }
-
-        // Takes ownership of a freshly-built document and makes it the most recently used one.
-        ISubjectDocument& Add( std::unique_ptr<ISubjectDocument> document )
-        {
-            ISubjectDocument& ref = *document;
-            m_Documents.emplace_back( std::move( document ) );
-            Touch( ref.Subject() );
-            return ref;
+            return m_Documents->Find( subject );
         }
 
         // Marks @p subject as the most recently used document. Focusing one is the only thing that reorders
@@ -123,48 +95,24 @@ namespace Desert::Editor
         // would never leave the front two.
         void Touch( const SubjectId& subject )
         {
-            if ( !Find( subject ) )
+            if ( !m_Documents->Find( subject ) )
                 return;
             std::erase( m_MostRecent, subject );
             m_MostRecent.insert( m_MostRecent.begin(), subject );
         }
 
-        // HANDS THE DOCUMENT BACK rather than destroying it: see the note above. Removes it from the well
-        // and from the ring, and records it under RecentlyClosed. Returns nullptr for a subject that is not
-        // open — a second close of one window in one frame, which is not an error.
-        [[nodiscard]] std::unique_ptr<ISubjectDocument> Release( const SubjectId& subject )
+        // A document has left the owner. Drops it from the ring and records it under RecentlyClosed.
+        //
+        // TOLD, NOT DISCOVERED. The well used to perform the release itself, so it learned of a close by
+        // doing it; a view cannot, and a view that polled the owner for departures would have to keep a
+        // second copy of the open set to notice one — the duplicated-state shape the split removes. The
+        // editor performs the release (it is the only thing that knows the device is idle) and tells the
+        // views. A view that is not told simply keeps a stale ring entry, which Touch and NextMostRecent
+        // both filter through the owner, so it cannot become a dangling reference.
+        void NoteClosed( const ISubjectDocument& document )
         {
-            const auto it = std::find_if( m_Documents.begin(), m_Documents.end(),
-                                          [&subject]( const std::unique_ptr<ISubjectDocument>& document )
-                                          { return document->Subject() == subject; } );
-            if ( it == m_Documents.end() )
-                return nullptr;
-
-            std::unique_ptr<ISubjectDocument> released = std::move( *it );
-            m_Documents.erase( it );
-            std::erase( m_MostRecent, subject );
-
-            RememberClosed( ClosedDocument{ DocumentDisplayName( released->GetName() ), released->Subject() } );
-            return released;
-        }
-
-        // Every open document, in one call, for "Close All". Same contract as Release: the caller destroys
-        // them, once, behind one device-idle wait rather than one per window.
-        [[nodiscard]] std::vector<std::unique_ptr<ISubjectDocument>> ReleaseAll()
-        {
-            std::vector<std::unique_ptr<ISubjectDocument>> released;
-            released.reserve( m_Documents.size() );
-            // Front to back, so the recently-closed list ends up newest-first in the order they were opened
-            // rather than in the order the vector happened to hold them.
-            for ( auto& document : m_Documents )
-            {
-                RememberClosed(
-                     ClosedDocument{ DocumentDisplayName( document->GetName() ), document->Subject() } );
-                released.emplace_back( std::move( document ) );
-            }
-            m_Documents.clear();
-            m_MostRecent.clear();
-            return released;
+            std::erase( m_MostRecent, document.Subject() );
+            RememberClosed( ClosedDocument{ DocumentDisplayName( document.GetName() ), document.Subject() } );
         }
 
         // CTRL+TAB. The document after @p current in most-recently-used order, wrapping to the front. This
@@ -213,7 +161,7 @@ namespace Desert::Editor
                 m_RecentlyClosed.resize( kRecentlyClosedLimit );
         }
 
-        std::vector<std::unique_ptr<ISubjectDocument>> m_Documents;
+        const OpenDocuments* m_Documents = nullptr;
         // Subjects, most recent first. Subjects and not pointers: an identity cannot dangle, and the whole
         // point of the split is that a document's lifetime is short.
         std::vector<SubjectId>           m_MostRecent;

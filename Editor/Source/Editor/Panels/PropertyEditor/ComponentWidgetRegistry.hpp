@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 struct ImGuiTextFilter;
@@ -57,6 +58,18 @@ namespace Desert::Editor
         // A hand-written widget cannot filter itself — the panel decides whether to draw it at all.
         const char* FieldFilter = nullptr;
 
+        // MAY THIS WIDGET OFFER A JUMP TO ANOTHER PANEL?
+        //
+        // A component's editor is no longer drawn only by Details. The Clouds window draws the cloud
+        // layer's own entry as its first stage — deliberately the same code, so the two windows cannot come
+        // to disagree about what a layer has in it — and the cloud entry offers a button that opens the
+        // Clouds window. Inside the Clouds window that button takes the user where they already are, which
+        // is a control that does nothing (§1.3).
+        //
+        // TRUE BY DEFAULT, because Details is the host every widget was written for and a new host that
+        // forgets to say is one that shows a jump rather than one that hides a control.
+        bool AllowPanelJumps = true;
+
         Assets::AssetManager* AssetMgr() const
         {
             return AssetManager.lock().get();
@@ -82,6 +95,11 @@ namespace Desert::Editor
         std::function<void*( ECS::Entity& )> DataPtr;
     };
 
+    // The registered name of the cloud layer's component editor. Stated ONCE because it now has two
+    // readers — the registration in ComponentEditorRegistrations.cpp and the Clouds window's first stage —
+    // and a name that agreed only by inspection would fail as a blank pane rather than as an error.
+    inline constexpr const char* kVolumetricCloudComponentEditor = "Volumetric Cloud";
+
     // Editor-side registry of component editors. Components self-register at static-init via the macros
     // below, so adding one never touches ComponentEditor / the Details panel.
     class ComponentWidgetRegistry
@@ -95,6 +113,15 @@ namespace Desert::Editor
         {
             return m_Entries;
         }
+
+        // ONE COMPONENT'S EDITOR, BY NAME — for a panel other than Details that has to draw exactly one
+        // component. The Clouds window's first stage IS the cloud layer's component, and drawing it any
+        // other way would be a second copy of fields this registry already knows how to draw.
+        //
+        // NULL WHEN NOTHING IS REGISTERED UNDER THAT NAME, so the caller can say so rather than drawing an
+        // empty pane. The name is a registry key and the constants below are the only ones any caller
+        // outside the registration file should spell.
+        [[nodiscard]] const ComponentEditorEntry* Find( std::string_view name ) const;
 
     private:
         std::vector<ComponentEditorEntry> m_Entries;

@@ -17,7 +17,7 @@
 // exactly the reason Editor/Core/SceneViewIdentity.hpp does — see Tests/Engine/RendererSlots.
 
 #include <Editor/Core/SubjectEditorRegistry.hpp>
-#include <Editor/Core/DocumentWell.hpp>
+#include <Editor/Core/OpenDocuments.hpp>
 #include <Editor/Panels/IPanel.hpp>
 
 #include <gtest/gtest.h>
@@ -32,9 +32,9 @@ using Desert::Assets::AssetTypeID;
 using Desert::Editor::AssetSubject;
 using Desert::Editor::ComponentSubject;
 using Desert::Editor::DocumentTitle;
-using Desert::Editor::DocumentWell;
 using Desert::Editor::IPanel;
 using Desert::Editor::ISubjectDocument;
+using Desert::Editor::OpenDocuments;
 using Desert::Editor::PendingRendererSlotDemand;
 using Desert::Editor::SubjectId;
 
@@ -196,12 +196,12 @@ TEST( AssetDocumentIdentity, TheDocumentsIdIsTheLastMarkerInItsName )
 
 TEST( AssetDocumentIdentity, AnOpenDocumentIsFoundByItsSubject )
 {
-    // Asked of DocumentWell, which is the ONE owner of open documents. It used to be asked of the panel
+    // Asked of OpenDocuments, which is the ONE owner of open documents. It used to be asked of the panel
     // list with a dynamic_cast, back when documents lived among the tools; that lookup is gone with the
     // mixing, and this assertion moved onto its replacement rather than out of the suite.
-    DocumentWell well;
-    well.Add( std::make_unique<FakeDocument>( "MP_GreenTint", Asset( 111 ) ) );
-    well.Add( std::make_unique<FakeDocument>( "CB_Orange", Asset( 222 ) ) );
+    OpenDocuments well;
+    well.Open( std::make_unique<FakeDocument>( "MP_GreenTint", Asset( 111 ) ) );
+    well.Open( std::make_unique<FakeDocument>( "CB_Orange", Asset( 222 ) ) );
 
     auto* found = well.Find( Asset( 222 ) );
     ASSERT_NE( found, nullptr ) << "A material that is already open was not found, so the editor would open a "
@@ -211,8 +211,8 @@ TEST( AssetDocumentIdentity, AnOpenDocumentIsFoundByItsSubject )
 
 TEST( AssetDocumentIdentity, AMaterialThatIsNotOpenIsNotFound )
 {
-    DocumentWell well;
-    well.Add( std::make_unique<FakeDocument>( "MP_GreenTint", Asset( 111 ) ) );
+    OpenDocuments well;
+    well.Open( std::make_unique<FakeDocument>( "MP_GreenTint", Asset( 111 ) ) );
 
     EXPECT_EQ( well.Find( Asset( 999 ) ), nullptr );
 }
@@ -221,15 +221,15 @@ TEST( AssetDocumentIdentity, ToolPanelsAreNeverMistakenForDocuments )
 {
     // This used to hold a MIXED list -- tools and documents in one vector -- and assert that a lookup over
     // it did not return the Logs panel for a material's handle. The mixing is what the split removed, so
-    // the assertion is now about the container rather than about the search: a tool cannot be in the well
-    // to be mistaken for anything, because the well only ever holds ISubjectDocument. The other half, that
+    // the assertion is now about the container rather than about the search: a tool cannot be in the owner
+    // to be mistaken for anything, because it only ever holds ISubjectDocument. The other half, that
     // a DOCUMENT cannot reach the tool registry, is asserted in Tests/Editor/DocumentOwnership.
     static_assert( std::is_convertible_v<FakeDocument*, ISubjectDocument*>,
                    "a document must be admissible to the document well" );
     static_assert( !std::is_convertible_v<FakeTool*, ISubjectDocument*>,
                    "a tool must NOT be admissible to the document well" );
 
-    DocumentWell well;
+    OpenDocuments well;
     EXPECT_EQ( well.Find( Asset( 111 ) ), nullptr );
 }
 
@@ -238,8 +238,8 @@ TEST( AssetDocumentIdentity, TheNullHandleMatchesNothing )
     // "No asset" is not a document to focus. Without this a failed path-to-handle resolution -- which yields
     // the null handle -- would focus whichever document happened to have been constructed from one, instead
     // of reporting that nothing could be opened.
-    DocumentWell well;
-    well.Add( std::make_unique<FakeDocument>( "Broken", Asset( 0 ) ) );
+    OpenDocuments well;
+    well.Open( std::make_unique<FakeDocument>( "Broken", Asset( 0 ) ) );
 
     EXPECT_EQ( well.Find( Asset( 0 ) ), nullptr );
 }
@@ -275,11 +275,11 @@ TEST( AssetDocumentIdentity, EveryCloudFormatIsFoundByItsOwnSubject )
     // Four formats, four open documents, one owner. Open-or-focus is keyed on the SUBJECT and never on the
     // type, so a `.dcnv` and a `.decloudtype` open at once must not find each other -- which is what a
     // lookup that had fallen back to matching on SubjectType would do.
-    DocumentWell well;
-    well.Add( std::make_unique<FakeCpuDocument>( "N.dcnv", Asset( 601, AssetTypeID::CloudNoiseVolume ) ) );
-    well.Add( std::make_unique<FakeCpuDocument>( "T.decloudtype", Asset( 602, AssetTypeID::CloudType ) ) );
-    well.Add( std::make_unique<FakeCpuDocument>( "B.dcmv", Asset( 603, AssetTypeID::CloudModellingVolume ) ) );
-    well.Add( std::make_unique<FakeCpuDocument>( "L.dclayout", Asset( 604, AssetTypeID::CloudLayout ) ) );
+    OpenDocuments well;
+    well.Open( std::make_unique<FakeCpuDocument>( "N.dcnv", Asset( 601, AssetTypeID::CloudNoiseVolume ) ) );
+    well.Open( std::make_unique<FakeCpuDocument>( "T.decloudtype", Asset( 602, AssetTypeID::CloudType ) ) );
+    well.Open( std::make_unique<FakeCpuDocument>( "B.dcmv", Asset( 603, AssetTypeID::CloudModellingVolume ) ) );
+    well.Open( std::make_unique<FakeCpuDocument>( "L.dclayout", Asset( 604, AssetTypeID::CloudLayout ) ) );
 
     ASSERT_NE( well.Find( Asset( 601, AssetTypeID::CloudNoiseVolume ) ), nullptr );
     EXPECT_EQ( well.Find( Asset( 602, AssetTypeID::CloudType ) )->Subject().Facet,
@@ -304,11 +304,11 @@ TEST( AssetDocumentIdentity, AnEntitysComponentIsAWindowOfItsOwn )
     // document was necessarily a file — and an anim graph, a particle emitter and a UI canvas are authored
     // data held by a COMPONENT ON AN ENTITY. The Details button the owner asked for had nowhere to send its
     // request, because the request carried a handle.
-    DocumentWell well;
-    well.Add(
+    OpenDocuments well;
+    well.Open(
          std::make_unique<FakeDocument>( "Hero \xc2\xb7 Anim Graph", Component( 88, "AnimationComponent" ) ) );
-    well.Add( std::make_unique<FakeDocument>( "Hero \xc2\xb7 Particles",
-                                              Component( 88, "ParticleEmitterComponent" ) ) );
+    well.Open( std::make_unique<FakeDocument>( "Hero \xc2\xb7 Particles",
+                                               Component( 88, "ParticleEmitterComponent" ) ) );
 
     // ONE ENTITY, TWO DOCUMENTS. Both subjects carry owner 88; only the facet differs. A seam keyed on the
     // owner alone would make these one window, and ImGui would draw the second into the first.
@@ -332,9 +332,9 @@ TEST( AssetDocumentIdentity, TheSameComponentOnTwoEntitiesIsTwoWindows )
 {
     // The other axis: one KIND of component, two entities. This is what "open the anim graph of this
     // character" has to mean when two characters are in the level.
-    DocumentWell well;
-    well.Add( std::make_unique<FakeDocument>( "Hero", Component( 1, "AnimationComponent" ) ) );
-    well.Add( std::make_unique<FakeDocument>( "Villain", Component( 2, "AnimationComponent" ) ) );
+    OpenDocuments well;
+    well.Open( std::make_unique<FakeDocument>( "Hero", Component( 1, "AnimationComponent" ) ) );
+    well.Open( std::make_unique<FakeDocument>( "Villain", Component( 2, "AnimationComponent" ) ) );
 
     EXPECT_EQ( well.Count(), 2u );
     EXPECT_NE( WindowId( DocumentTitle( "x", Component( 1, "AnimationComponent" ) ) ),
