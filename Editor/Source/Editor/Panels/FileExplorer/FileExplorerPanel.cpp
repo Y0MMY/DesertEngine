@@ -2350,11 +2350,35 @@ namespace Desert::Editor
         // world rather than adding a window to it — so it goes through its own guarded load, the same one
         // a drop and the File menu use.
         //
-        // A SHADER GRAPH is not a document YET. The Node Graph is still a singleton tool that swaps its
-        // document in place, so a second `.dgraph` overwrites the first with no prompt; making it a
-        // document needs a `.dgraph` asset type, which turns the AssetHandleStability census red until it
-        // is catalogued. Named here rather than left as an unexplained branch: this IS the remaining
-        // hand-written arm, and it is one, not five.
+        // A SHADER GRAPH is not a document, and U7-2 MEASURED THE PRICE OF MAKING IT ONE AND DID NOT PAY
+        // IT. The note that stood here named one of the four things in the way; here are all four, so the
+        // next reader can decide rather than re-derive.
+        //
+        //   1. THERE IS NO `AssetTypeID::ShaderGraph`. Adding one reddens
+        //      AssetHandleStability.TheCatalogueCoversEveryAssetTypeId until the type is catalogued, and
+        //      needs a `ShaderGraphAsset` beside it (CloudLayoutAsset, the smallest comparable one, is 175
+        //      lines across two files) plus its place in the preloader and the content scan.
+        //   2. A `.dgraph` HAS NO IDENTITY OF ITS OWN. ShaderGraph::Document is { Name, NextId, Domain,
+        //      Lit, Nodes, Links } — no GUID. A subject's Owner is a 64-bit id that must resolve back to
+        //      the data, and a NAME is not one: two graphs may share a name, and renaming one must not make
+        //      it a different document. So the FORMAT gains a field and the six `.dgraph` files in the tree
+        //      gain a migration. That is an asset-format change, which is a different kind of decision from
+        //      a registration.
+        //   3. THE PANEL IS SINGLE-DOCUMENT BY CONSTRUCTION: one ax::NodeEditor::EditorContext, one
+        //      m_Doc, one m_PreviewMaterial, and New / Load / this double-click all replace m_Doc with no
+        //      check at all — so a second `.dgraph` DISCARDS UNSAVED WORK WITH NO PROMPT. That is the U6
+        //      rule ("a document with unsaved edits is not closed without asking") broken by a window that
+        //      is not a document, and it is the strongest argument for finishing the job rather than
+        //      patching a prompt onto a tool.
+        //   4. AND IT IS THE ONE EDITOR AN AGENT CANNOT DRIVE. Measured on the control channel: the
+        //      palette offers `Panel / Open Node Graph`, which SHOWS the window, and no `Open` entry for
+        //      any `.dgraph` — because the Open group is enumerated from the registered path openers and
+        //      nothing claims that extension. A panel's own toolbar buttons are reachable by a mouse and
+        //      synthetic input is closed on this machine, so New / Load / Save here can be neither
+        //      exercised nor photographed. Every other editor became drivable the day it became a document.
+        //
+        // Named here rather than left as an unexplained branch: this IS the remaining hand-written arm, and
+        // it is one, not five.
         else if ( doubleClicked && entry->Type == FileType::Scene )
         {
             Core::SceneOpenRequest::Request( entry->AssetPath );

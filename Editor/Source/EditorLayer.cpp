@@ -3933,11 +3933,16 @@ namespace Desert::Editor
 
             ImGui::Dummy( ImVec2( 0.0f, 6.0f ) );
             {
-                // Both doors named, because both exist and neither is discoverable from an empty area:
-                // the browser's double-click and the pencil on an asset slot in Details.
+                // EVERY door named, because none is discoverable from an empty area. There were two while
+                // every document was a FILE; the third arrived with the component documents (U7, U7-2) and
+                // is not an asset slot at all — the anim graph, the emitter, the UI canvas and the two
+                // timelines are opened by a button beside the component that holds them, and a user
+                // reading this list would otherwise have gone looking in the Content Browser for a file
+                // that does not exist.
                 const char* body = "Double-click a material, a cloud type, a noise volume or a layout in the "
-                                   "Content Browser \xe2\x80\x94 or press the pencil on any asset slot in "
-                                   "Details.";
+                                   "Content Browser \xe2\x80\x94 press the pencil on any asset slot in "
+                                   "Details \xe2\x80\x94 or, for an anim graph, an emitter, a UI canvas or "
+                                   "a timeline, the button beside that component in Details.";
                 ImGui::PushTextWrapPos( ImGui::GetCursorPosX() + avail );
                 ImGui::PushStyleColor( ImGuiCol_Text, ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
                 ImGui::TextUnformatted( body );
