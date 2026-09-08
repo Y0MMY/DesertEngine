@@ -53,6 +53,10 @@
 #include <Editor/Core/GizmoState.hpp>
 #include <Editor/Core/ViewportModes.hpp>
 
+// §8 opens a real project: which project a pin belongs to, and what it is relative to, are both answers
+// this gives — so a test of the pinning helpers that mocked it would be testing nothing they do.
+#include <Engine/Project/ProjectContext.hpp>
+
 // glm::vec3 <-> JSON reflector (OutlineColor). Must be visible before rfl::json, exactly as it must be
 // in EditorPreferences.cpp — without it the whole struct is "Unsupported type" at the first vec3.
 #include <Common/Core/Serialization/GlmReflection.hpp>
@@ -1761,6 +1765,58 @@ TEST( PreferenceOwnershipFavourites, EachProjectsPinsSurviveARestartAndDoNotReac
     EXPECT_EQ( EditorPreferences::Get().FavouriteFolders["Beta"], ( std::vector<std::string>{ "Meshes" } ) );
     EXPECT_EQ( EditorPreferences::Get().FavouriteFolders.size(), 2u )
          << "the two projects' pins did not stay two lists";
+}
+
+// THE PATH THE PANEL ACTUALLY TAKES, against a real project on a real disk — the three helpers the content
+// browser calls, in the order a user calls them.
+//
+// IT OPENS A PROJECT, WHICH IS WHY IT IS LAST IN THE FILE. ProjectContext::Open remaps
+// Common::Constants::Path globally and there is no Close; gtest runs suites in the order it first meets
+// them, so this group runs after every other one here. Nothing above reads a content path — they are all
+// about editor.json under HOME — but a test added after this one is inheriting an open project, and that
+// is worth knowing before it is a mystery.
+//
+// `RecordInRecent::No`: a unit test is not a person opening a project, and the alternative is filing a temp
+// directory at the top of the developer's own recent list on every run.
+TEST( PreferenceOwnershipFavourites, PinningThroughTheBrowsersOwnHelpersRoundTripsAndDropsWhatIsGone )
+{
+    FreshInstall();
+
+    const std::filesystem::path project = std::filesystem::temp_directory_path() / "DesertFavouritesProject";
+    std::error_code             ec;
+    std::filesystem::remove_all( project, ec );
+    std::filesystem::create_directories( project / "Assets" / "Scenes", ec );
+    std::filesystem::create_directories( project / "Assets" / "Doomed", ec );
+    WriteWholeFile( project / "Pinning.deproj",
+                    R"({"FileVersion":1,"Name":"Pinning","AssetsRoot":"Assets","DefaultScene":"",)"
+                    R"("Description":"","EngineVersion":""})" );
+
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( project / "Pinning.deproj" ).string(),
+                                                        Desert::Project::ProjectContext::RecordInRecent::No ) );
+
+    const std::string scenes = ( project / "Assets" / "Scenes" ).generic_string();
+    const std::string doomed = ( project / "Assets" / "Doomed" ).generic_string();
+
+    EXPECT_FALSE( EditorPreferences::IsFavouriteFolder( scenes ) );
+    EditorPreferences::ToggleFavouriteFolder( scenes );
+    EditorPreferences::ToggleFavouriteFolder( doomed );
+
+    // Absolute in, absolute out — the panel navigates with these strings and never sees the stored form.
+    EXPECT_TRUE( EditorPreferences::IsFavouriteFolder( scenes ) );
+    EXPECT_EQ( EditorPreferences::CurrentFavouriteFolders(), ( std::vector<std::string>{ scenes, doomed } ) );
+
+    // ...and RELATIVE on disk, which is the property the absolute path could not hold.
+    EXPECT_EQ( EditorPreferences::Get().FavouriteFolders["Pinning"],
+               ( std::vector<std::string>{ "Scenes", "Doomed" } ) );
+
+    // A pin whose folder is deleted behind the editor's back is dropped by the next write, and only that
+    // one: the check has to be able to tell a folder that is gone from a folder it could not ask about.
+    std::filesystem::remove_all( project / "Assets" / "Doomed", ec );
+    EditorPreferences::ToggleFavouriteFolder( scenes ); // unpin Scenes; Doomed is pruned in the same write
+    EXPECT_EQ( EditorPreferences::Get().FavouriteFolders.count( "Pinning" ), 0u )
+         << "the project's key outlived its last pin";
+
+    std::filesystem::remove_all( project, ec );
 }
 
 // ONE PLACE COMPOSES `$HOME/.desertengine`, AND THE CONTENT BROWSER WAS THE THIRD.

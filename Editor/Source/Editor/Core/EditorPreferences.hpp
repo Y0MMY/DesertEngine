@@ -45,13 +45,25 @@ namespace Desert::Editor
     // (It skips the ONE member that is not a key of the file, UnknownKeys; PreferenceOwnership asserts
     // that the skip and what rfl::json::write actually emits still agree, so the exemption cannot widen.)
     //
-    // AND THIS IS THE ONLY PER-USER SETTINGS STORE. `~/.desertengine` holds three neighbours and not one of
-    // them is an alternative to this struct: `projects.json` and `engines.json` are cross-process
-    // REGISTRIES shared with the launcher, and `Layouts/*.ini` (with the working-directory `imgui.ini`) is
-    // opaque ImGui dock state that ImGui itself writes and parses. `asset_favorites.txt` was a fourth and
-    // was the one exception; К5 closed it — the pinned folders are `FavouriteFolders` below, the file is
-    // deleted by the migration that reads it, and there is no second per-user store left to point at. A new
-    // per-user setting goes in this struct; a new per-user FILE is a conversation with the owner.
+    // AND THIS IS THE ONLY STORE OF EDITOR PREFERENCES. `~/.desertengine` holds four neighbours, and the
+    // sentence that used to stand here counted three of them and called this file the only per-user store
+    // full stop — which stopped being true when К3 created `machine.json` next door. Each neighbour, and
+    // why none of them is somewhere a preference may go instead:
+    //
+    //   * `projects.json` and `engines.json` — cross-process REGISTRIES shared with the launcher, which
+    //     links no engine code; they are lists of what exists, not answers about how anything behaves.
+    //   * `Layouts/*.ini` (with the working-directory `imgui.ini`) — opaque dock state ImGui itself
+    //     writes and parses. Nothing here can read it and nothing there is a named value.
+    //   * `machine.json` — Common::Settings::MachineSettings, and the ONE deliberate second file. Its
+    //     fields are the same KIND as these (per host, per person) and it exists because the audience
+    //     differs: SceneRenderer reads every one of them and the packaged game runs SceneRenderer, while
+    //     the Editor target is the only thing that ever opens editor.json. One kind, two hosts, two files
+    //     — the argument and both ends of the wiring are asserted in ConfigOwnership §8.
+    //
+    // `asset_favorites.txt` was a FIFTH and was the one that had no argument. К5 closed it: the pinned
+    // folders are `FavouriteFolders` below, and the file is deleted by the migration that reads it. A new
+    // per-user setting goes in this struct — or in machine.json if the shipped game needs it too; a new
+    // per-user FILE is a conversation with the owner.
     struct EditorPreferences
     {
         float CameraSpeed = 1.0f;

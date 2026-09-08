@@ -59,6 +59,33 @@ namespace Desert::Editor
         return ::Desert::Project::ProjectContext::Current().Name;
     }
 
+    // IS THIS PIN'S FOLDER PROVABLY GONE? True only when the filesystem gave a definite answer and that
+    // answer was "there is nothing here" (or "what is here is not a folder"). False when the question could
+    // not be asked at all — an unmounted volume, a network share that is down, a parent this process may
+    // not traverse — because dropping a pin on that is destroying a user's data because a disk was busy.
+    //
+    // WHY exists() AND NOT is_directory(). Both take an error_code, and they disagree about what a MISSING
+    // path is. Measured on this toolchain (libc++, macOS 15): `is_directory("/no/such/path", ec)` returns
+    // false AND SETS ec TO ENOENT, while `exists("/no/such/path", ec)` returns false and leaves ec clear.
+    // So the obvious one-liner — `!is_directory(p, ec)` guarded by `!ec` — is wrong in the direction that
+    // does not show: it never prunes anything, because the case it is meant to catch is the case it reads
+    // as an error. That was the first version of this, and the test below it is what said so.
+    static bool PinIsProvablyGone( const std::filesystem::path& folder )
+    {
+        std::error_code ec;
+        const bool      there = std::filesystem::exists( folder, ec );
+        if ( ec )
+            return false; // the filesystem could not answer; the pin stays
+        if ( !there )
+            return true;
+
+        // It is there, so this cannot fail with "not found"; a failure now is again an unanswerable
+        // question and again keeps the pin.
+        std::error_code kindEc;
+        const bool      isFolder = std::filesystem::is_directory( folder, kindEc );
+        return !kindEc && !isFolder;
+    }
+
     // A folder inside the assets root, in the form the field stores: relative, `/`-separated, "." for the
     // root itself. Empty means the path is NOT inside the root and therefore cannot be stored — the caller
     // decides what to say about that, because the two callers say different things.
@@ -684,15 +711,16 @@ namespace Desert::Editor
             pins.push_back( rel );
 
         // THE ONLY PLACE ANYTHING IS EVER REMOVED FROM THIS LIST WITHOUT THE USER ASKING, and it removes
-        // only what it can prove is gone: a pin of a folder that no longer exists on disk. The legacy file
-        // never shrank at all, so a pin of a folder deleted two projects ago was still drawn in the
-        // sidebar. Done at the write and not at the read, because a reader that mutates its store is a
-        // save the user did not make (К6) — and this IS a user action, with a save already going out.
-        std::error_code ec;
-        pins.erase(
-             std::remove_if( pins.begin(), pins.end(), [&root, &ec]( const std::string& kept )
-                             { return !std::filesystem::is_directory( kept == "." ? root : root / kept, ec ); } ),
-             pins.end() );
+        // only what it can PROVE is gone. The legacy file never shrank at all, so a pin of a folder deleted
+        // two projects ago was still drawn in the sidebar. Done at the write and not at the read, because a
+        // reader that mutates its store is a save the user did not make (К6) — and this IS a user action,
+        // with a save already going out.
+        //
+        // "GONE" AND "CANNOT BE ANSWERED" ARE DIFFERENT ANSWERS (§1.4), and telling them apart is not the
+        // one-liner it looks like — see PinIsProvablyGone.
+        pins.erase( std::remove_if( pins.begin(), pins.end(), [&root]( const std::string& kept )
+                                    { return PinIsProvablyGone( kept == "." ? root : root / kept ); } ),
+                    pins.end() );
 
         // An empty list is not a project with no pins, it is a key with nothing behind it. Erasing it is
         // what keeps a user who tried the feature once from carrying that project's name for ever.
