@@ -1,19 +1,34 @@
 @echo off
 setlocal
-REM Package a distributable build: binaries + content pak (+ loose Resources for the editor).
-REM Output: dist\DesertEngine-<config>\ — CI archives this directory as a downloadable artifact.
+REM THE ENGINE DROP — the downloadable build of the TOOLS, not of a game.
+REM Output: dist\DesertEngine-<config>\ — CI archives this directory as an artifact (ci.yml).
 REM
 REM   scripts\Windows\Package.bat [Release^|Debug]
 REM
-REM Content ships BOTH ways on purpose (same rationale as scripts/MacOS/Package.sh):
-REM   - Content.dpak (built with the same PakTool the Runtime mounts) — the packaged-game path;
-REM   - loose Resources\ — the editor's dev path and the VFS's loose-file override for debugging.
-REM Updates later: keep Content.manifest (written beside the pak below, under a thousandth of its size), then
-REM for the next release build the new pak and run
-REM     PakTool patch <old Content.manifest> <new Content.dpak> Patch_001.dpak
-REM — the Runtime mounts Patch*.dpak on top of the base automatically, and the patch carries the list
-REM of files the release DELETED as well as the ones it changed. Keeping the manifest is what makes
-REM that possible without keeping the old 318 MB archive.
+REM WHAT THIS IS AND WHAT IT IS NOT (П5). A GAME is packaged by the editor's own PackageGame() and by
+REM nothing else: it needs an OPEN PROJECT, which this script does not have and CI does not have
+REM either, and its product is the player binary plus one archive carrying the project's content and
+REM its descriptor. This script's product is the EDITOR plus the tools plus the loose engine resources
+REM the editor reads from disk. Two disjoint jobs, and only one of them ships a game.
+REM
+REM WHY Content.dpak AND Content.manifest ARE NO LONGER WRITTEN HERE. Measured on the macOS twin of
+REM this script, 2026-09-08, and the finding is platform-independent because the reasoning is about
+REM call sites rather than about the shell: `VFS::MountPak` has exactly ONE non-test call site in this
+REM repository — Runtime/Source/PackagedContent.cpp — so the editor and the tools in this directory
+REM never mount an archive at all, and the pak's only possible reader was the Runtime sitting beside
+REM it. That reader mounted its 144 MB and then refused, because a pak of Editor\Resources carries no
+REM project descriptor and this script has no project to describe. The drop was 528 MB of which 144 MB
+REM was an archive nothing could use and another 133 MB was the SAME tree loose beside it — one tree
+REM shipped twice, 52 % of the artifact — and that pair is what made this directory read as a second,
+REM broken way to package a game.
+REM
+REM The header this replaced asserted the opposite in writing ("Content.dpak … the packaged-game
+REM path"), which is this project's most frequent defect shape: a comment promising a guarantee the
+REM tree does not honour. It was believed for as long as nobody ran the Runtime in this folder.
+REM
+REM The patch workflow those two files were written for is not lost — `PakTool manifest <pak> <out>`
+REM records a manifest of any archive, and the archive a release actually patches is a GAME's,
+REM produced by PackageGame. Recording one for the engine drop answered a question nobody asks.
 
 cd /d "%~dp0..\.."
 set "ROOT=%CD%"
@@ -39,16 +54,8 @@ for %%E in (Editor Runtime ProjectHub PakTool DShaderTool) do (
 REM Assimp is the one dependency that ships as a DLL (everything else links statically).
 for %%D in ("%BIN%\*.dll") do copy /Y "%%D" "%OUT%\" >NUL 2>&1
 
-REM One content pak with everything the editor/runtime reads (keys keep the "Resources/" prefix so
-REM reads relative to the package root resolve through the VFS unchanged).
-"%BIN%\PakTool.exe" create "%OUT%\Content.dpak" "%ROOT%\Editor\Resources" --prefix Resources || exit /b 1
-
-REM The manifest of THIS release, beside it. Written at package time because it cannot be written
-REM later: a manifest of a version can only be recorded while that version exists. It is what the next
-REM release's `PakTool patch` compares against.
-"%BIN%\PakTool.exe" manifest "%OUT%\Content.dpak" "%OUT%\Content.manifest" || exit /b 1
-
-REM Loose copy for the editor + debugging override.
+REM The editor's resources, loose — the only form anything in this directory can read. See the header
+REM for why no pak and no manifest are written here.
 robocopy "%ROOT%\Editor\Resources" "%OUT%\Resources" /E /NFL /NDL /NJH /NJS /NP >NUL
 REM robocopy uses exit codes 0-7 for success; anything >= 8 is a real failure.
 if %ERRORLEVEL% GEQ 8 (

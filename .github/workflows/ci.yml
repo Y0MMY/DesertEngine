@@ -177,8 +177,17 @@ jobs:
           path: build/TestReports/
           if-no-files-found: ignore
 
-      # Downloadable build: binaries + Content.dpak (built with the same PakTool the Runtime
-      # mounts) + loose Resources. Release only — a Debug artifact would be huge and unused.
+      # THE ENGINE DROP: the editor + the tools + the loose engine resources they read. NOT a game —
+      # a game is packaged by the editor's own PackageGame(), which needs an open project that CI does
+      # not have. Release only; a Debug artifact would be huge and unused.
+      #
+      # This comment used to say "binaries + Content.dpak (built with the same PakTool the Runtime
+      # mounts) + loose Resources", and П5 measured that claim false on 2026-09-08: the pak's only
+      # possible reader was the Runtime beside it, and that Runtime mounted 144 MB and then refused,
+      # because a pak of Editor/Resources carries no project descriptor. The pak and its manifest are
+      # gone from both platform scripts, and the artifact went 528 -> 384 MB — 52 % of it had been one
+      # tree shipped twice. Three places asserted the same wrong thing (both scripts and this line);
+      # if a fourth appears, it is the same defect, not a new one.
       - name: Package build
         if: matrix.config == 'Release'
         run: ./scripts/MacOS/Package.sh Release
