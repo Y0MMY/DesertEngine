@@ -35,7 +35,10 @@
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <cctype>
 #include <fstream>
+#include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -507,6 +510,203 @@ TEST( PackagedContent, AMissingRuntimeIsRefusedByNamingThisHostsOwnBuildScript )
          << "the refusal does not name a script this host can run: " << result.Message;
     EXPECT_NE( result.Message.find( host.RuntimeBinary ), std::string::npos )
          << "the refusal does not say which file was missing: " << result.Message;
+}
+
+// ── EVERY DECLARED ROOT SHIPS, OR SAYS OUT LOUD WHY IT IS NOT CONTENT ─────────────────────────────
+//
+// WHY THE CENSUS AT THE TOP OF THIS FILE WAS NOT ENOUGH, stated as what it missed. It walks the roots
+// ONE function lists — `ServiceScanRoots` — which is why fonts and icons are safe and why nothing in
+// this repository ever noticed that `Resources/Scripts/` existed, held every Lua example the editor
+// offered, and was in NO tree the packager builds an archive from. Six scripts, three committed scenes
+// naming one, and a packaged game that would have loaded none of them: measured by I8, found by hand,
+// caught by no check. A root only enters that census by being scanned by a service; a root that some
+// PANEL scans, or that a component field names, enters nothing.
+//
+// So the relation is turned the other way round and anchored at the DECLARATION instead. Constants.hpp
+// is where a root comes into existence, so that is the list that cannot drift: every path constant it
+// declares must either be covered by a tree in PackagedContentTrees() — itself or an ancestor of it —
+// or carry a written reason why it is not a thing a game contains.
+//
+// THE ROW THAT DOES THE WORK IS RESOURCE_PATH'S. The engine tree is NOT shipped wholesale; three named
+// subtrees below it are. So `Resources/Videos/` added tomorrow, scanned by whoever adds it, has exactly
+// two ways past this suite: become a packed tree, or say in one sentence why a game does not need it.
+// Neither is something you do by accident, which is the whole point — the previous answer was "nothing
+// happens, and you find out when somebody packages the game".
+namespace
+{
+    enum class RootVerdict
+    {
+        Packaged,   ///< a packed tree, or inside one
+        NotContent, ///< deliberately not in the archive, for the stated reason
+    };
+
+    struct DeclaredRoot
+    {
+        const char*     Name; // exactly as Constants.hpp spells it
+        const fs::path* Live; // the live constant, so a remap is followed rather than re-typed
+        RootVerdict     What;
+        const char*     Reason; // NotContent rows only; empty for the others
+    };
+
+    // Index over Constants.hpp's declarations. The completeness of THIS table is not trusted — the
+    // first test below derives the real set from the header and refuses anything missing.
+    const std::vector<DeclaredRoot>& DeclaredRoots()
+    {
+        namespace P                                  = Common::Constants::Path;
+        static const std::vector<DeclaredRoot> roots = {
+             // --- engine resources: never remapped, and only these three travel ---
+             { "RESOURCE_PATH", &P::RESOURCE_PATH, RootVerdict::NotContent,
+               "the engine tree's ROOT, and it is not shipped wholesale - only the three named subtrees "
+               "below it are. Anything new placed under it is invisible to the packager until it becomes "
+               "a tree of its own here AND in PackagedContentTrees(); Resources/Scripts/ was exactly that "
+               "and shipped in nothing for as long as it existed." },
+             { "SHADERDIR_PATH", &P::SHADERDIR_PATH, RootVerdict::Packaged, "" },
+             { "FONTS_PATH", &P::FONTS_PATH, RootVerdict::Packaged, "" },
+             { "ICONS_PATH", &P::ICONS_PATH, RootVerdict::Packaged, "" },
+
+             // --- project content: every row is derived from the assets or cooked root, and both of
+             //     those are packed trees, so the whole census travels by construction ---
+             { "ASSETS_PATH", &P::ASSETS_PATH, RootVerdict::Packaged, "" },
+             { "MESH_PATH", &P::MESH_PATH, RootVerdict::Packaged, "" },
+             { "MATERIAL_PATH", &P::MATERIAL_PATH, RootVerdict::Packaged, "" },
+             { "TEXTUREDIR_PATH", &P::TEXTUREDIR_PATH, RootVerdict::Packaged, "" },
+             { "SKYBOX_PATH", &P::SKYBOX_PATH, RootVerdict::Packaged, "" },
+             { "SCENE_PATH", &P::SCENE_PATH, RootVerdict::Packaged, "" },
+             { "PREFAB_PATH", &P::PREFAB_PATH, RootVerdict::Packaged, "" },
+             { "SCRIPT_PATH", &P::SCRIPT_PATH, RootVerdict::Packaged, "" },
+             { "COLLECTIONS_PATH", &P::COLLECTIONS_PATH, RootVerdict::Packaged, "" },
+             { "CLOUD_NOISE_PATH", &P::CLOUD_NOISE_PATH, RootVerdict::Packaged, "" },
+             { "CLOUD_TYPE_PATH", &P::CLOUD_TYPE_PATH, RootVerdict::Packaged, "" },
+             { "CLOUD_VOLUME_PATH", &P::CLOUD_VOLUME_PATH, RootVerdict::Packaged, "" },
+             { "CLOUD_LAYOUT_PATH", &P::CLOUD_LAYOUT_PATH, RootVerdict::Packaged, "" },
+             { "COOKED_PATH", &P::COOKED_PATH, RootVerdict::Packaged, "" },
+             { "MESH_PATH_COOKED", &P::MESH_PATH_COOKED, RootVerdict::Packaged, "" },
+             { "TEXTURE_PATH_COOKED", &P::TEXTURE_PATH_COOKED, RootVerdict::Packaged, "" },
+        };
+        return roots;
+    }
+
+    std::string RepoRoot()
+    {
+        std::string prefix = "./";
+        for ( int up = 0; up < 8; ++up )
+        {
+            std::ifstream probe( prefix + "Desert/Common/Source/Common/Core/Constants.hpp" );
+            if ( probe )
+                return prefix;
+            prefix += "../";
+        }
+        return {};
+    }
+
+    // Every path constant Constants.hpp DECLARES, by name. A declaration is
+    // `inline const std::filesystem::path[&] <NAME> =` — the `=` is what separates a declaration from
+    // `Dir( ContentDir d )`, which has the same prefix and is a function.
+    std::vector<std::string> DeclaredRootNamesInTheHeader( const std::string& source )
+    {
+        static const std::string kPrefix = "inline const std::filesystem::path";
+
+        std::vector<std::string> names;
+        for ( std::size_t at = source.find( kPrefix ); at != std::string::npos;
+              at             = source.find( kPrefix, at + 1 ) )
+        {
+            std::size_t i = at + kPrefix.size();
+            while ( i < source.size() && ( source[i] == '&' || source[i] == ' ' ) )
+                ++i;
+            const std::size_t nameStart = i;
+            while ( i < source.size() &&
+                    ( std::isalnum( static_cast<unsigned char>( source[i] ) ) != 0 || source[i] == '_' ) )
+                ++i;
+            if ( i == nameStart )
+                continue;
+            const std::string name = source.substr( nameStart, i - nameStart );
+
+            std::size_t after = i;
+            while ( after < source.size() && source[after] == ' ' )
+                ++after;
+            if ( after < source.size() && source[after] == '=' )
+                names.push_back( name );
+        }
+        return names;
+    }
+
+    // Is `path` the packed tree `tree`, or inside it? Component-wise, because these paths carry a
+    // trailing separator and a string prefix test would also match "Resources/AssetsOther/".
+    bool IsAtOrInside( const fs::path& path, const fs::path& tree )
+    {
+        const fs::path rel = path.lexically_normal().lexically_relative( tree.lexically_normal() );
+        if ( rel.empty() )
+            return false;
+        return *rel.begin() != "..";
+    }
+} // namespace
+
+// 1. NO UNDECLARED ROW AND NO UNREGISTERED ROOT. The header is the source of truth in both directions:
+//    a constant added there without a row here fails, and a row here whose constant is gone fails too.
+TEST( PackagedContent, EveryRootConstantTheHeaderDeclaresIsInThePackagingRegister )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() ) << "the repository root was not found from the working directory";
+
+    std::ifstream in( root + "Desert/Common/Source/Common/Core/Constants.hpp" );
+    ASSERT_TRUE( in.is_open() );
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+
+    const std::vector<std::string> declared = DeclaredRootNamesInTheHeader( buffer.str() );
+    ASSERT_FALSE( declared.empty() ) << "no path constant was found in Constants.hpp, which cannot be "
+                                        "true - the parser is broken, not the header";
+
+    std::set<std::string> registered;
+    for ( const DeclaredRoot& row : DeclaredRoots() )
+        registered.insert( row.Name );
+
+    for ( const std::string& name : declared )
+    {
+        EXPECT_EQ( registered.count( name ), 1u )
+             << name
+             << " is a content root the engine can read from and nothing says whether a PACKAGED GAME "
+                "gets it. Add a row: Packaged (and a tree in PackagedContentTrees() that covers it), or "
+                "NotContent with the reason a game does not need it.";
+    }
+
+    const std::set<std::string> present( declared.begin(), declared.end() );
+    for ( const DeclaredRoot& row : DeclaredRoots() )
+    {
+        EXPECT_EQ( present.count( row.Name ), 1u )
+             << row.Name << " is registered here but Constants.hpp no longer declares it - a stale row.";
+    }
+}
+
+// 2. THE VERDICT IS TRUE, not merely written. Checked under the PACKAGED remap, because that is the
+//    only world in which the answer matters and the dev-time spellings would flatter it.
+TEST( PackagedContent, EveryRootCalledContentIsCoveredByATreeThePackagerPacks )
+{
+    EnvironmentGuard guard;
+
+    const fs::path pkg = fs::temp_directory_path() / "desert_pkg_rootcensus";
+    Common::Constants::Path::SetProjectRoot( pkg, Desert::Editor::kPackagedAssetsRoot );
+
+    const auto trees = Desert::Editor::PackagedContentTrees();
+
+    for ( const DeclaredRoot& row : DeclaredRoots() )
+    {
+        bool covered = false;
+        for ( const auto& tree : trees )
+            covered = covered || IsAtOrInside( *row.Live, *tree.Tree );
+
+        if ( row.What == RootVerdict::Packaged )
+        {
+            EXPECT_TRUE( covered ) << row.Name << " (" << row.Live->string()
+                                   << ") is registered as content that ships, and no tree in "
+                                      "PackagedContentTrees() contains it. Everything under it is "
+                                      "missing from the archive, and the failure lands on a player.";
+        }
+        else
+        {
+            EXPECT_STRNE( row.Reason, "" ) << row.Name << " is excluded from the package with no reason given.";
+        }
+    }
 }
 
 int main( int argc, char** argv )
