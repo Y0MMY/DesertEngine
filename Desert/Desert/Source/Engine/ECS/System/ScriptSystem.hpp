@@ -114,7 +114,7 @@ namespace Desert::ECS
                         // differ in a packaged game because ASSETS_PATH is remapped there. Resolved once,
                         // here, and both the loader and its error message get the same answer - an error
                         // naming the key would send the reader looking for a file spelled "assets:...".
-                        const std::string file = script.ResolvedPath().generic_string();
+                        const std::string file   = script.ResolvedPath().generic_string();
                         auto              loaded = m_Engine.LoadEntityScript( id, slot, file );
                         if ( !loaded )
                         {

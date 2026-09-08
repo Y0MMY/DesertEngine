@@ -167,8 +167,8 @@ namespace
 
 TEST( SceneScriptRootMigration, TheRootedSpellingBecomesATaggedKey )
 {
-    std::vector<Assets::EntityData> entities{ ScriptedWith(
-         std::vector<std::string>{ "Resources/Assets/Scripts/Examples/MoveAlongX.lua" } ) };
+    std::vector<Assets::EntityData> entities{
+         ScriptedWith( std::vector<std::string>{ "Resources/Assets/Scripts/Examples/MoveAlongX.lua" } ) };
 
     const auto report = Migration::MigrateScriptRootV15ToV16( entities );
 
@@ -191,15 +191,12 @@ TEST( SceneScriptRootMigration, TheKeyIsTheOneStableKeyForPathWouldMint )
 {
     Common::Constants::Path::ResetToSandbox();
 
-    const std::filesystem::path file =
-         Common::Constants::Path::SCRIPT_PATH / "Examples" / "MoveAlongX.lua";
+    const std::filesystem::path file = Common::Constants::Path::SCRIPT_PATH / "Examples" / "MoveAlongX.lua";
 
-    std::vector<Assets::EntityData> entities{ ScriptedWith(
-         std::vector<std::string>{ file.generic_string() } ) };
+    std::vector<Assets::EntityData> entities{ ScriptedWith( std::vector<std::string>{ file.generic_string() } ) };
     Migration::MigrateScriptRootV15ToV16( entities );
 
-    EXPECT_EQ( ScriptKeyOf( entities[0] ).value_or( "<none>" ),
-               Common::AssetHandle::StableKeyForPath( file ) );
+    EXPECT_EQ( ScriptKeyOf( entities[0] ).value_or( "<none>" ), Common::AssetHandle::StableKeyForPath( file ) );
 }
 
 // The editor writes `Resources/Assets/Scripts/...` (its working directory is `Editor/`), the migrator is
@@ -220,8 +217,7 @@ TEST( SceneScriptRootMigration, EverySpellingOfOneFileGivesOneKey )
 
     EXPECT_EQ( report.Slots, 4 );
     for ( std::size_t i = 0; i < 4; ++i )
-        EXPECT_EQ( ScriptKeyOf( entities[0], i ).value_or( "<none>" ),
-                   "assets:Scripts/Examples/MoveAlongX.lua" )
+        EXPECT_EQ( ScriptKeyOf( entities[0], i ).value_or( "<none>" ), "assets:Scripts/Examples/MoveAlongX.lua" )
              << "slot " << i;
 }
 
@@ -229,8 +225,8 @@ TEST( SceneScriptRootMigration, EverySpellingOfOneFileGivesOneKey )
 // rule Constants::Path::RootForContentPath states for every other content row.
 TEST( SceneScriptRootMigration, TheLastScriptsFolderIsTheRoot )
 {
-    std::vector<Assets::EntityData> entities{ ScriptedWith(
-         std::vector<std::string>{ "Scripts/Proj/Resources/Assets/Scripts/AI/Brain.lua" } ) };
+    std::vector<Assets::EntityData> entities{
+         ScriptedWith( std::vector<std::string>{ "Scripts/Proj/Resources/Assets/Scripts/AI/Brain.lua" } ) };
 
     Migration::MigrateScriptRootV15ToV16( entities );
 
@@ -260,8 +256,8 @@ TEST( SceneScriptRootMigration, AnEmptySlotStaysEmptyRatherThanBecomingABareTag 
 // in a packaged game. A guess would be the silent substitution §1.4 forbids.
 TEST( SceneScriptRootMigration, AScriptOutsideAnyScriptsFolderIsCarriedAndNamed )
 {
-    std::vector<Assets::EntityData> entities{ ScriptedWith(
-         std::vector<std::string>{ "Resources/Assets/AI/Brain.lua" }, "Wanderer" ) };
+    std::vector<Assets::EntityData> entities{
+         ScriptedWith( std::vector<std::string>{ "Resources/Assets/AI/Brain.lua" }, "Wanderer" ) };
 
     const auto report = Migration::MigrateScriptRootV15ToV16( entities );
 
@@ -278,8 +274,8 @@ TEST( SceneScriptRootMigration, AScriptOutsideAnyScriptsFolderIsCarriedAndNamed 
 
 TEST( SceneScriptRootMigration, APathThatIsNotAStringIsCarriedAndNamed )
 {
-    std::vector<Assets::EntityData> entities{ ScriptedWith(
-         std::vector<rfl::Generic>{ rfl::Generic( 7 ) }, "Broken" ) };
+    std::vector<Assets::EntityData> entities{
+         ScriptedWith( std::vector<rfl::Generic>{ rfl::Generic( 7 ) }, "Broken" ) };
 
     const auto report = Migration::MigrateScriptRootV15ToV16( entities );
 
@@ -292,12 +288,12 @@ TEST( SceneScriptRootMigration, APathThatIsNotAStringIsCarriedAndNamed )
 
 TEST( SceneScriptRootMigration, ASlotThatIsNotAnObjectIsLeftAlone )
 {
-    std::vector<Assets::EntityData> entities{ ScriptedWith(
-         std::vector<std::string>{ "Resources/Assets/Scripts/A.lua" } ) };
+    std::vector<Assets::EntityData> entities{
+         ScriptedWith( std::vector<std::string>{ "Resources/Assets/Scripts/A.lua" } ) };
 
     // Replace the whole slot list with one non-object row, keeping the payload shape.
     rfl::Generic::Object payload;
-    payload["Scripts"]             = rfl::Generic( rfl::Generic::Array{ rfl::Generic( "not-an-object" ) } );
+    payload["Scripts"]               = rfl::Generic( rfl::Generic::Array{ rfl::Generic( "not-an-object" ) } );
     entities[0].Components["Script"] = rfl::Generic( payload );
 
     const auto report = Migration::MigrateScriptRootV15ToV16( entities );
@@ -338,8 +334,8 @@ TEST( SceneScriptRootMigration, AnEntityWithNoScriptComponentIsUntouched )
 
 TEST( SceneScriptRootMigration, ASecondRunChangesNothing )
 {
-    std::vector<Assets::EntityData> entities{ ScriptedWith(
-         std::vector<std::string>{ "Resources/Assets/Scripts/Examples/MoveAlongX.lua" } ) };
+    std::vector<Assets::EntityData> entities{
+         ScriptedWith( std::vector<std::string>{ "Resources/Assets/Scripts/Examples/MoveAlongX.lua" } ) };
 
     Migration::MigrateScriptRootV15ToV16( entities );
     const std::string once = rfl::json::write( entities );
@@ -362,8 +358,7 @@ TEST( SceneScriptRootMigration, MigrateSceneRunsItForAV15FileAndStampsTheHead )
     EXPECT_TRUE( report.ScriptRootRaised );
     EXPECT_EQ( report.ScriptRoot.Slots, 1 );
     EXPECT_EQ( scene.SceneVersion.value_or( 0 ), Core::kSceneVersion );
-    EXPECT_EQ( ScriptKeyOf( scene.Entities[0] ).value_or( "<none>" ),
-               "assets:Scripts/Examples/MoveAlongX.lua" );
+    EXPECT_EQ( ScriptKeyOf( scene.Entities[0] ).value_or( "<none>" ), "assets:Scripts/Examples/MoveAlongX.lua" );
 }
 
 // THE GATE IS ON THE STEP'S OWN NUMBER, and this is the half that proves it fires rather than merely
@@ -418,11 +413,11 @@ TEST( SceneScriptRootMigrationCorpus, NoShippedSceneStillStatesTheOldPathKey )
 
                 ++slots;
                 EXPECT_FALSE( fields.value().get( "Path" ).has_value() )
-                     << entry.path().string()
-                     << " still states a Script slot Path — run Tools/SceneMigrator";
+                     << entry.path().string() << " still states a Script slot Path — run Tools/SceneMigrator";
 
                 const auto key = fields.value().get( "ScriptKey" );
-                ASSERT_TRUE( key.has_value() ) << entry.path().string() << " has a script slot with no "
+                ASSERT_TRUE( key.has_value() ) << entry.path().string()
+                                               << " has a script slot with no "
                                                   "ScriptKey at all";
                 const std::string text = key.value().to_string().value_or( std::string() );
                 if ( text.empty() )

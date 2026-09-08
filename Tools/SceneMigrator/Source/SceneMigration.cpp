@@ -1505,8 +1505,7 @@ namespace Desert::Migration
                         LOG_WARN( "[SceneMigration] entity '{0}': a Script slot's {1} is {2}, not a string "
                                   "- it is carried over under {3} unchanged and still names no script",
                                   tag, kOldKey, Describe( value ), kNewKey );
-                        report.UnrootedNames.push_back( tag + " > Script." + kOldKey + " = " +
-                                                        Describe( value ) );
+                        report.UnrootedNames.push_back( tag + " > Script." + kOldKey + " = " + Describe( value ) );
                         ++carriedHere;
                         kept[kNewKey] = value;
                         continue;

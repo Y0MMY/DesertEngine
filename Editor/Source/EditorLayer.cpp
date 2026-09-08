@@ -6149,8 +6149,8 @@ namespace Desert::Editor
                 // Through StableKeyForPath, like the picker: the slot stores a ROOT-TAGGED KEY, and a
                 // template that stored the rooted spelling would author the very defect I9 migrated
                 // three scenes out of — a reference that resolves here and nowhere a game ships to.
-                slot.ScriptKey = Common::AssetHandle::StableKeyForPath(
-                     Common::Constants::Path::SCRIPT_PATH / "Examples/PlayerController.lua" );
+                slot.ScriptKey = Common::AssetHandle::StableKeyForPath( Common::Constants::Path::SCRIPT_PATH /
+                                                                        "Examples/PlayerController.lua" );
                 player.AddComponent<ECS::ScriptComponent>().Scripts.push_back( std::move( slot ) );
             }
         }

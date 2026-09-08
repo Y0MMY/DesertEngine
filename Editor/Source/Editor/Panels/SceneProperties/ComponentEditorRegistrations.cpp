@@ -1559,9 +1559,8 @@ DESERT_REGISTER_CUSTOM_COMPONENT(
                   ImGui::PushID( static_cast<int>( i ) );
                   auto& slot = sc.Scripts[i];
 
-                  const std::string preview = slot.ScriptKey.empty()
-                                                   ? "Select script..."
-                                                   : slot.ResolvedPath().filename().string();
+                  const std::string preview =
+                       slot.ScriptKey.empty() ? "Select script..." : slot.ResolvedPath().filename().string();
 
                   ImGui::SetNextItemWidth( -60.0f ); // leave room for the remove button
                   if ( ImGui::BeginCombo( "##ScriptSel", preview.c_str() ) )
@@ -1617,8 +1616,8 @@ DESERT_REGISTER_CUSTOM_COMPONENT(
 
                       // ---- Exposed properties (the script's `Properties` table) ----
                       if ( slot.Properties.empty() )
-                          slot.Properties = ::Desert::Scripting::ReadScriptProperties(
-                               slot.ResolvedPath().generic_string() );
+                          slot.Properties =
+                               ::Desert::Scripting::ReadScriptProperties( slot.ResolvedPath().generic_string() );
 
                       ImGui::SameLine();
                       if ( ImGui::Button( "Refresh Props" ) )
