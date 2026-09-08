@@ -21,6 +21,13 @@ namespace Desert::Editor
     // extensionless.
     inline constexpr const char* kBundleLauncherName = "Runtime";
 
+    // THE SUFFIX OF A RELEASE'S OWN RECORD, appended to the package's name: `MyGame` -> `MyGame.manifest`
+    // beside `MyGame/` (or `MyGame.app/`) in the output directory. One symbol rather than a literal for
+    // the reason П5 gave the descriptor one: the packager writes this file and something else entirely
+    // has to find it later — a release script, a test, whoever hands it to `PakTool patch` — and a
+    // release that cannot find its own baseline cannot be patched at all.
+    inline constexpr const char* kContentManifestExtension = ".manifest";
+
     // EVERY FIELD HERE IS READ BY PackageGame, AND THAT IS CHECKED — Desert/Tests/Editor/
     // BuildSettingsConsumers asserts the relation in both directions: no option the Build Settings panel
     // offers that the packager ignores, and no option the packager honours that nothing can set. It was
@@ -81,6 +88,20 @@ namespace Desert::Editor
         size_t CookFailures  = 0; // content the cook could not read/parse/compile (see CookStats)
         size_t CookUnwritten = 0; // artifacts produced that did not reach the disk
 
+        // WHERE THE PATCH BASELINE WAS WRITTEN (П7), or empty when this result did not produce one —
+        // which is every BuildContentPak, because a dev archive is not a release and a baseline for a
+        // version nobody shipped is a file nobody can ever patch against.
+        //
+        // It is a FIELD rather than a sentence inside `Message` because of what the file is: the one
+        // artifact of a release that has to outlive the release, and the only one whose absence cannot
+        // be repaired later. Whoever built the game has to be able to find it, and a path buried in
+        // prose is a path a build script cannot pick up.
+        // The `= {}` is load-bearing, not decoration: without a default member initializer every one of
+        // the fifteen `return { false, "...", "" }` refusals in GamePackager.cpp becomes a
+        // -Wmissing-field-initializers warning, and a field added at the end of this struct must cost
+        // the refusals nothing (which is the reason the counts above were appended here too).
+        std::string ManifestPath = {};
+
         // A package exists AND everything the cook was asked to produce is in it. This is the question
         // "did the build go green", and it is the one a caller should ask — `Success` alone answers a
         // narrower question than anybody looking at a build result means.
@@ -112,6 +133,16 @@ namespace Desert::Editor
     //
     // In a .app the binary and the archive live together in Contents/MacOS; Contents/Resources is not
     // produced. That split was what forced the launcher to pass `--project`, and it is gone with it.
+    //
+    // AND ONE FILE THAT IS NOT PART OF THE PACKAGE (П7): `<Name>.manifest`, written BESIDE the package
+    // directory in options.OutputDir, never inside it. It is the record of what this release hands out
+    // — the "before" side `PakTool patch` needs to build the next update — and it can only be taken
+    // while this version exists: a release packaged without one can never be patched, and no later run
+    // can reconstruct it. It stays outside because the product really is a binary and one archive: the
+    // player needs nothing from it, and a publisher's record inside the folder a player copies around
+    // is one more thing an installer can lose and one more thing that reads as content. The reader has
+    // been in the tree since П3 — Runtime/Source/PackagedContent.cpp mounts every Patch*.dpak over the
+    // base — and until now there was no writer anywhere on the path a game actually takes.
     //
     // Pure CPU + filesystem — safe to run on a JobSystem worker.
     PackageResult PackageGame( const PackageOptions& options );

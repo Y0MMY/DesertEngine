@@ -3,6 +3,7 @@
 #include "PakFile.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <charconv>
 #include <fstream>
 #include <system_error>
@@ -259,5 +260,77 @@ namespace Common::Utils
             }
         }
         return diff;
+    }
+
+    Common::ResultStr<PatchBuild> BuildPatchPak( const std::filesystem::path& baseManifestFile,
+                                                 const std::filesystem::path& newerPak,
+                                                 const std::filesystem::path& outPatch )
+    {
+        std::ifstream in( baseManifestFile, std::ios::binary );
+        if ( !in )
+        {
+            // The reason, not just the path. This refusal is what a release engineer reads when a patch
+            // will not build, and "cannot open" answers the question with the question — the same
+            // correction PakTool's `list` already carries for an archive.
+            const std::error_code ec( errno, std::generic_category() );
+            return Common::MakeFormattedError<PatchBuild>(
+                 "the base manifest {} could not be read ({}). A patch needs the manifest of the release "
+                 "it updates; without it there is no \"before\" side to compare against, and it cannot be "
+                 "reconstructed after the fact — it is recorded when that release is packaged.",
+                 baseManifestFile.string(), ec.message() );
+        }
+        const std::string text( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
+
+        auto parsed = ContentManifest::Parse( text );
+        if ( !parsed )
+            return Common::MakeFormattedError<PatchBuild>( "the base manifest {} is not a manifest: {}",
+                                                           baseManifestFile.string(), parsed.GetError() );
+        const ContentManifest base = parsed.ExtractValue();
+
+        PakReader newer( newerPak );
+        if ( !newer.IsOpen() )
+            return Common::MakeFormattedError<PatchBuild>( "the new release archive {} could not be opened: {}",
+                                                           newerPak.string(), newer.OpenError() );
+
+        PatchBuild built;
+        built.Diff = CompareManifests( base, ContentManifest::FromPak( newer ) );
+        if ( built.Diff.Empty() )
+        {
+            // No archive, and the caller is TOLD that rather than left to find an empty file — or, as
+            // before, a stale one from a previous run that a `remove` may or may not have reached.
+            std::error_code ec;
+            std::filesystem::remove( outPatch, ec );
+            return Common::MakeSuccess( std::move( built ) );
+        }
+
+        PakWriter writer( outPatch );
+        if ( !writer.IsOpen() )
+            return Common::MakeFormattedError<PatchBuild>( "the patch archive {} could not be created",
+                                                           outPatch.string() );
+
+        for ( const auto* keys : { &built.Diff.Added, &built.Diff.Changed } )
+            for ( const auto& key : *keys )
+            {
+                const auto data = newer.Read( key );
+                if ( !data )
+                    return Common::MakeFormattedError<PatchBuild>(
+                         "entry '{}' could not be read out of {} — the patch would be missing a file it "
+                         "says it delivers",
+                         key, newerPak.string() );
+                if ( !writer.AddData( key, data->data(), data->size() ) )
+                    return Common::MakeFormattedError<PatchBuild>( "entry '{}' could not be written into {}", key,
+                                                                   outPatch.string() );
+            }
+
+        if ( !writer.SetDeletedKeys( built.Diff.Removed ) )
+            return Common::MakeError<PatchBuild>( "a deleted key cannot be recorded (empty, reserved, or "
+                                                  "containing a line break)" );
+
+        if ( writer.Finalize() == 0 )
+            return Common::MakeFormattedError<PatchBuild>( "the patch archive {} could not be finalized",
+                                                           outPatch.string() );
+
+        built.Written = true;
+        return Common::MakeSuccess( std::move( built ) );
     }
 } // namespace Common::Utils

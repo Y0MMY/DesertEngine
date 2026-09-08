@@ -187,69 +187,28 @@ namespace
         return 0;
     }
 
+    // The patch itself is built by Common::Utils::BuildPatchPak — this is the CLI around it. The loop
+    // used to live here, inside `main()`'s process, which put the only consumer of a recorded manifest
+    // somewhere no test could reach without spawning a binary it cannot depend on having been built.
     int Patch( const fs::path& baseManifest, const fs::path& newPath, const fs::path& outPath )
     {
-        std::ifstream in( baseManifest, std::ios::binary );
-        if ( !in )
+        const auto built = Common::Utils::BuildPatchPak( baseManifest, newPath, outPath );
+        if ( !built )
         {
-            std::fprintf( stderr, "PakTool: cannot open %s\n", baseManifest.string().c_str() );
+            std::fprintf( stderr, "PakTool: %s\n", built.GetError().c_str() );
             return 1;
         }
-        const std::string text( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
-        auto              parsed = Common::Utils::ContentManifest::Parse( text );
-        if ( !parsed )
-        {
-            std::fprintf( stderr, "PakTool: %s: %s\n", baseManifest.string().c_str(), parsed.GetError().c_str() );
-            return 1;
-        }
-        const Common::Utils::ContentManifest base = parsed.ExtractValue();
 
-        Common::Utils::PakReader newer( newPath );
-        if ( !newer.IsOpen() )
-        {
-            std::fprintf( stderr, "PakTool: cannot open %s: %s\n", newPath.string().c_str(),
-                          newer.OpenError().c_str() );
-            return 1;
-        }
-        const auto diff =
-             Common::Utils::CompareManifests( base, Common::Utils::ContentManifest::FromPak( newer ) );
-
-        if ( diff.Empty() )
+        // "Nothing changed" is reported as ITS OWN outcome rather than as a patch of size zero: the
+        // exit code is 0 either way, so the line below is the only thing that tells a release script
+        // whether there is a file to upload.
+        if ( !built.GetValue().Written )
         {
             std::printf( "PakTool: no differences — no patch written\n" );
-            std::error_code ec;
-            fs::remove( outPath, ec );
             return 0;
         }
 
-        Common::Utils::PakWriter writer( outPath );
-        if ( !writer.IsOpen() )
-        {
-            std::fprintf( stderr, "PakTool: cannot create %s\n", outPath.string().c_str() );
-            return 1;
-        }
-        for ( const auto* keys : { &diff.Added, &diff.Changed } )
-            for ( const auto& key : *keys )
-            {
-                const auto data = newer.Read( key );
-                if ( !data || !writer.AddData( key, data->data(), data->size() ) )
-                {
-                    std::fprintf( stderr, "PakTool: failed to copy entry %s\n", key.c_str() );
-                    return 1;
-                }
-            }
-        if ( !writer.SetDeletedKeys( diff.Removed ) )
-        {
-            std::fprintf( stderr, "PakTool: a deleted key cannot be recorded (empty, reserved, or "
-                                  "containing a line break)\n" );
-            return 1;
-        }
-        if ( writer.Finalize() == 0 )
-        {
-            std::fprintf( stderr, "PakTool: finalize failed\n" );
-            return 1;
-        }
-
+        const auto& diff = built.GetValue().Diff;
         std::printf( "PakTool: patch %s — %zu added, %zu changed, %zu deleted\n", outPath.string().c_str(),
                      diff.Added.size(), diff.Changed.size(), diff.Removed.size() );
         return 0;

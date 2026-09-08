@@ -9,6 +9,7 @@
 #include <Common/Core/Constants.hpp>
 #include <Common/Core/Logger.hpp>
 #include <Common/Project/ProjectFormat.hpp>
+#include <Common/Utilities/ContentManifest.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Utilities/PakFile.hpp>
 
@@ -236,7 +237,45 @@ namespace Desert::Editor
                 return { false, "Failed to finalize Content.dpak (no entries?)", "" };
         }
 
-        // 5) Bundle only: MoltenVK + the Vulkan loader travel INSIDE Contents/Frameworks so the player
+        // 5) THE RECORD OF WHAT THIS RELEASE HANDS OUT (П7) — taken HERE because here is the only place
+        // it can be taken. `PakTool patch` compares the next release's archive against the manifest of
+        // this one, and a manifest can only be recorded while the version it describes still exists: a
+        // release packaged without one is a release that can never be patched, and nothing later can
+        // reconstruct it from the shipped folder. The patch READER has been in the tree since П3
+        // (Runtime/Source/PackagedContent.cpp mounts every Patch*.dpak over the base); this is the
+        // writer, and until now the path a real game takes had none.
+        //
+        // FROM THE ARCHIVE, not from the trees that went into it. The archive is what shipped — after
+        // the raw-mesh filter, after the cook, with the descriptor in it — so a manifest of the source
+        // trees would describe a release that does not exist, and the first thing to notice would be a
+        // patch that re-ships files nobody changed.
+        //
+        // BESIDE THE PACKAGE, NOT INSIDE IT: the product is a binary and one archive, and the player
+        // needs nothing from this file. See GamePackager.hpp.
+        //
+        // A FAILURE HERE FAILS THE PACKAGE, like every other step. The alternative is a package that
+        // exists and can never be updated, discovered on the day somebody needs to ship a fix.
+        const fs::path manifestPath = fs::path( options.OutputDir ) / ( safeName + kContentManifestExtension );
+        {
+            const Common::Utils::PakReader packed( gameDir / "Content.dpak" );
+            if ( !packed.IsOpen() )
+                return { false,
+                         "Content.dpak could not be reopened to record the release manifest: " +
+                              packed.OpenError(),
+                         "" };
+
+            const std::string manifest = Common::Utils::ContentManifest::FromPak( packed ).Serialize();
+            if ( const auto written =
+                      Common::Utils::FileSystem::WriteContentToFileAtomic( manifestPath, manifest );
+                 !written )
+                return { false,
+                         "The release manifest " + manifestPath.string() +
+                              " could not be written: " + written.GetError() +
+                              ". Without it this build can never be patched, so it is not a package.",
+                         "" };
+        }
+
+        // 6) Bundle only: MoltenVK + the Vulkan loader travel INSIDE Contents/Frameworks so the player
         // machine needs no Homebrew. The ICD json is rewritten to point at the bundled dylib (the
         // loader resolves library_path relative to the json file).
         bool bundledVulkan = false;
@@ -292,7 +331,7 @@ namespace Desert::Editor
             }
         }
 
-        // 6) Launcher + (bundle) Info.plist. The launcher script is the bundle's CFBundleExecutable:
+        // 7) Launcher + (bundle) Info.plist. The launcher script is the bundle's CFBundleExecutable:
         // dyld reads DYLD_* only at process start, so the env MUST be set before the real binary execs.
         //
         // WHAT THE LAUNCHER IS STILL FOR, now that it no longer names the project (П5): the Vulkan
@@ -407,7 +446,8 @@ namespace Desert::Editor
             msg << "  WARNING: " << cook.StoreFailures
                 << " cooked artifact(s) could not be written; the game will rebuild them at every start";
         LOG_INFO( "[Package] {}", msg.str() );
-        return { true, msg.str(), fs::absolute( root, ec ).string(), cook.Failures, cook.StoreFailures };
+        return { true,          msg.str(),          fs::absolute( root, ec ).string(),
+                 cook.Failures, cook.StoreFailures, fs::absolute( manifestPath, ec ).string() };
     }
     PackageResult BuildContentPak()
     {
