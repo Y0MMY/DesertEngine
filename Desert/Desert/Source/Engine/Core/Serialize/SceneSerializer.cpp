@@ -21,6 +21,8 @@
 #include <regex>
 #include <unordered_set>
 
+#include <chrono>
+
 namespace Desert::Core
 {
     namespace
@@ -165,6 +167,7 @@ namespace Desert::Core
         const SceneSerialized scene = loadable.ExtractValue();
 
         LOG_INFO( "Loading scene: {0}", scene.SceneName );
+        const auto f6DeserializeStart = std::chrono::steady_clock::now(); // F6 TEMPORARY
 
         // THE FILE, KEPT AS IT WAS PARSED, and every key in it this build cannot name, SAID OUT LOUD.
         //
@@ -348,6 +351,13 @@ namespace Desert::Core
                     m_Scene->Attach( parentIt->second, prefabRoot );
             }
         }
+
+        // F6 TEMPORARY
+        LOG_INFO( "[F6TIME] '{}': {} entity record(s) deserialized in {} ms", scene.SceneName,
+                  scene.Entities.size(),
+                  std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() -
+                                                                        f6DeserializeStart )
+                       .count() );
 
         return BOOLSUCCESS;
     }

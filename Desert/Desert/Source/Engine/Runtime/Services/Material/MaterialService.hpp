@@ -167,6 +167,19 @@ namespace Desert::Runtime
             return m_Materials.find( handle ) != m_Materials.end();
         }
 
+        // IS AN ASSET SHELL ON RECORD FOR @p handle? The other half of the question above, and the two are
+        // NOT interchangeable: a registered shell that nothing has drawn yet has no built material, and a
+        // built material always has a shell.
+        //
+        // The scene parse asks THIS one, once per material reference, to decide whether it owes the
+        // service a registration. It cannot ask through `Get`, which builds the runtime material on a miss
+        // — the guard would then do the work it exists to avoid, which is what the resolver used to do:
+        // every material a scene named was built during parsing because `!Get(handle)` was the test.
+        [[nodiscard]] bool HasAsset( const Assets::AssetHandle& handle ) const
+        {
+            return m_MaterialAssets.find( handle ) != m_MaterialAssets.end();
+        }
+
         // FORGET a material asset entirely — its runtime materials, its shell, and its entry in the
         // external -> internal map.
         //

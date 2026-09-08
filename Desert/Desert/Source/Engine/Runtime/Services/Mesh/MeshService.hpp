@@ -49,6 +49,20 @@ namespace Desert::Runtime
         Mesh*              Get( const Assets::AssetHandle& handle ) const; // builds-on-miss from a shell
         Assets::MeshAsset* GetAsset( const Assets::AssetHandle& handle ) const;
 
+        // IS A SHELL ON RECORD FOR @p handle? A map lookup and NOTHING ELSE, which is the whole point of
+        // it existing beside `GetAsset`.
+        //
+        // The scene parse asks this once per mesh reference, before deciding whether it owes the service a
+        // registration, so the question must cost less than the answer it guards. Neither existing
+        // accessor can be used for it: `GetAsset` parses the `.stmesh` through EnsureLoaded and `Get`
+        // builds the GPU mesh, so the obvious ways to ask "is it registered?" are the two ways to
+        // guarantee the answer is yes at full price. (`MaterialService::HasBuiltMaterial` exists for the
+        // same reason, one axis over — see its comment.)
+        [[nodiscard]] bool HasAsset( const Assets::AssetHandle& handle ) const
+        {
+            return m_MeshAssets.find( handle ) != m_MeshAssets.end();
+        }
+
         void                Clear();
         std::optional<bool> IsSkinned( const Assets::AssetHandle& handle ) const;
 
