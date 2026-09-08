@@ -56,6 +56,91 @@ namespace Desert::Editor
             return rel.generic_string();
         }
 
+        // -- EVERY AUTHORED SCALAR OF A CLOUD TYPE, ONCE ------------------------------------------------
+        //
+        // TWO READERS AND ONE LIST. The sliders this panel draws and the properties the control channel
+        // offers are the same rows, in the same order, with the same clamps - because they are read off
+        // this table rather than written out twice. The alternative was a second list inside
+        // EditableProperties, and the failure it produces is silent in both directions: a channel that can
+        // set a number the panel does not show, or a slider the channel cannot reach, with nothing
+        // anywhere saying so.
+        //
+        // THE NAME IS THE C++ FIELD'S OWN NAME, not the caption. A caption is what a person reads and may
+        // be reworded; the name is what a client addresses and must not move under it.
+        //
+        // The three authored things that are NOT here are absent by construction rather than by omission:
+        // the vertical profile is a CURVE of sixteen samples (drawn by DrawProfileEditor, and a channel
+        // that carries at most four floats cannot express it), and the display name and the notes are
+        // text. EditableProperties reports what it can carry and the panel draws the rest.
+        struct ShapeField
+        {
+            const char* Name;
+            const char* Label;
+            float Graphic::CloudTypeShape::*Member;
+            float                           Min;
+            float                           Max;
+            const char*                     Format;
+            /// A section header drawn before this row, or nullptr.
+            const char* SectionBefore;
+            /// The profile canvas is drawn before this row. Exactly one row carries it.
+            bool ProfileEditorBefore;
+            /// Drawn disabled while the type has no anvil - a second lobe's altitude means nothing without
+            /// the lobe, and a live slider for it is a control that changes nothing.
+            bool        GatedByAnvil;
+            const char* Tooltip;
+        };
+
+        constexpr ShapeField kShapeFields[] = {
+             { "BaseAltitudeKm", "Base Altitude (km)", &Graphic::CloudTypeShape::BaseAltitudeKm, 0.0f, 14.0f,
+               "%.2f", nullptr, false, false,
+               "Where this kind of cloud's base sits - its lifting condensation level. ABSOLUTE, not a "
+               "fraction of a layer: the shell the march intersects is computed from this and the top, so "
+               "moving it moves the clouds." },
+             { "TopAltitudeKm", "Top Altitude (km)", &Graphic::CloudTypeShape::TopAltitudeKm, 0.0f, 16.0f, "%.2f",
+               nullptr, false, false, "The top this kind reaches at the CORE of a placement patch." },
+             { "EdgeTopFraction", "Edge Top Fraction", &Graphic::CloudTypeShape::EdgeTopFraction, 0.0f, 1.0f,
+               "%.2f", nullptr, false, false,
+               "How much of its full height it reaches where a patch has only just begun. Near 1 is a sheet "
+               "- the same everywhere. Near 0.1 is a cumulus field: a flat pad at the rim of a patch and a "
+               "tower in its middle." },
+             { "BaseRampFraction", "Base Ramp", &Graphic::CloudTypeShape::BaseRampFraction, 0.001f, 1.0f, "%.3f",
+               nullptr, false, false,
+               "How much of the cloud's own height the base takes to reach full density. Small is the flat "
+               "bottom of a cumulus; as long as the taper it becomes the symmetric section of a lenticular." },
+             { "AnvilStrength", "Anvil Strength", &Graphic::CloudTypeShape::AnvilStrength, 0.0f, 1.0f, "%.2f",
+               nullptr, true, false,
+               "A SECOND lobe of cloud, above the tower and spreading wider than it, with a GAP between the "
+               "two. Zero means this kind has none. The profile above cannot express it and is not meant to: "
+               "one curve is one connected body, and what makes a cumulonimbus recognisable is the gap." },
+             { "AnvilAltitudeKm", "Anvil Altitude (km)", &Graphic::CloudTypeShape::AnvilAltitudeKm, 0.0f, 16.0f,
+               "%.2f", nullptr, false, true, nullptr },
+             { "AnvilThicknessKm", "Anvil Thickness (km)", &Graphic::CloudTypeShape::AnvilThicknessKm, 0.0f, 5.0f,
+               "%.2f", nullptr, false, true, nullptr },
+             { "DetailCharacter", "Detail Character", &Graphic::CloudTypeShape::DetailCharacter, 0.0f, 1.0f,
+               "%.2f", "Matter and edge", false, false,
+               "0 is wispy erosion, 1 is billowy. This is the type's EDGE, not its silhouette: a cirrus is 0 "
+               "and a stratocumulus is nearly 1." },
+             { "DetailFactor", "Detail Factor", &Graphic::CloudTypeShape::DetailFactor, 0.0f, 8.0f, "%.2f",
+               nullptr, false, false, nullptr },
+             { "DensityFactor", "Density Factor", &Graphic::CloudTypeShape::DensityFactor, 0.0f, 8.0f, "%.2f",
+               nullptr, false, false, nullptr },
+             { "ExtinctionFactor", "Extinction Factor", &Graphic::CloudTypeShape::ExtinctionFactor, 0.0f, 8.0f,
+               "%.2f", nullptr, false, false,
+               "The three factors MULTIPLY the layer's own Detail Strength, Density Scale and Extinction "
+               "Scale rather than replacing them, so 1 means 'this kind as it is' and the layer's sliders "
+               "keep meaning what they meant." },
+             { "PlacementScale", "Placement Scale", &Graphic::CloudTypeShape::PlacementScale, 0.05f, 8.0f, "%.2f",
+               "Where it sits in the sky", false, false,
+               "How big this kind's patches are, as a MULTIPLE of the layer's Weather Tile Size. Below 1 "
+               "gives many small cells - a stratocumulus deck of one-kilometre lumps; above 1 gives few "
+               "large ones - a storm cell, or a sheet that never ends. Each kind of cloud in the layer has "
+               "its own, which is why a low deck and a tall tower can be different sizes in the same sky." },
+             { "PlacementAnisotropy", "Placement Anisotropy", &Graphic::CloudTypeShape::PlacementAnisotropy, 1.0f,
+               8.0f, "%.2f", nullptr, false, false,
+               "How much longer this kind's patches are ALONG THE WIND than across it. 1 is round; above 1 "
+               "they are drawn out downwind into bands, which is what makes fibrous cirrus read as cirrus." },
+        };
+
         // The document's VISIBLE title: the subject's file name. Computed before the base class is
         // constructed — ISubjectDocument bakes the title in its own constructor and holds it for the
         // window's life — so it is a free function rather than a member.
@@ -135,6 +220,18 @@ namespace Desert::Editor
         if ( !asset )
             asset = m_Assets->CreateAsset<Assets::CloudTypeAsset>( Assets::AssetPriority::Medium, path );
 
+        // REGISTERED IS NOT LOADED. An asset the manager knows about but has not read yet answers false to
+        // IsReadyForUse, and this window used to give up on it — so a type opened in the first seconds of a
+        // session, before the preloader reached it, came up showing the BUILT-IN DEFAULT under the file's
+        // own name, and a Save from there would have written the default over the artist's type.
+        //
+        // Found by GetDiskState answering "untracked" for a document whose file is plainly there, and it
+        // was the THIRD of three panels with the same hole (CloudNoiseVolumePanel and CloudLayoutPanel
+        // carry the same fix and the same note). One defect written three times, which is what happens
+        // when three windows each resolve their own subject.
+        if ( asset && !asset->IsReadyForUse() )
+            asset->Load();
+
         if ( !asset || !asset->IsReadyForUse() )
         {
             m_Status        = "'" + path.string() + "' could not be opened - the log says why.";
@@ -143,6 +240,11 @@ namespace Desert::Editor
         }
 
         m_Data       = asset->GetData();
+        // WHAT THE FILE HOLDS, kept so GetDiskState has something to be clean against. Taken here rather
+        // than derived later: after this line the buffer starts being edited, and a snapshot taken at the
+        // first edit would already be one edit late.
+        m_OnDisk     = m_Data;
+        m_Tracked    = true;
         m_SourcePath = path;
         m_SourceName = path.filename().string();
         CopyInto( m_NameBuffer, sizeof( m_NameBuffer ), m_Data.DisplayName.value_or( "" ) );
@@ -175,75 +277,30 @@ namespace Desert::Editor
     {
         Utils::ImGuiUtilities::SectionHeader( "Shape" );
 
-        Graphic::CloudTypeShape& s = m_Data.Shape;
+        Graphic::CloudTypeShape& shape = m_Data.Shape;
 
-        ImGui::SliderFloat( "Base Altitude (km)", &s.BaseAltitudeKm, 0.0f, 14.0f, "%.2f" );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Where this kind of cloud's base sits - its lifting condensation level. "
-                               "ABSOLUTE, not a fraction of a layer: the shell the march intersects is "
-                               "computed from this and the top, so moving it moves the clouds." );
+        // DRAWN FROM kShapeFields, not from thirteen hand-written slider calls. The captions, the clamps
+        // and the tooltips that used to live here are IN the table now, which is what makes the control
+        // channel's census of this document the same list a person sees rather than a second one beside it.
+        for ( const ShapeField& field : kShapeFields )
+        {
+            if ( field.SectionBefore )
+                Utils::ImGuiUtilities::SectionHeader( field.SectionBefore );
 
-        ImGui::SliderFloat( "Top Altitude (km)", &s.TopAltitudeKm, 0.0f, 16.0f, "%.2f" );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "The top this kind reaches at the CORE of a placement patch." );
+            // The one control on this panel that is a CANVAS rather than a number, drawn where the table
+            // says it belongs. Its own method for the reason it always had one: it owns a hit region, a
+            // drag that runs across several samples and a set of presets.
+            if ( field.ProfileEditorBefore )
+                DrawProfileEditor();
 
-        ImGui::SliderFloat( "Edge Top Fraction", &s.EdgeTopFraction, 0.0f, 1.0f, "%.2f" );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "How much of its full height it reaches where a patch has only just begun. "
-                               "Near 1 is a sheet - the same everywhere. Near 0.1 is a cumulus field: a "
-                               "flat pad at the rim of a patch and a tower in its middle." );
+            const bool gated = field.GatedByAnvil && shape.AnvilStrength <= 0.0f;
+            ImGui::BeginDisabled( gated );
+            ImGui::SliderFloat( field.Label, &( shape.*field.Member ), field.Min, field.Max, field.Format );
+            ImGui::EndDisabled();
 
-        ImGui::SliderFloat( "Base Ramp", &s.BaseRampFraction, 0.001f, 1.0f, "%.3f" );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "How much of the cloud's own height the base takes to reach full density. "
-                               "Small is the flat bottom of a cumulus; as long as the taper it becomes the "
-                               "symmetric section of a lenticular." );
-
-        DrawProfileEditor();
-
-        ImGui::SliderFloat( "Anvil Strength", &s.AnvilStrength, 0.0f, 1.0f, "%.2f" );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "A SECOND lobe of cloud, above the tower and spreading wider than it, with a "
-                               "GAP between the two. Zero means this kind has none. The profile above "
-                               "cannot express it and is not meant to: one curve is one connected body, and "
-                               "what makes a cumulonimbus recognisable is the gap." );
-
-        ImGui::BeginDisabled( s.AnvilStrength <= 0.0f );
-        ImGui::SliderFloat( "Anvil Altitude (km)", &s.AnvilAltitudeKm, 0.0f, 16.0f, "%.2f" );
-        ImGui::SliderFloat( "Anvil Thickness (km)", &s.AnvilThicknessKm, 0.0f, 5.0f, "%.2f" );
-        ImGui::EndDisabled();
-
-        Utils::ImGuiUtilities::SectionHeader( "Matter and edge" );
-
-        ImGui::SliderFloat( "Detail Character", &s.DetailCharacter, 0.0f, 1.0f, "%.2f" );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "0 is wispy erosion, 1 is billowy. This is the type's EDGE, not its "
-                               "silhouette: a cirrus is 0 and a stratocumulus is nearly 1." );
-
-        ImGui::SliderFloat( "Detail Factor", &s.DetailFactor, 0.0f, 8.0f, "%.2f" );
-        ImGui::SliderFloat( "Density Factor", &s.DensityFactor, 0.0f, 8.0f, "%.2f" );
-        ImGui::SliderFloat( "Extinction Factor", &s.ExtinctionFactor, 0.0f, 8.0f, "%.2f" );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "The three factors MULTIPLY the layer's own Detail Strength, Density Scale "
-                               "and Extinction Scale rather than replacing them, so 1 means \"this kind as "
-                               "it is\" and the layer's sliders keep meaning what they meant." );
-
-        Utils::ImGuiUtilities::SectionHeader( "Where it sits in the sky" );
-
-        ImGui::SliderFloat( "Placement Scale", &s.PlacementScale, 0.05f, 8.0f, "%.2f" );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "How big this kind's patches are, as a MULTIPLE of the layer's Weather Tile "
-                               "Size. Below 1 gives many small cells - a stratocumulus deck of one-kilometre "
-                               "lumps; above 1 gives few large ones - a storm cell, or a sheet that never "
-                               "ends. Each kind of cloud in the layer has its own, which is why a low deck "
-                               "and a tall tower can be different sizes in the same sky." );
-
-        ImGui::SliderFloat( "Placement Anisotropy", &s.PlacementAnisotropy, 0.1f, 16.0f, "%.2f" );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "How much longer the patches are along the wind than across it. 1 is round. "
-                               "Above 1 combs them out downwind, which is what makes cirrus fibrous instead "
-                               "of blotchy; BELOW 1 stretches them ACROSS the wind, which is what a wave "
-                               "cloud is - a lenticular's crest lies perpendicular to the flow." );
+            if ( field.Tooltip && ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "%s", field.Tooltip );
+        }
     }
 
     void CloudTypePanel::DrawProfileEditor()
@@ -564,21 +621,29 @@ namespace Desert::Editor
             return;
         }
 
-        // A Save As to a DIFFERENT file makes a new asset, and the new asset gets its own window rather than
-        // stealing this one. Compared before the write, because after it the file exists and the two paths
-        // would be indistinguishable by anything on disk.
-        const bool isCopy = target != m_SourcePath;
+        // A Save As to a DIFFERENT file makes a new asset, and the new asset gets its own window rather
+        // than stealing this one. Compared before the write, because after it the file exists and the two
+        // paths would be indistinguishable by anything on disk.
+        (void)WriteTo( target, /*isCopy=*/target != m_SourcePath );
+    }
 
+    bool CloudTypePanel::WriteTo( const Common::Filepath& target, const bool isCopy )
+    {
+        // LIFTED OUT OF THE BUTTON so that SaveDocument runs it too. It is the whole sequence and not just
+        // the write: the file, the re-registration that makes a layer already pointing at this type show
+        // the new numbers this frame, and the re-read that puts the file's own values back in the buffer.
+        // Two copies of that sequence is how one of them comes to lack the registration, and the symptom
+        // would be an edit that only appears after a restart.
         const auto written = Assets::CloudTypeAsset::Save( target, m_Data );
         if ( !written )
         {
             m_Status        = "Save failed: " + written.GetError();
             m_StatusIsError = true;
-            return;
+            return false;
         }
 
-        // NOT m_SourcePath = target. On a Save As that is a DIFFERENT file, repointing is exactly the defect
-        // the immutable subject exists to prevent — see the note above the buttons.
+        // NOT m_SourcePath = target. On a Save As that is a DIFFERENT file, repointing is exactly the
+        // defect the immutable subject exists to prevent — see the note above the buttons.
         if ( !isCopy )
             m_SourceName = target.filename().string();
 
@@ -602,7 +667,15 @@ namespace Desert::Editor
                 {
                     m_Status        = "Saved, but the type could not be registered: " + registered.GetError();
                     m_StatusIsError = true;
-                    return;
+                    // THE FILE IS ON DISK, so the document IS clean — a registration failure is about the
+                    // running sky, not about what was written, and reporting the save as failed would make
+                    // "Save All" try again for ever.
+                    if ( !isCopy )
+                    {
+                        m_OnDisk  = m_Data;
+                        m_Tracked = true;
+                    }
+                    return true;
                 }
 
                 // Only for the file this document actually edits. Re-reading a COPY's data into this
@@ -610,6 +683,15 @@ namespace Desert::Editor
                 if ( !isCopy )
                     m_Data = asset->GetData(); // re-read from the file, so the buffer is what is on disk
             }
+        }
+
+        if ( !isCopy )
+        {
+            // The document is now CLEAN, and it is clean against what the file holds rather than against
+            // what was submitted: the re-read above may have normalised a value, and a snapshot of the
+            // pre-write buffer would leave the tab dirty for ever over a difference nobody made.
+            m_OnDisk  = m_Data;
+            m_Tracked = true;
         }
 
         if ( isCopy )
@@ -620,11 +702,12 @@ namespace Desert::Editor
             RequestCloudDocument( m_Assets, target.string() );
             m_Status        = "Saved a copy to " + target.string() + " - it has opened in its own window.";
             m_StatusIsError = false;
-            return;
+            return true;
         }
 
         m_Status        = "Saved to " + target.string();
         m_StatusIsError = false;
+        return true;
     }
 
     bool CloudTypePanel::IsSubjectAlive() const
@@ -634,5 +717,140 @@ namespace Desert::Editor
         // that failed to reload as its own class would read as deleted and the window would close on a
         // load error instead of reporting it.
         return m_Assets && m_Assets->FindMetadataByHandle( Assets::AssetHandle( Subject().Owner ) ) != nullptr;
+    }
+
+    // -- WHAT AN EDIT HAS REACHED, AND HOW IT LEAVES -----------------------------------------------
+
+    ISubjectDocument::DiskState CloudTypePanel::GetDiskState() const
+    {
+        // UNTRACKED IS NOT CLEAN. A window that fell back to the built-in default has no file to be clean
+        // against, and drawing "no dot" for it would assert the file is up to date on no evidence.
+        if ( !m_Tracked )
+            return DiskState::Untracked;
+
+        // Compared against a COPY of what the file held, with a DEFAULTED operator== - so a field added to
+        // CloudTypeData tomorrow is compared tomorrow. A dirty FLAG maintained by each edit path is the
+        // thing that falls behind, and the cost of it falling behind is a person's unsaved work thrown
+        // away by a close that asked nothing.
+        return m_Data == m_OnDisk ? DiskState::Clean : DiskState::Dirty;
+    }
+
+    bool CloudTypePanel::SaveDocument()
+    {
+        // A document with no file of its own reports false rather than inventing a path. Save As is a
+        // gesture with a dialog behind it and is not what "Save the focused document" means.
+        if ( m_SourcePath.empty() )
+            return false;
+
+        const auto valid = Assets::ValidateCloudTypeShape( m_Data.Shape );
+        if ( !valid )
+        {
+            // REFUSED OUT LOUD, with the number that is wrong. A save that quietly did nothing would tell
+            // "Save All" that this document is on disk when it is not.
+            LOG_ERROR( "[Clouds] '{}' cannot be saved: {}", m_SourcePath.string(), valid.GetError() );
+            m_Status        = "Not saveable: " + valid.GetError();
+            m_StatusIsError = true;
+            return false;
+        }
+
+        // THE SAME CALL THE BUTTON MAKES. Not a second route to the same bytes: the write, the
+        // re-registration that makes the sky show the new numbers, and the re-read that puts the file's
+        // own values back in the buffer are one sequence, and a copy of it here would drift the day a step
+        // is added to either.
+        return WriteTo( m_SourcePath, /*isCopy=*/false );
+    }
+
+    std::vector<EditableProperty> CloudTypePanel::EditableProperties() const
+    {
+        std::vector<EditableProperty> properties;
+        properties.reserve( std::size( kShapeFields ) );
+
+        // DERIVED FROM THE SAME TABLE THE SLIDERS READ. The census a client checks the window against and
+        // the rows a person sees are one list, in one order, with one set of clamps.
+        //
+        // THE GROUP IS THE SECTION A ROW IS UNDER, not the one it happens to CARRY. SectionBefore marks
+        // where a header is drawn, so only the first row of a section holds the name — and reporting that
+        // literally would have put "Detail Factor" back under Shape while the window draws it under
+        // "Matter and edge". A client checks the census against the window row by row (EditableProperty::
+        // Group says so at its own declaration), so the two must be the same reading of the same table.
+        const char* section = "Shape";
+        for ( const ShapeField& field : kShapeFields )
+        {
+            if ( field.SectionBefore )
+                section = field.SectionBefore;
+
+            EditableProperty property;
+            property.Name       = field.Name;
+            property.Label      = field.Label;
+            property.Group      = section;
+            property.Type       = "float";
+            property.Components = 1;
+            property.Min        = field.Min;
+            property.Max        = field.Max;
+            property.Value[0]   = m_Data.Shape.*field.Member;
+            properties.push_back( std::move( property ) );
+        }
+
+        // THE CURVE IS REPORTED AND REFUSED, not omitted. A property missing from a census reads as a
+        // property the format does not have, and those are two different problems (EditableProperty::
+        // Settable). Sixteen samples do not fit in a channel that carries four floats, and the honest
+        // answer is to say so where a client will read it.
+        EditableProperty profile;
+        profile.Name       = "Profile";
+        profile.Label      = "Vertical profile";
+        profile.Group      = "Shape";
+        profile.Type       = "curve";
+        profile.Components = 1;
+        profile.Settable   = false;
+        profile.NotSettableReason =
+             "'Profile' is a curve of " + std::to_string( Graphic::kCloudProfileSamples ) +
+             " samples - the cloud's own silhouette, dragged in the panel. This channel carries at most "
+             "four numbers, so it cannot express one.";
+        properties.push_back( std::move( profile ) );
+
+        return properties;
+    }
+
+    Common::BoolResultStr CloudTypePanel::SetEditableProperty( const std::string&        name,
+                                                               const std::vector<float>& value )
+    {
+        for ( const ShapeField& field : kShapeFields )
+        {
+            if ( name != field.Name )
+                continue;
+
+            // THE COUNT IS PART OF THE PROPERTY'S IDENTITY. Three numbers for a float is a caller who
+            // meant a different property, and quietly taking the first would hand them a write they did
+            // not ask for.
+            if ( value.size() != 1u )
+            {
+                return Common::MakeFormattedError<bool>(
+                     "'{}' is a single number and {} were sent. Ask 'properties' for what this document "
+                     "offers and how many components each row takes.",
+                     name, value.size() );
+            }
+
+            // REFUSED RATHER THAN CLAMPED, on the panel's OWN range: a value silently moved is a value the
+            // caller reads back as its own and then cannot explain.
+            if ( value[0] < field.Min || value[0] > field.Max )
+            {
+                return Common::MakeFormattedError<bool>( "'{}' takes {} to {}; {} is outside it.", name, field.Min,
+                                                         field.Max, value[0] );
+            }
+
+            m_Data.Shape.*field.Member = value[0];
+            return BOOLSUCCESS;
+        }
+
+        if ( name == "Profile" )
+        {
+            return Common::MakeFormattedError<bool>(
+                 "'Profile' is a curve of {} samples and this channel carries at most four numbers. It is "
+                 "dragged in the panel's own profile editor.",
+                 Graphic::kCloudProfileSamples );
+        }
+
+        return Common::MakeFormattedError<bool>(
+             "this cloud type has no property called '{}'. Ask 'properties' for the ones it offers.", name );
     }
 } // namespace Desert::Editor

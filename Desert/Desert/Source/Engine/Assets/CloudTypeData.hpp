@@ -98,6 +98,10 @@ namespace Desert::Assets
 
         /// The numbers and the curve. Nested rather than flattened so that the file's schema and the
         /// struct the generator consumes cannot drift apart: there is no mapping between them to get wrong.
+
+        /// Same authored state? DEFAULTED so the compiler generates it from every member — see the long
+        /// note at Graphic::CloudVerticalProfile::operator==. Read by the cloud documents' GetDiskState.
+        [[nodiscard]] bool      operator==( const CloudTypeData& ) const = default;
         Graphic::CloudTypeShape Shape;
     };
 

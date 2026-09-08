@@ -83,6 +83,10 @@ namespace Desert::Assets
         float WispyPeriodLowFrequency   = 2.0f;
         float WispyPeriodHighFrequency  = 4.0f;
         float BillowPeriodLowFrequency  = 3.0f;
+
+        /// Same authored state? DEFAULTED so the compiler generates it from every member — see the long
+        /// note at Graphic::CloudVerticalProfile::operator==. Read by the cloud documents' GetDiskState.
+        [[nodiscard]] bool operator==( const CloudNoiseVolumeParams& ) const = default;
         float BillowPeriodHighFrequency = 6.0f;
     };
 

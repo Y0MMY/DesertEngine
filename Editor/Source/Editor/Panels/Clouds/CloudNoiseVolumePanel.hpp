@@ -86,10 +86,34 @@ namespace Desert::Editor
             return false;
         }
 
+        // ── THE DOCUMENT SURFACE ───────────────────────────────────────────────────────────────────────
+        //
+        // See the note beside m_VolumeRevision for what "dirty" means for a `.dcnv`.
+        [[nodiscard]] DiskState GetDiskState() const override;
+        bool                    SaveDocument() override;
+
+        /// The recipe's own numbers. Their group says what a client has to know and the type cannot: they
+        /// take effect at the next BAKE, not when they are set — a `.dcnv` holds voxels, and a recipe
+        /// nobody has baked has changed nothing about the sky or about the file.
+        [[nodiscard]] std::vector<EditableProperty> EditableProperties() const override;
+        [[nodiscard]] Common::BoolResultStr         SetEditableProperty( const std::string&        name,
+                                                                         const std::vector<float>& value ) override;
+
     private:
         // Reads the subject out of the AssetManager into the editing buffer. Called once, from the
         // constructor: the subject cannot change, so neither can the answer.
         void LoadSubject( Assets::AssetManager* assets );
+
+        // Writes @p target and re-registers the asset. The body of the Save button, lifted out so that
+        // SaveDocument (the palette, "Save All", the control channel) runs the SAME sequence rather than a
+        // second route to the same bytes.
+        bool WriteTo( const std::filesystem::path& target, bool isCopy );
+
+        // THE ONE PLACE m_Volume IS REPLACED. Three callers -- the load, a finished bake and a sheet
+        // import -- and it exists so that "the voxels changed" is counted rather than remembered: an 8 MiB
+        // buffer cannot be compared against a snapshot every frame, and a dirty flag written at three
+        // sites is a flag that will one day be written at two.
+        void AdoptVolume( Assets::CloudNoiseVolumeData&& volume );
 
         void DrawGenerateSection();
         void DrawPreviewSection();
@@ -122,6 +146,24 @@ namespace Desert::Editor
         std::string                    m_SourceName; // what is in m_Volume: a file name, or "(baked)"
         std::string                    m_Status;     // the last thing that happened, shown to the artist
         bool                           m_StatusIsError = false;
+
+        // ── WHAT AN EDIT HAS REACHED ───────────────────────────────────────────────────────────────────
+        //
+        // What Save writes is m_Volume -- the VOXELS -- and not the recipe beside them, so the document is
+        // dirty when the voxels have been re-baked or imported since the file was last read or written.
+        // AN EDITED RECIPE THAT HAS NOT BEEN BAKED IS NOT DIRTY, and that is a fact about this format
+        // rather than an oversight: nothing of it has reached the file, and a dot claiming otherwise would
+        // send an artist to Save when what they owe is a Bake. The panel says which state it is in.
+        //
+        // COUNTED, NOT COMPARED. The volume is 8 MiB at the shipped resolution; a snapshot to diff against
+        // would double the panel's footprint for a question asked once a frame. AdoptVolume is the one
+        // place the buffer changes, so a counter beside it cannot fall behind the way a flag at three call
+        // sites would.
+        uint32_t m_VolumeRevision = 0u;
+        uint32_t m_SavedRevision  = 0u;
+        // UNTRACKED IS NOT CLEAN: false until this document has read its subject off disk. A window whose
+        // asset would not load has no file to be clean against.
+        bool m_Tracked = false;
 
         // WHERE SAVE WRITES: the subject's own file, resolved once at construction. Save As may write
         // ELSEWHERE, but it never assigns to this — a copy becomes its OWN document rather than repointing

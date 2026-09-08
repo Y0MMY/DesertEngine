@@ -469,6 +469,9 @@ namespace Desert::Editor
         ComponentEditContext ctx;
         ctx.AssetManager = m_Assets;
         ctx.UIHelper     = m_UI.get();
+        // The cloud entry offers "Open in Clouds" and "In Clouds" buttons for Details' benefit. From here
+        // they would take the user to the window they are standing in — see ComponentEditContext.
+        ctx.AllowPanelJumps = false;
         entry->Draw( entity, m_Scene.get(), ctx );
     }
 

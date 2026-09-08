@@ -154,6 +154,31 @@ namespace Desert::Editor
             return false;
         }
 
+        // ── WHAT AN EDIT HAS REACHED ───────────────────────────────────────────────────────────────────
+        //
+        // The authored state of a `.dclayout` is the CANVAS — the pattern's four planes and the mask's
+        // one. m_Layout is derived from it (RebuildLayout) and is what Bake writes, so the question
+        // "is there an unsaved edit" is a question about the canvas.
+        //
+        // COMPARED AGAINST A COPY of what the file held, with a DEFAULTED operator== on
+        // Assets::CloudLayoutCanvas — a memcmp of about 1.3 MiB at the shipped 512 side, which is cheap
+        // beside the picture this panel draws every frame. A dirty FLAG raised at each of the seven places
+        // that can move a texel is the thing that falls behind, and the cost of it falling behind is a
+        // painting thrown away by a close that asked nothing.
+        [[nodiscard]] DiskState GetDiskState() const override;
+
+        // Bakes the canvas into a layout and writes it to the SUBJECT'S OWN file — the same call the Bake
+        // button makes, so the write, the re-registration and the status line cannot drift apart.
+        bool SaveDocument() override;
+
+        /// The layout's own numbers: which channel of the picture feeds which cloud species, and which
+        /// channel of the imported mask picture is read as the mask. The PICTURES themselves are reported
+        /// and refused rather than omitted — a property missing from a census reads as a property the
+        /// format does not have.
+        [[nodiscard]] std::vector<EditableProperty> EditableProperties() const override;
+        [[nodiscard]] Common::BoolResultStr         SetEditableProperty( const std::string&        name,
+                                                                         const std::vector<float>& value ) override;
+
         ImVec2 GetDefaultSize() const override
         {
             // TALL, and the number came from looking at it. The panel carries two square panes and a
@@ -302,6 +327,17 @@ namespace Desert::Editor
         /// leave the window's title, its ImGui id and its open-or-focus key all naming the file it no
         /// longer edits. Making a NEW painting is the asset browser's job ("New Cloud Layout").
         std::filesystem::path m_SubjectPath;
+
+        // WHAT THE FILE HOLDS, as of the last open or the last bake to this document's own file. The other
+        // side of the comparison GetDiskState makes. UNTRACKED IS NOT CLEAN: m_Tracked is false until this
+        // document has actually recovered a canvas from its subject, because a window whose painting would
+        // not open has no file to be clean against.
+        Assets::CloudLayoutCanvas m_OnDiskCanvas;
+        bool                      m_Tracked = false;
+
+        // Bakes the canvas and writes @p target. The body of the Bake button, lifted out so SaveDocument
+        // runs the same sequence rather than a second route to the same bytes.
+        bool WriteTo( const std::filesystem::path& target, bool isCopy );
 
         // ---- source -----------------------------------------------------------------------------------
 

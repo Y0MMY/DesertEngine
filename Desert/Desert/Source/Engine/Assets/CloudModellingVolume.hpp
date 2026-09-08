@@ -189,6 +189,10 @@ namespace Desert::Assets
 
         /// 0..1, how much matter this lump carries relative to the instance's own Density Factor. A wispy
         /// tail is thinner than the core it grew from, and this is where that is said.
+
+        /// Same authored state? DEFAULTED so the compiler generates it from every member — see the long
+        /// note at Graphic::CloudVerticalProfile::operator==. Read by the cloud documents' GetDiskState.
+        [[nodiscard]] bool operator==( const CloudModellingBlob& ) const = default;
         float DensityScale = 1.0f;
     };
 
@@ -235,6 +239,10 @@ namespace Desert::Assets
         /// to be stored in a sequence — nothing downstream may depend on the order, and
         /// Desert/Tests/Engine/CloudAuthored asserts a shuffled recipe bakes byte for byte the same
         /// volume.
+
+        /// Same authored state? DEFAULTED so the compiler generates it from every member — see the long
+        /// note at Graphic::CloudVerticalProfile::operator==. Read by the cloud documents' GetDiskState.
+        [[nodiscard]] bool              operator==( const CloudModellingVolumeRecipe& ) const = default;
         std::vector<CloudModellingBlob> Blobs;
     };
 

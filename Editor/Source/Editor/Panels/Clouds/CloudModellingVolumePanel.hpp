@@ -110,6 +110,31 @@ namespace Desert::Editor
             return false;
         }
 
+        // ── WHAT AN EDIT HAS REACHED ───────────────────────────────────────────────────────────────────
+        //
+        // The authored state of a `.dcmv` is its RECIPE — "THE ONE PIECE OF STATE", as m_Recipe's own note
+        // puts it — and the voxels in the file are a pure function of it. So the document is dirty exactly
+        // when the recipe differs from the one the file's header carries, compared against a copy with a
+        // DEFAULTED operator== so that a field added to a lump tomorrow is compared tomorrow.
+        [[nodiscard]] DiskState GetDiskState() const override;
+
+        // ── SAVING A `.dcmv` IS A BAKE, AND THIS ONE BLOCKS ────────────────────────────────────────────
+        //
+        // The Bake & Save button runs the bake on the job pool so the artist can keep typing. A
+        // programmatic save cannot: SaveDocument's contract is that its answer says whether the FILE WAS
+        // WRITTEN, and a call that started a job and returned would leave a caller unable to tell "refused"
+        // from "in progress" — the two-facts-one-answer shape §1.4 is about. So this one runs the same
+        // generator synchronously and answers about the file. It costs about 200 ms for the shipped
+        // eight-lump body in a debug build (Г10's measurement), which is what a save costs.
+        bool SaveDocument() override;
+
+        /// The recipe's own numbers, and each lump's, addressed as `Lump0.CentreKm` and so on. Derived
+        /// from the recipe rather than listed, so a body with three lumps offers three lumps' worth of
+        /// rows and a body with nine offers nine.
+        [[nodiscard]] std::vector<EditableProperty> EditableProperties() const override;
+        [[nodiscard]] Common::BoolResultStr         SetEditableProperty( const std::string&        name,
+                                                                         const std::vector<float>& value ) override;
+
     private:
         // Reads the subject's recipe out of its `.dcmv` header into the editing buffer. Called once, from
         // the constructor: the subject cannot change, so neither can the answer.
@@ -151,6 +176,13 @@ namespace Desert::Editor
 
         // THE ONE PIECE OF STATE. Everything else in this panel is derived from it or is about showing it.
         Assets::CloudModellingVolumeRecipe m_Recipe;
+
+        // WHAT THE FILE'S HEADER HOLDS, as of the last open or the last bake to this document's own file.
+        // The other side of the comparison GetDiskState makes. UNTRACKED IS NOT CLEAN: m_Tracked is false
+        // until this document has actually decoded its subject, because a window showing the shipped
+        // example has no file to be clean against.
+        Assets::CloudModellingVolumeRecipe m_OnDiskRecipe;
+        bool                               m_Tracked = false;
 
         int         m_Selected = 0; // which lump the property editor is showing, -1 for none
         std::string m_SourceName;   // what m_Recipe came from: a file name, or "(the shipped example)"

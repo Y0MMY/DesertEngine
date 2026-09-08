@@ -58,6 +58,18 @@ namespace Desert::Editor
         // A hand-written widget cannot filter itself — the panel decides whether to draw it at all.
         const char* FieldFilter = nullptr;
 
+        // MAY THIS WIDGET OFFER A JUMP TO ANOTHER PANEL?
+        //
+        // A component's editor is no longer drawn only by Details. The Clouds window draws the cloud
+        // layer's own entry as its first stage — deliberately the same code, so the two windows cannot come
+        // to disagree about what a layer has in it — and the cloud entry offers a button that opens the
+        // Clouds window. Inside the Clouds window that button takes the user where they already are, which
+        // is a control that does nothing (§1.3).
+        //
+        // TRUE BY DEFAULT, because Details is the host every widget was written for and a new host that
+        // forgets to say is one that shows a jump rather than one that hides a control.
+        bool AllowPanelJumps = true;
+
         Assets::AssetManager* AssetMgr() const
         {
             return AssetManager.lock().get();

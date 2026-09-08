@@ -129,6 +129,10 @@ namespace Desert::Editor
         }
 
         m_Recipe     = decoded.GetValue().Recipe;
+        // WHAT THE FILE HOLDS, kept so GetDiskState has something to be clean against. Taken here rather
+        // than derived later: after this line the recipe starts being sculpted.
+        m_OnDiskRecipe = m_Recipe;
+        m_Tracked      = true;
         m_Selected   = m_Recipe.Blobs.empty() ? -1 : 0;
         m_SourceName = m_SubjectPath.filename().string();
         m_SliceIndex = static_cast<int>( Assets::CloudModellingAxisExtent( m_Axis ) / 2u );
@@ -227,7 +231,15 @@ namespace Desert::Editor
         const bool isCopy = m_BakeTarget != m_SubjectPath;
 
         if ( !isCopy )
+        {
             m_SourceName = m_BakeTarget.filename().string();
+            // The recipe the bake was started from is what the file's header now carries. m_BakingRecipe
+            // and NOT m_Recipe: the artist may have moved a lump while the bake ran, and claiming the
+            // document is clean against an edit that is not in the file is the lie this snapshot exists to
+            // prevent.
+            m_OnDiskRecipe = m_BakingRecipe;
+            m_Tracked      = true;
+        }
         m_Status        = "Saved to " + m_BakeTarget.string();
         m_StatusIsError = false;
 
@@ -804,6 +816,296 @@ namespace Desert::Editor
 
         ImGui::SameLine();
         ImGui::TextDisabled( "Bodies live in %s", Common::Constants::Path::CLOUD_VOLUME_PATH.string().c_str() );
+    }
+
+    // -- WHAT AN EDIT HAS REACHED, AND HOW IT LEAVES -----------------------------------------------
+
+    ISubjectDocument::DiskState CloudModellingVolumePanel::GetDiskState() const
+    {
+        if ( !m_Tracked )
+            return DiskState::Untracked;
+        return m_Recipe == m_OnDiskRecipe ? DiskState::Clean : DiskState::Dirty;
+    }
+
+    bool CloudModellingVolumePanel::SaveDocument()
+    {
+        if ( m_SubjectPath.empty() )
+            return false;
+
+        // A BAKE ALREADY RUNNING IS NOT A REASON TO START A SECOND ONE, and it is not a save either. Said
+        // out loud: a caller that got `false` here and one that got it from a validation failure need to
+        // be able to tell the two apart, and the log line is where that difference lives.
+        if ( m_BakeRunning )
+        {
+            LOG_WARN( "[Clouds] '{}' is baking already; the save was not started. Ask again once it has "
+                      "finished.",
+                      m_SubjectPath.string() );
+            return false;
+        }
+
+        // Validated with the SAME function the panel's own button uses, so a recipe the button refuses is
+        // one this refuses, with the same words.
+        if ( const auto valid = Assets::ValidateCloudModellingRecipe( m_Recipe ); !valid )
+        {
+            LOG_ERROR( "[Clouds] '{}' cannot be saved: {}", m_SubjectPath.string(), valid.GetError() );
+            m_Status        = "Not saveable: " + valid.GetError();
+            m_StatusIsError = true;
+            return false;
+        }
+
+        // SYNCHRONOUS, and the header says why. The generator is the same one the pooled bake calls, so a
+        // volume written from here is byte for byte the volume the button writes.
+        auto voxels = Assets::GenerateCloudModellingVolume( m_Recipe );
+        if ( !voxels )
+        {
+            LOG_ERROR( "[Clouds] '{}' could not be baked: {}", m_SubjectPath.string(), voxels.GetError() );
+            m_Status        = "Bake failed: " + voxels.GetError();
+            m_StatusIsError = true;
+            return false;
+        }
+
+        // StoreBakedVolume writes to m_BakeTarget and reads m_BakingRecipe, exactly as it does for the
+        // pooled bake — set here so that the one function that knows how to write and register a volume is
+        // the one that does it.
+        m_BakeTarget   = m_SubjectPath;
+        m_BakingRecipe = m_Recipe;
+        StoreBakedVolume( voxels.ExtractValue() );
+
+        return !m_StatusIsError;
+    }
+
+    // -- THE NUMBERS A CLIENT CAN DRAG ---------------------------------------------------------------
+    //
+    // DERIVED FROM THE RECIPE, never listed: the body-level numbers, then one group per lump, addressed
+    // `Lump0.CentreKm` and so on. A body with three lumps offers three groups and one with nine offers
+    // nine, so the census cannot fall behind a sculpt.
+    //
+    // The index is in the NAME rather than taken from the panel's selection, because a property whose
+    // meaning depends on which row is highlighted is a property a client cannot address twice and get the
+    // same thing.
+
+    namespace
+    {
+        struct BodyField
+        {
+            const char* Name;
+            const char* Label;
+            float Assets::CloudModellingVolumeRecipe::*Member;
+            float                                      Min;
+            float                                      Max;
+        };
+
+        constexpr BodyField kBodyFields[] = {
+             { "BlendRadiusKm", "Blend Radius (km)", &Assets::CloudModellingVolumeRecipe::BlendRadiusKm, 0.001f,
+               1.0f },
+             { "ProfileDepthKm", "Profile Depth (km)", &Assets::CloudModellingVolumeRecipe::ProfileDepthKm, 0.001f,
+               4.0f },
+             { "EnvelopeMarginKm", "Envelope Margin (km)", &Assets::CloudModellingVolumeRecipe::EnvelopeMarginKm,
+               0.0f, 4.0f },
+        };
+
+        struct LumpField
+        {
+            const char* Suffix;
+            const char* Label;
+            float Assets::CloudModellingBlob::*Member;
+            float                              Min;
+            float                              Max;
+        };
+
+        constexpr LumpField kLumpScalars[] = {
+             { ".Weight", "Weight", &Assets::CloudModellingBlob::Weight, 0.125f, 8.0f },
+             { ".DetailType", "Detail Type", &Assets::CloudModellingBlob::DetailType, 0.0f, 1.0f },
+             { ".DensityScale", "Density Scale", &Assets::CloudModellingBlob::DensityScale, 0.0f, 1.0f },
+        };
+
+        struct LumpVector
+        {
+            const char* Suffix;
+            const char* Label;
+            glm::vec3 Assets::CloudModellingBlob::*Member;
+            float                                  Min;
+            float                                  Max;
+        };
+
+        constexpr LumpVector kLumpVectors[] = {
+             { ".CentreKm", "Centre (km)", &Assets::CloudModellingBlob::CentreKm, -8.0f, 8.0f },
+             { ".RadiiKm", "Radii (km)", &Assets::CloudModellingBlob::RadiiKm, 0.001f, 8.0f },
+             { ".RotationDeg", "Rotation (deg)", &Assets::CloudModellingBlob::RotationDeg, -360.0f, 360.0f },
+        };
+    } // namespace
+
+    std::vector<EditableProperty> CloudModellingVolumePanel::EditableProperties() const
+    {
+        std::vector<EditableProperty> properties;
+
+        const auto scalar =
+             [&]( const char* name, const char* label, const char* group, float value, float min, float max )
+        {
+            EditableProperty property;
+            property.Name       = name;
+            property.Label      = label;
+            property.Group      = group;
+            property.Type       = "float";
+            property.Components = 1;
+            property.Min        = min;
+            property.Max        = max;
+            property.Value[0]   = value;
+            properties.push_back( std::move( property ) );
+        };
+
+        const auto vector3 = [&]( const std::string& name, const char* label, const std::string& group,
+                                  const glm::vec3& value, float min, float max )
+        {
+            EditableProperty property;
+            property.Name       = name;
+            property.Label      = label;
+            property.Group      = group;
+            property.Type       = "float3";
+            property.Components = 3;
+            property.Min        = min;
+            property.Max        = max;
+            property.Value[0]   = value.x;
+            property.Value[1]   = value.y;
+            property.Value[2]   = value.z;
+            properties.push_back( std::move( property ) );
+        };
+
+        vector3( "SizeKm", "Size (km)", "Body", m_Recipe.SizeKm, 0.05f, 32.0f );
+        for ( const BodyField& field : kBodyFields )
+            scalar( field.Name, field.Label, "Body", m_Recipe.*field.Member, field.Min, field.Max );
+
+        for ( std::size_t i = 0; i < m_Recipe.Blobs.size(); ++i )
+        {
+            const std::string prefix = "Lump" + std::to_string( i );
+            const std::string group  = "Lump " + std::to_string( i );
+            const auto&       blob   = m_Recipe.Blobs[i];
+
+            for ( const LumpVector& field : kLumpVectors )
+                vector3( prefix + field.Suffix, field.Label, group, blob.*field.Member, field.Min, field.Max );
+            for ( const LumpField& field : kLumpScalars )
+            {
+                EditableProperty property;
+                property.Name       = prefix + field.Suffix;
+                property.Label      = field.Label;
+                property.Group      = group;
+                property.Type       = "float";
+                property.Components = 1;
+                property.Min        = field.Min;
+                property.Max        = field.Max;
+                property.Value[0]   = blob.*field.Member;
+                properties.push_back( std::move( property ) );
+            }
+
+            // THE PRIMITIVE IS REPORTED AND REFUSED. It is a KIND and not a number — a sphere, a capsule
+            // and an ellipsoid constrain their radii differently (ConformRadiiToPrimitive), so writing one
+            // as an index would silently rewrite two other fields.
+            EditableProperty primitive;
+            primitive.Name       = prefix + ".Primitive";
+            primitive.Label      = "Primitive";
+            primitive.Group      = group;
+            primitive.Type       = "enum";
+            primitive.Components = 1;
+            primitive.Value[0]   = static_cast<float>( blob.Primitive );
+            primitive.Settable   = false;
+            primitive.NotSettableReason =
+                 "'" + primitive.Name +
+                 "' is which SOLID the lump is, and each of the three constrains its radii differently - a "
+                 "sphere's three agree, a capsule's cross-section is round. Setting it as a number would "
+                 "quietly rewrite the radii too; it is a dropdown in the panel.";
+            properties.push_back( std::move( primitive ) );
+        }
+
+        return properties;
+    }
+
+    Common::BoolResultStr CloudModellingVolumePanel::SetEditableProperty( const std::string&        name,
+                                                                          const std::vector<float>& value )
+    {
+        // The census is the authority on what exists and how many components each row takes; checking
+        // against it rather than against a second list here is what keeps the two from parting company.
+        const std::vector<EditableProperty> census = EditableProperties();
+        const EditableProperty*             row    = nullptr;
+        for ( const EditableProperty& property : census )
+            if ( property.Name == name )
+                row = &property;
+
+        if ( !row )
+        {
+            return Common::MakeFormattedError<bool>(
+                 "this sculpted body has no property called '{}'. Ask 'properties' for the ones it offers - "
+                 "a lump's rows are addressed 'Lump0.CentreKm' and so on.",
+                 name );
+        }
+        if ( !row->Settable )
+            return Common::MakeError<bool>( row->NotSettableReason );
+
+        if ( static_cast<int>( value.size() ) != row->Components )
+        {
+            return Common::MakeFormattedError<bool>( "'{}' takes {} number(s) and {} were sent.", name,
+                                                     row->Components, value.size() );
+        }
+        for ( const float component : value )
+        {
+            if ( ( row->Min && component < *row->Min ) || ( row->Max && component > *row->Max ) )
+            {
+                return Common::MakeFormattedError<bool>( "'{}' takes {} to {}; {} is outside it.", name,
+                                                         row->Min.value_or( 0.0f ), row->Max.value_or( 0.0f ),
+                                                         component );
+            }
+        }
+
+        // ── THE WRITE GOES THROUGH THE SAME REPAIR THE WIDGET DOES ────────────────────────────────────
+        //
+        // A lump's radii are constrained by its primitive, and the panel keeps every lump legal AS IT IS
+        // EDITED so that the validator's refusals are a guard against hand-edited files rather than
+        // something an artist meets by moving a slider. A channel that skipped that step could write a
+        // recipe the panel itself would never produce.
+        if ( name == "SizeKm" )
+        {
+            m_Recipe.SizeKm = glm::vec3( value[0], value[1], value[2] );
+            InvalidateSlice();
+            return BOOLSUCCESS;
+        }
+        for ( const BodyField& field : kBodyFields )
+        {
+            if ( name != field.Name )
+                continue;
+            m_Recipe.*field.Member = value[0];
+            InvalidateSlice();
+            return BOOLSUCCESS;
+        }
+
+        const std::size_t dot = name.find( '.' );
+        if ( dot == std::string::npos || name.rfind( "Lump", 0 ) != 0 )
+            return Common::MakeFormattedError<bool>( "'{}' is not a name this document writes.", name );
+
+        const std::size_t index = static_cast<std::size_t>( std::stoul( name.substr( 4, dot - 4 ) ) );
+        if ( index >= m_Recipe.Blobs.size() )
+            return Common::MakeFormattedError<bool>( "this body has no lump {}.", index );
+
+        Assets::CloudModellingBlob& blob   = m_Recipe.Blobs[index];
+        const std::string           suffix = name.substr( dot );
+
+        for ( const LumpVector& field : kLumpVectors )
+        {
+            if ( suffix != field.Suffix )
+                continue;
+            blob.*field.Member = glm::vec3( value[0], value[1], value[2] );
+            ConformRadiiToPrimitive( blob );
+            InvalidateSlice();
+            return BOOLSUCCESS;
+        }
+        for ( const LumpField& field : kLumpScalars )
+        {
+            if ( suffix != field.Suffix )
+                continue;
+            blob.*field.Member = value[0];
+            InvalidateSlice();
+            return BOOLSUCCESS;
+        }
+
+        return Common::MakeFormattedError<bool>( "'{}' is not a name this document writes.", name );
     }
 
     bool CloudModellingVolumePanel::IsSubjectAlive() const
