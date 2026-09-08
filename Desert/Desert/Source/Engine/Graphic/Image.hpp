@@ -66,7 +66,6 @@ namespace Desert::Graphic
         virtual Core::Formats::ImageFormat    GetImageFormat() const         = 0;
         virtual uint32_t                      GetMipmapLevels() const        = 0;
         virtual bool                          IsLoaded() const               = 0;
-        virtual void                          Use( uint32_t slot = 0 ) const = 0;
         virtual Core::Formats::ImagePixelData GetImagePixels()               = 0;
 
         virtual const Common::UUID GetHash() const final

@@ -30,12 +30,6 @@ namespace Desert::Graphic::API::Vulkan
                       const std::string& passName = {} );
         ~VulkanShader();
 
-        virtual void Use( BindUsage /*use*/ = BindUsage::Bind ) const override
-        {
-        }
-        virtual void RT_Use( BindUsage /*use*/ = BindUsage::Bind ) const override
-        {
-        }
         virtual Common::BoolResultStr Reload() override;
         virtual const std::string     GetName() const override
         {

@@ -178,9 +178,6 @@ namespace Desert::Graphic
             m_Accounting.RecordBytes( bytes );
         }
 
-        virtual void Use( BindUsage use = BindUsage::Bind ) const    = 0;
-        virtual void RT_Use( BindUsage use = BindUsage::Bind ) const = 0;
-
         [[nodiscard]] virtual unsigned int GetSize() const = 0;
 
         [[nodiscard]] virtual Common::BoolResultStr RT_Invalidate() = 0;

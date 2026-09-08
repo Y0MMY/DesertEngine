@@ -46,14 +46,6 @@ namespace Desert::Graphic::API::Vulkan
         return BOOLSUCCESS;
     }
 
-    void VulkanVertexBuffer::Use( BindUsage /*use*/ /*= BindUsage::Bind */ ) const
-    {
-    }
-
-    void VulkanVertexBuffer::RT_Use( BindUsage /*use*/ /*= BindUsage::Bind */ ) const
-    {
-    }
-
     [[nodiscard]] Common::BoolResultStr VulkanVertexBuffer::Invalidate()
     {
         return RT_Invalidate();

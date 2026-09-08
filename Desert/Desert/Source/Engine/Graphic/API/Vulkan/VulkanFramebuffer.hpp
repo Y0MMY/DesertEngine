@@ -63,10 +63,6 @@ namespace Desert::Graphic::API::Vulkan
         Common::BoolResultStr Invalidate() override;
         Common::BoolResultStr Release() override;
 
-        virtual void Use( BindUsage = BindUsage::Bind ) const override
-        {
-        }
-
         Common::BoolResultStr Resize( uint32_t width, uint32_t height ) override;
 
         virtual const std::shared_ptr<Image2D>& GetColorAttachmentImage( uint32_t index = 0 ) const override

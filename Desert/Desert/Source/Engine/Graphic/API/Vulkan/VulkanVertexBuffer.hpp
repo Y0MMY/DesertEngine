@@ -20,8 +20,6 @@ namespace Desert::Graphic::API::Vulkan
 
         NO_DISCARD virtual Common::BoolResultStr SetData( void* data, uint32_t size,
                                                           uint32_t offset = 0 ) override;
-        virtual void Use( BindUsage use = BindUsage::Bind ) const override;
-        virtual void RT_Use( BindUsage use = BindUsage::Bind ) const override;
 
         [[nodiscard]] virtual Common::BoolResultStr Invalidate() override;
         [[nodiscard]] virtual Common::BoolResultStr Release() override;

@@ -62,14 +62,6 @@ namespace Desert::Graphic::API::Vulkan
         return BOOLSUCCESS;
     }
 
-    void VulkanIndexBuffer::Use( BindUsage /*use*/ /*= BindUsage::Bind */ ) const
-    {
-    }
-
-    void VulkanIndexBuffer::RT_Use( BindUsage /*use*/ /*= BindUsage::Bind */ ) const
-    {
-    }
-
     Common::BoolResultStr VulkanIndexBuffer::Invalidate()
     {
         return RT_Invalidate();
