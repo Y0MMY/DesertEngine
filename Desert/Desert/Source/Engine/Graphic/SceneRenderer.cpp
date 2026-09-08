@@ -1054,10 +1054,31 @@ namespace Desert::Graphic
 
     // Capability gate shared by the two Ensure* helpers. Both SSR and RSM-GI accumulate into RGBA32F
     // targets that are sampled and blended, so a device that cannot do that cannot run either feature.
-    // Reads the introspection layer (Engine::Device) rather than assuming — the whole point of it.
+    //
+    // IT ASKS ABOUT THE FORMAT IT ACTUALLY USES. This used to read the cached
+    // `DeviceCapabilities::SupportsFloatRenderTargets` bool while the comment above it claimed to "read
+    // the introspection layer (Engine::Device) rather than assuming — the whole point of it". The bool
+    // IS an assumption: VulkanDevice computes it once at init for one hardcoded format
+    // (VK_FORMAT_R32G32B32A32_SFLOAT) against one hardcoded feature set, so every later reader inherits
+    // whichever format the initialiser happened to pick. Reading it here was a comment describing the
+    // code somebody meant to write.
+    //
+    // `Device::IsFormatSupported` is that code, and until now it had no caller anywhere — it stood in
+    // the PureVirtualCensus register, and its own doc comment says "Prefer this over adding another
+    // Supports<Feature> bool", which made the recommended question the one nobody asked. The three bits
+    // below map exactly onto the three VkFormatFeatureFlags the cached bool hardcodes, so the ANSWER is
+    // unchanged today; what changes is that the question now names its format, and a second float target
+    // in another format gets a truthful answer instead of this one's.
     bool SceneRenderer::HasFloatRenderTargetSupport() const
     {
-        return EngineContext::GetInstance().GetCapabilities().SupportsFloatRenderTargets;
+        const auto device = EngineContext::GetInstance().GetDevice();
+        if ( !device )
+            return false;
+        return device->IsFormatSupported( Core::Formats::ImageFormat::RGBA32F,
+                                          static_cast<Engine::FormatUsage>(
+                                               Engine::FormatUsage_Sampled |
+                                               Engine::FormatUsage_ColorAttachment |
+                                               Engine::FormatUsage_Blendable ) );
     }
 
     // Both Ensure* helpers below are LAZY on purpose: every PreviewViewport owns a SceneRenderer, so

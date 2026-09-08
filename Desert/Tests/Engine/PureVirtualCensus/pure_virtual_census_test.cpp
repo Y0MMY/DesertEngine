@@ -553,10 +553,6 @@ namespace
            "FENCED (API/Vulkan): inputs are set, never read back." },
          { "ComputePipeline", "GetOutput", "Desert/Desert/Source/Engine/Graphic/Pipeline.hpp",
            "FENCED (API/Vulkan): outputs are set, never read back." },
-         { "Device", "IsFormatSupported", "Desert/Desert/Source/Engine/Core/Device.hpp",
-           "FENCED (API/Vulkan), and the sharpest row here: its own comment says 'Prefer this over "
-           "adding another Supports<Feature> bool' -- the RECOMMENDED question is the one nobody asks. "
-           "Every caller still reads the cached DeviceCapabilities flags beside it." },
          { "MaterialBackend", "ApplyPushConstants",
            "Desert/Desert/Source/Engine/Graphic/Materials/MaterialBackend.hpp",
            "FENCED (API/Vulkan): the renderer pushes them itself at draw time out of "
@@ -754,14 +750,19 @@ TEST( PureVirtualCensus, NoAbstractBaseIsLeftWithoutASingleImplementation )
 
 TEST( PureVirtualCensus, TheNumberIsStatedSoAShrinkageIsVisible )
 {
-    // 23, and it was 31 before Г12 deleted the eight-row bind vocabulary in one decision rather than
+    // 22: Г12 also gave `Device::IsFormatSupported` its FIRST caller — SceneRenderer's float-render-target
+    // gate, which had been reading a cached bool computed once at device init for ONE hardcoded format,
+    // while the comment above it claimed to read the introspection layer. That row left by being
+    // ANSWERED, like `AssetBase::Unload` before it, and the doc comment that said 'prefer this over
+    // adding another Supports<Feature> bool' is now true. It was 23 before that, and 31 before Г12
+    // deleted the eight-row bind vocabulary in one decision rather than
     // eight; it was 35 when Г8 counted: `RenderSystem::Shutdown` and the orphan duplicate of
     // ImGuiLayer.hpp went with that task, `MaterialProperty::Clone` with М9, and `AssetBase::Unload`
     // with А7 — the last of those by being ANSWERED rather than deleted, which is the only way a row
     // that was a design question is allowed to leave. Up is a regression; down is welcome, and this
     // line moves with it. The count is quoted because a per-row diff never says "there are four more
     // of these now".
-    EXPECT_EQ( std::size( k_Census ), 23u )
+    EXPECT_EQ( std::size( k_Census ), 22u )
          << "the number of pure virtuals implemented by everybody and called by nobody has changed";
 }
 
