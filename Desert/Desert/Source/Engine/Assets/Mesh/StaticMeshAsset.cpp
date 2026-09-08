@@ -42,6 +42,20 @@ namespace Desert::Assets
             return Common::MakeError( "StaticMeshAsset cannot load skinned mesh data." );
         }
 
+        // AN EMPTY SUCCESSFUL LOAD IS A SILENT WRONG ANSWER (DC 1.4). A submesh is the unit this engine
+        // draws — MeshECSSystem iterates GetSubmeshes() and nothing else — so a mesh that parses to zero of
+        // them is a file with vertices nobody will ever issue a draw for. Reported here, with the numbers,
+        // rather than after: refusing BEFORE the members are cleared leaves the asset exactly as it was and
+        // IsReadyForUse false, so the caller sees "not loaded" instead of "loaded, and empty", which is the
+        // distinction this whole task is about.
+        if ( data.Submeshes.empty() )
+        {
+            return Common::MakeFormattedError(
+                 "'{}' parsed but carries ZERO submeshes ({} vertices, {} triangles), so nothing in it can "
+                 "be drawn. The cooked file is incomplete — re-cook it (Assets > Rebuild Cooked Assets).",
+                 m_Metadata.Filepath.string(), data.StaticVertices.size(), data.Indices.size() );
+        }
+
         m_Vertices.clear();
         m_Indices.clear();
         m_Submeshes.clear();

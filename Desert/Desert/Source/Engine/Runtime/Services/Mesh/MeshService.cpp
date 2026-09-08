@@ -30,17 +30,21 @@ namespace Desert::Runtime
 
     Common::BoolResultStr MeshService::Register( const std::shared_ptr<Assets::MeshAsset>& meshAsset )
     {
+        if ( !meshAsset )
+        {
+            return Common::MakeError( "Mesh asset is null" );
+        }
         if ( !meshAsset->GetMetadata().IsValid() )
         {
             return Common::MakeError( "Mesh asset is invalid" );
         }
 
-        const auto handle = meshAsset->GetMetadata().Handle;
-        m_Meshes[handle] = Graphic::MeshFactory::Create( meshAsset );
-        m_MeshAssets[handle] = meshAsset;
-        ClaimMeshBuffers( m_Meshes[handle], Graphic::ResourceOwner::AssetService, handle );
+        // THE SHELL BEFORE THE BUILD. Recorded first so that a build which fails (a skinned mesh whose rig
+        // is not in the manager yet, a cooked file that will not parse) still leaves something `Get` can
+        // retry from — and so BuildAndCache's own EnsureLoaded has the asset on record while it runs.
+        m_MeshAssets[meshAsset->GetMetadata().Handle] = meshAsset;
 
-        return BOOLSUCCESS;
+        return BuildAndCache( meshAsset );
     }
 
     Common::BoolResultStr MeshService::RegisterAsset( const std::shared_ptr<Assets::MeshAsset>&  meshAsset,
@@ -80,6 +84,40 @@ namespace Desert::Runtime
         return meshAsset->EnsureLoaded( *manager );
     }
 
+    Common::BoolResultStr MeshService::BuildAndCache( const std::shared_ptr<Assets::MeshAsset>& meshAsset ) const
+    {
+        // The payload first. Building from an unparsed shell produces a Mesh with no geometry in it, and
+        // that Mesh is then the cached answer for the life of the process — see the header on Register.
+        if ( const auto loaded = EnsureLoaded( meshAsset ); !loaded )
+            return loaded;
+
+        const std::string path   = meshAsset->GetMetadata().Filepath.string();
+        const auto        handle = meshAsset->GetMetadata().Handle;
+
+        auto mesh = Graphic::MeshFactory::Create( meshAsset );
+        if ( !mesh )
+        {
+            // MeshFactory has already said which of its preconditions failed; this adds the file, which it
+            // does not have. Nothing is cached: the comment this replaces was right that a sticky null can
+            // never recover once the dependency is in place.
+            return Common::MakeFormattedError( "MeshService: no runtime mesh could be built for '{}'", path );
+        }
+
+        // THE RELATION. Asserted rather than assumed, because both sides are individually well-formed and
+        // only their disagreement is the defect.
+        if ( mesh->GetSubmeshes().size() != meshAsset->GetSubmeshes().size() )
+        {
+            return Common::MakeFormattedError(
+                 "MeshService: '{}' holds {} submesh(es) but the runtime mesh built from it has {} — it "
+                 "would draw nothing while looking like a built mesh, so it is NOT cached.",
+                 path, meshAsset->GetSubmeshes().size(), mesh->GetSubmeshes().size() );
+        }
+
+        m_Meshes[handle] = std::move( mesh );
+        ClaimMeshBuffers( m_Meshes[handle], Graphic::ResourceOwner::AssetService, handle );
+        return BOOLSUCCESS;
+    }
+
     Assets::AssetHandle MeshService::RegisterProcedural( const std::shared_ptr<Mesh>& mesh )
     {
         // Procedural meshes have no source path, so mint a fresh random id (the default handle is now Null).
@@ -112,23 +150,17 @@ namespace Desert::Runtime
             return it->second.get();
 
         // Lazy build: a shell was registered — parse the .stmesh (if needed) + build the GPU mesh now.
+        // Through the same BuildAndCache the eager path uses, so both routes obey the same relation and a
+        // FAILED build caches nothing: a sticky null (or a sticky empty) can never recover once the
+        // dependency it was missing is in place.
         if ( auto ait = m_MeshAssets.find( handle ); ait != m_MeshAssets.end() )
         {
-            if ( const auto loaded = EnsureLoaded( ait->second ); !loaded )
+            if ( const auto built = BuildAndCache( ait->second ); !built )
             {
-                LOG_ERROR( "MeshService::Get: {}", loaded.GetError() );
+                LOG_ERROR( "MeshService::Get: {}", built.GetError() );
                 return nullptr;
             }
-            auto  mesh = Graphic::MeshFactory::Create( ait->second );
-            auto* raw  = mesh.get();
-            // Don't cache a FAILED build (e.g. a skinned mesh whose skeleton dependency wasn't resolved yet) —
-            // otherwise the null is sticky and the mesh can never recover once the dependency is in place.
-            if ( raw )
-            {
-                m_Meshes[handle] = std::move( mesh );
-                ClaimMeshBuffers( m_Meshes[handle], Graphic::ResourceOwner::AssetService, handle );
-            }
-            return raw;
+            return m_Meshes[handle].get();
         }
         return nullptr;
     }

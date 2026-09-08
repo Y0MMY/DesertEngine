@@ -1667,8 +1667,15 @@ namespace Desert::Editor
                  m_AssetManager->CreateAsset<Assets::StaticMeshAsset>( Assets::AssetPriority::High, cookedStr );
             if ( created )
             {
-                Runtime::ResourceRegistry::GetMeshService()->Register( created );
-                created->Load();
+                // Register parses before it builds (MeshService.hpp), so the `created->Load()` that used to
+                // follow this line ran one step too late: `CreateAsset` can hand back the preloader's
+                // unparsed shell, and the mesh built from it was cached empty before the load happened.
+                if ( const auto registered = Runtime::ResourceRegistry::GetMeshService()->Register( created );
+                     !registered )
+                {
+                    LOG_ERROR( "[Thumbnails] cooked mesh '{}' could not be built: {}", cookedStr,
+                               registered.GetError() );
+                }
                 a = created;
             }
         }

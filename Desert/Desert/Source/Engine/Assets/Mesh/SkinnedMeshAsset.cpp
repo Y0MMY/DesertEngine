@@ -40,6 +40,17 @@ namespace Desert::Assets
             return Common::MakeError( "SkinnedMeshAsset cannot load static mesh data." );
         }
 
+        // The same refusal StaticMeshAsset::Load states in full, for the same reason and in the same place:
+        // a mesh with no submeshes issues no draw, and a success that means "empty" cannot be told from a
+        // success that means "loaded".
+        if ( data.Submeshes.empty() )
+        {
+            return Common::MakeFormattedError(
+                 "'{}' parsed but carries ZERO submeshes ({} vertices, {} triangles), so nothing in it can "
+                 "be drawn. The cooked file is incomplete — re-cook it (Assets > Rebuild Cooked Assets).",
+                 m_Metadata.Filepath.string(), data.SkinnedVertices.size(), data.Indices.size() );
+        }
+
         m_Vertices.clear();
         m_Indices.clear();
         m_Submeshes.clear();

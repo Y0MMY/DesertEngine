@@ -162,8 +162,15 @@ namespace Desert::Editor::MeshDnD
         if ( !created )
             return Common::UUID::Null();
 
-        Runtime::ResourceRegistry::GetMeshService()->Register( created );
-        created->Load();
+        // Register parses first (MeshService.hpp), which is why the `created->Load()` that used to follow
+        // this line is gone: on a re-import `CreateAsset` returns the preloader's unparsed shell, and the
+        // build then happened before the load.
+        if ( const auto registered = Runtime::ResourceRegistry::GetMeshService()->Register( created );
+             !registered )
+        {
+            LOG_ERROR( "[Import] cooked mesh '{}' could not be built: {}", cookedStr, registered.GetError() );
+            return Common::UUID::Null();
+        }
 
         // UE-style: a just-imported mesh's materials + textures are immediately available (no restart/Save).
         // Order matters: textures FIRST (materials bind them eagerly at register time), then materials.
@@ -197,7 +204,16 @@ namespace Desert::Editor::MeshDnD
                 return Common::UUID::Null();
             }
 
-            Runtime::ResourceRegistry::GetMeshService()->Register( asset ); // rebuild with the resolved skeleton
+            // Rebuild with the resolved skeleton. Reported rather than dropped: the caller receives a handle
+            // either way, and a refusal here (the rig still missing, the .skmesh unparsable) is the one
+            // moment the reason is knowable.
+            if ( const auto registered = Runtime::ResourceRegistry::GetMeshService()->Register( asset );
+                 !registered )
+            {
+                LOG_ERROR( "Skinned mesh '{}' could not be built: {}", asset->GetMetadata().Filepath.string(),
+                           registered.GetError() );
+                return Common::UUID::Null();
+            }
             RegisterCookedTextures( mgr );
             RegisterCookedMaterials( mgr, sourcePath );
             return asset->GetMetadata().Handle;
@@ -242,7 +258,12 @@ namespace Desert::Editor::MeshDnD
         if ( !created )
             return { Common::UUID::Null(), false };
 
-        Runtime::ResourceRegistry::GetMeshService()->Register( created );
+        if ( const auto registered = Runtime::ResourceRegistry::GetMeshService()->Register( created );
+             !registered )
+        {
+            LOG_ERROR( "[Import] cooked mesh '{}' could not be built: {}", staticStr, registered.GetError() );
+            return { Common::UUID::Null(), false };
+        }
         RegisterCookedTextures( mgr );
         RegisterCookedMaterials( mgr, sourcePath );
         return { created->GetMetadata().Handle, false };
