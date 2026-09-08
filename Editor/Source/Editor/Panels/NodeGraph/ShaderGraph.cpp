@@ -898,15 +898,19 @@ namespace Desert::Editor::ShaderGraph
         // Exposed properties block — shared across domains (post-process effects can expose params too).
         // Scene texture (post-process) sits at set 0 / binding 0, so params start at Binding(1).
         //
-        // The graph's own textures are numbered from kGraphTextureBinding UPWARD, one per texture,
-        // and that base sits above every engine binding a generated shader can declare. It used to be
-        // 2, which was safe only while the engine blocks a graph could receive were DirectionLightsUB
-        // (14) and TimeUB (15) — thirteen textures away. A lit surface now also declares
-        // LightsMetadata (4), the point and spot storage buffers (6, 16), the IBL trio (8, 9, 10), the
-        // cloud shadow pair (20, 21) and the five cascade bindings (5, 7, 13, 22, 23), so the third
-        // texture in a graph would have landed on top of LightsMetadata. Nothing would have said so:
-        // two GLSL declarations at one binding is a descriptor the engine writes twice and a shader
+        // The graph's own textures are numbered from kGraphTextureBinding UPWARD, one per texture, and
+        // that base is the first slot of the window reserved for graph-owned resources
+        // (Engine/Core/ShaderCompiler/ShaderGraphBindings.hpp). It used to be 2, which was safe only
+        // while the engine blocks a graph could receive were two; a lit surface grew to twelve, so the
+        // third texture in a graph would have landed on top of LightsMetadata. Nothing would have said
+        // so: two GLSL declarations at one binding is a descriptor the engine writes twice and a shader
         // that reads whichever it got.
+        //
+        // THE SLOT LIST THAT USED TO BE WRITTEN OUT HERE IS GONE ON PURPOSE: it was prose asserting a
+        // property of a tree that moves, and the next binding added to a shader-graph surface would have
+        // left it wrong and silent. What keeps the window free now is a measurement over the compiled
+        // SPIR-V of every shipped pass (Desert/Tests/Engine/ShaderCacheKey), which no comment can go
+        // stale against.
         if ( !textures.empty() || !colorParams.empty() || !floatParams.empty() )
         {
             out << "    Properties";
