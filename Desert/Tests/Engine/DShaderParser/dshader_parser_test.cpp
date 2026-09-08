@@ -729,6 +729,135 @@ Shader "Volume"
     EXPECT_EQ( cs.find( "Uniform(0)" ), std::string::npos );
 }
 
+// ─── Comments are prose, not declarations ────────────────────────────────────────────────────────
+//
+// The sugar rules matched the WHOLE file text, comments included, and the five paren-less keywords
+// (In / Out / Uniform / Buffer / PushConstant) are ordinary English words. The live instance was
+// Programs/Particles/ParticleSimulate.shader:
+//
+//     // Integrate alive particles. In LOCAL mode (u_Counts.w) the integrated state is the offset
+//
+// which the sugar rewrote into `... layout(location = 0) in LOCAL mode ...` and which really did
+// consume location 0. It was harmless only because a COMPUTE stage declares no automatic In/Out, so
+// the eaten number was never asked for. The first author to add `In`/`Out` to a stage whose prose
+// happens to contain one of the five words would have got attributes shifted by one — and would have
+// gone looking in the code, not in the paragraph above it.
+//
+// WHAT COUNTS AS A COMMENT here is exactly what GLSL says: `//` to end of line and `/* */`
+// (non-nesting). Nothing else. `#if 0` is NOT a comment — see PreprocessorOffBranchIsStillCode.
+
+static const char* kCommentTrapLocations = R"(
+Shader "CommentTrap"
+{
+    Vertex
+    {
+        // Integrate alive particles. In LOCAL mode the state is an offset.
+        /* Out of the pool comes exactly one entry. */
+        In  vec3 a_Position;
+        Out vec2 v_UV;
+        void main() { gl_Position = vec4( a_Position, 1.0 ); v_UV = vec2( 0.0 ); }
+    }
+    Fragment
+    {
+        In  vec2 v_UV;
+        Out vec4 o_Color;
+        void main() { o_Color = vec4( v_UV, 0.0, 1.0 ); }
+    }
+}
+)";
+
+TEST( DShaderParserComments, ProseDoesNotConsumeAutoLocations )
+{
+    auto res = DShaderParser::Parse( kCommentTrapLocations );
+    ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
+    const auto& v = res.GetValue().Stages.at( ShaderStage::Vertex );
+
+    // Before the fix these were location 1, because the comments took 0 first.
+    EXPECT_NE( v.find( "layout(location = 0) in vec3 a_Position" ), std::string::npos ) << v;
+    EXPECT_NE( v.find( "layout(location = 0) out vec2 v_UV" ), std::string::npos ) << v;
+}
+
+TEST( DShaderParserComments, CommentTextSurvivesVerbatim )
+{
+    const std::string translated = DShaderParser::TranslateSugar( R"(
+// The PushConstant carries the row index. In LOCAL mode the Buffer is an Out parameter.
+/* A Uniform is a Buffer with a different name. */
+In vec3 a_Position;
+)" );
+
+    EXPECT_NE( translated.find(
+                    "// The PushConstant carries the row index. In LOCAL mode the Buffer is an Out parameter." ),
+               std::string::npos )
+         << translated;
+    EXPECT_NE( translated.find( "/* A Uniform is a Buffer with a different name. */" ), std::string::npos )
+         << translated;
+    EXPECT_NE( translated.find( "layout(location = 0) in vec3 a_Position;" ), std::string::npos ) << translated;
+}
+
+TEST( DShaderParserComments, NumberedFormInAProseCommentNeitherRewritesNorReservesTheNumber )
+{
+    // Both halves matter. The comment must survive as written (it is documentation of the OLD
+    // spelling), and it must not seed the allocator — before the fix `In(0)` here reserved location 0
+    // and the real declaration below it was pushed to 1.
+    const std::string translated = DShaderParser::TranslateSugar( R"(
+// Until 2026-01-01 this was spelled In(0) vec3 a_Position; the number is now automatic.
+In vec3 a_Position;
+/* Uniform(3) sampler2D u_Tex; was here too. */
+Uniform sampler2D u_Tex;
+)" );
+
+    EXPECT_NE( translated.find( "spelled In(0) vec3 a_Position;" ), std::string::npos ) << translated;
+    EXPECT_NE( translated.find( "/* Uniform(3) sampler2D u_Tex; was here too. */" ), std::string::npos )
+         << translated;
+    EXPECT_NE( translated.find( "layout(location = 0) in vec3 a_Position;" ), std::string::npos ) << translated;
+    EXPECT_NE( translated.find( "layout(binding = 0) uniform sampler2D u_Tex;" ), std::string::npos )
+         << translated;
+}
+
+TEST( DShaderParserComments, ABlockCommentSpanningLinesIsSkippedWhole )
+{
+    const std::string translated = DShaderParser::TranslateSugar( R"(
+/* Out
+   In
+   Buffer */
+Out vec4 o_Color;
+)" );
+    EXPECT_NE( translated.find( "/* Out\n   In\n   Buffer */" ), std::string::npos ) << translated;
+    EXPECT_NE( translated.find( "layout(location = 0) out vec4 o_Color;" ), std::string::npos ) << translated;
+}
+
+TEST( DShaderParserComments, CommentOpenersInsideEachOtherAreNotComments )
+{
+    // `/*` inside a line comment does not open a block, and `//` inside a block comment does not end
+    // it. Getting either wrong would blank out real code and delete declarations silently.
+    const std::string translated = DShaderParser::TranslateSugar( R"(
+// a /* that never opens
+In vec3 a_Position;
+/* a // that never closes
+   In vec3 a_NotDeclared; */
+Out vec4 o_Color;
+)" );
+    EXPECT_NE( translated.find( "layout(location = 0) in vec3 a_Position;" ), std::string::npos ) << translated;
+    EXPECT_NE( translated.find( "In vec3 a_NotDeclared; */" ), std::string::npos ) << translated;
+    EXPECT_NE( translated.find( "layout(location = 0) out vec4 o_Color;" ), std::string::npos ) << translated;
+}
+
+TEST( DShaderParserComments, PreprocessorOffBranchIsStillCode )
+{
+    // The stated boundary: only GLSL comments are skipped. An `#if 0` branch is still translated,
+    // and it still consumes a number — exactly as it did before this change. Asserted rather than
+    // assumed, because the next person to hit it deserves to find the decision instead of the
+    // symptom: text you want the sugar to ignore goes in a comment, not behind `#if 0`.
+    const std::string translated = DShaderParser::TranslateSugar( R"(
+#if 0
+In vec3 a_Old;
+#endif
+In vec3 a_Position;
+)" );
+    EXPECT_NE( translated.find( "layout(location = 0) in vec3 a_Old;" ), std::string::npos ) << translated;
+    EXPECT_NE( translated.find( "layout(location = 1) in vec3 a_Position;" ), std::string::npos ) << translated;
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );
