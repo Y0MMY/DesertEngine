@@ -11,6 +11,7 @@
 #include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Widgets/Controls/Controls.hpp>
 #include <ImGui/imgui.h>
+#include <Editor/Widgets/PreviewSlotBudget.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
@@ -19,7 +20,10 @@
 #include <filesystem>
 #include <system_error>
 #include <Engine/Core/Scene.hpp>
+#include <Engine/Core/EngineContext.hpp>
+#include <Engine/Graphic/SceneRenderer.hpp>
 #include <Common/Core/Constants.hpp>
+#include <Common/Core/Logger.hpp>
 
 namespace Desert::Editor
 {
@@ -105,10 +109,47 @@ namespace Desert::Editor
         }
     } // namespace
 
-    void ScenePropertiesPanel::EnsurePreview()
+    bool ScenePropertiesPanel::EnsurePreview()
     {
-        if ( !m_Preview )
-            m_Preview = std::make_unique<PreviewViewport>();
+        if ( m_Preview )
+            return true;
+
+        // NOT WHEN THERE IS NO SLOT LEFT TO GIVE IT.
+        //
+        // A live preview owns a full SceneRenderer, and a SceneRenderer that finds every one of the six
+        // slots taken does NOT fail — it records into slot 0 and shares the main viewport's per-frame state
+        // (Engine/Core/RendererSlotPool.hpp). That reads as "the preview moves when I move the scene
+        // camera", it has no error message, and it is worth days to find. This panel is the easiest way in
+        // the editor to reach that state: opening a sixth surface costs a deliberate click, but the
+        // Details preview appears the moment anything with a mesh is CLICKED.
+        //
+        // Through the SHARED rule, not a comparison written out here: ThumbnailService asks the same
+        // question with a different entitlement, and two spellings of one policy is how they come to
+        // disagree (Editor/Widgets/PreviewSlotBudget.hpp). This one is a UserSurface — somebody clicked an
+        // entity and is looking at the row — so it is allowed the last slot; the background captures are
+        // not, which is what keeps a picture in the cache for the moment this refusal fires.
+        //
+        // Declining is checked every frame, not once: a scene view or a material window closing hands its
+        // slot back, and the next frame builds the preview after all.
+        if ( !PreviewSlotBudget::MayClaim( PreviewSlotBudget::Demand::UserSurface,
+                                           Graphic::SceneRenderer::GetLiveRendererCount(),
+                                           EngineContext::kMaxRendererSlots ) )
+        {
+            // Once per stretch of scarcity, not once per frame: this is a state the user can leave by
+            // closing a window, and a line every frame would bury the log it belongs in.
+            if ( !m_PreviewSlotRefused )
+            {
+                m_PreviewSlotRefused = true;
+                LOG_WARN( "[Details] all {} renderer slots are in use — the 3D Model row is showing its "
+                          "cached thumbnail instead of a live preview. Close a scene view or a material "
+                          "window to get the live one back.",
+                          EngineContext::kMaxRendererSlots );
+            }
+            return false;
+        }
+        m_PreviewSlotRefused = false;
+        m_Preview            = std::make_unique<PreviewViewport>();
+        return true;
     }
 
     void ScenePropertiesPanel::ReleasePreview()
@@ -163,7 +204,21 @@ namespace Desert::Editor
             return;
         }
 
-        EnsurePreview();
+        // THE ANSWER IS CHECKED, and this line is the whole reason the refusal had to be made reachable
+        // before it was believed. EnsurePreview used to be infallible, so every line below it dereferenced
+        // m_Preview without a thought — correctly, because there was no state in which it was null here.
+        // Teaching it to decline quietly re-created that state and left both dereferences standing: the
+        // SetMesh below, and the Update() at the end of this function, which fires whenever a component
+        // drew the row on the PREVIOUS frame (so the flag outlives the renderer by exactly one frame).
+        // Measured, not reasoned: five material documents open plus a click on a mesh killed the editor on
+        // the frame after the refusal was logged.
+        //
+        // Returning without touching m_PreviewKey is deliberate. The key records what the preview is
+        // POINTING AT, and a preview that does not exist points at nothing; writing the key here would
+        // make the next frame — the one where a slot has come free — believe it was already framed, and
+        // the row would show an empty pane until the selection changed.
+        if ( !EnsurePreview() )
+            return;
 
         if ( key != m_PreviewKey )
         {
@@ -468,8 +523,13 @@ namespace Desert::Editor
         // so a freshly selected mesh shows the live preview on the same frame instead of falling back to
         // the PNG thumbnail for one frame and jumping the row's layout. Keyed off the SAME function
         // OnPreUpdate uses, so the two can never disagree about what is previewable.
+        //
+        // The answer is DISCARDED here, and only here: what follows hands `m_Preview.get()` to the
+        // component pass, and a null there is already a supported value — the 3D Model row falls back to
+        // the thumbnail it asked the service for. OnPreUpdate is the caller that must not ignore it,
+        // because everything after its call dereferences the pointer.
         if ( PreviewKeyOf( selectedEntity, static_cast<uint64_t>( *selectedOpt ) ) != 0 )
-            EnsurePreview();
+            (void)EnsurePreview();
         m_ComponentEditor->SetPreview( m_Preview.get(), m_ThumbnailUI.get(), &m_PreviewActive );
         m_ComponentEditor->Render( const_cast<ECS::Entity&>( selectedEntity ), m_Scene.get(),
                                    m_FieldSearch.c_str() );

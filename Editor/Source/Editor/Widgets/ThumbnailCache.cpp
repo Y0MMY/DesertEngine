@@ -6,6 +6,7 @@
 #include <Common/Core/Logger.hpp>
 
 #include <Engine/Core/Formats/ImageFormat.hpp>
+#include <Engine/Graphic/ResourceLedger.hpp>
 
 #include <stb_image/stb_image.h>
 
@@ -172,6 +173,19 @@ namespace Desert::Editor
                  .Usage      = Core::Formats::Image2DUsage::Image2D,
                  .Properties = Core::Formats::Sample,
             };
+            // THIS IMAGE HAS AN OWNER, AND IT SAYS SO. Every thumbnail in the editor is created on this
+            // one line — the browser grid, the Collections cards, both Details slots, the drag ghost —
+            // so one scope here attributes all of them and the sixth panel written next year is
+            // attributed the day it calls Get(). That is the arithmetic ResourceAttributionScope exists
+            // for (Engine/Graphic/ResourceLedger.hpp): claiming them one at a time would mean touching
+            // five files to answer one question and silently missing the sixth.
+            //
+            // EditorTool rather than AssetService, and the difference is not cosmetic: AssetService is
+            // the ONLY category asset eviction may release, because there the asset's file is the recipe.
+            // A thumbnail's recipe is a render, not a file read — dropping one to reclaim memory would
+            // cost a capture to rebuild, not a load. Mis-filing it here would hand eviction a lever it
+            // must not have.
+            const Graphic::ResourceAttributionScope owned( Graphic::ResourceOwner::EditorTool );
             result = Graphic::Image2D::Create( spec, nullptr );
 
             const auto ms = []( auto from, auto to )

@@ -482,6 +482,25 @@ namespace Desert::Editor
         m_Framed = TryFrameMesh();
     }
 
+    bool PreviewViewport::HasContent() const
+    {
+        // See the header for why this is a question about the RUNTIME mesh and not about m_Framed.
+        if ( !m_HasContent )
+            return false;
+
+        // Materials and primitives hand over something drawable at assignment time; there is nothing here
+        // to look up for them, and no mesh handle to look it up with.
+        if ( static_cast<uint64_t>( m_MeshHandle ) == 0 )
+            return true;
+
+        // Get() builds on a miss from the registered shell, so this both answers the question and is the
+        // lazy path that makes the answer become true once the mesh is available. Submeshes, not the
+        // pointer: a Mesh that exists with none of them draws exactly nothing, which is the state the
+        // Details row must fall back to its thumbnail for.
+        const auto* runtime = Runtime::ResourceRegistry::GetMeshService()->Get( m_MeshHandle );
+        return runtime && !runtime->GetSubmeshes().empty();
+    }
+
     bool PreviewViewport::TryFrameMesh()
     {
         // Bounds from the ASSET'S OWN VERTICES when they are there, and only then from the submesh AABBs.

@@ -37,6 +37,23 @@ namespace Desert::Editor
      *     reason a capture fails is a shader, a service registration or a device that was not ready yet,
      *     and persisting "this asset is bad" would turn a transient failure into one only a cache wipe
      *     could clear. The thing worth persisting is the picture, and that is what the PNG is.
+     *
+     * IT SURVIVES ASSET EVICTION, AND THAT IS A PROPERTY OF WHERE THE QUESTION IS ASKED, NOT LUCK. A queued
+     * request carries a handle and a path, and a handle can go cold under it: A7 evicts the BUILT object on
+     * a scene change and keeps the shell. What saves this queue is that nothing here trusts the handle at
+     * queue time — `AssetThumbnailRenderer::RequestMesh` asks `MeshService::Get` at DISPATCH, which is the
+     * lazy path that rebuilds from the shell, so an evicted mesh reloads on the way into the capture and an
+     * unregistered one is refused with its reason. The dedup and failure sets are keyed on the asset's
+     * identity rather than on a pointer, so they mean the same thing on both sides of an eviction.
+     *
+     * AND IT NEVER TAKES THE LAST RENDERER SLOT. A capture owns a full SceneRenderer, which is one of six
+     * (Engine/Core/RendererSlotPool.hpp), and a renderer that finds none free does not fail — it records
+     * into slot 0 and shares the main viewport's per-frame state. This queue is background work: nobody
+     * clicked for it, and what it produces is the picture a row shows precisely WHILE the person cannot
+     * have a live preview. Taking the sixth slot would therefore starve the surface they are opening in
+     * order to render its consolation prize. The entitlement is stated once, for both consumers of it, in
+     * Editor/Widgets/PreviewSlotBudget.hpp; when it says no, the queue is kept and the refusal is LOGGED,
+     * because a queue that quietly stops draining reads exactly like a queue with nothing in it.
      */
     class ThumbnailService
     {
@@ -126,6 +143,17 @@ namespace Desert::Editor
         // because dispatch asks it a second time, when the dedup sets deliberately still hold the entry.
         static bool NeedsCapture( const std::string& png, const std::string& source );
 
+        /**
+         * @brief Build the renderer — but only if a background job is entitled to a slot right now.
+         *
+         * The whole reason this is a function and not two lines in Tick(): the rule that a capture must
+         * never take the LAST free renderer slot is a standing condition, and a condition written at the
+         * one call site it happens to have today is a condition the second call site will not have. False
+         * means "not now"; the queue is left standing and the refusal is logged, because a queue that
+         * silently stops draining looks exactly like a queue with nothing in it.
+         */
+        bool AcquireRenderer();
+
         // Created lazily — a session may never preview — and RELEASED again once the queue has been idle
         // for a while, because it owns a full SceneRenderer and therefore one of the six renderer slots
         // (Engine/Core/RendererSlotPool.hpp). Holding it for the rest of the session after one thumbnail
@@ -145,6 +173,10 @@ namespace Desert::Editor
         std::optional<std::filesystem::file_time_type> m_InFlightPngBefore;
         int                                            m_InFlightTicks = 0;
         int                                            m_IdleTicks     = 0; // consecutive frames with no work
+        // Already said out loud that there was no slot to spare. Latched so the warning is one line per
+        // stretch of scarcity rather than one per frame, and cleared — with its own line — the moment one
+        // comes free, because "it is running again" is as much news as "it stopped".
+        bool m_SlotRefused = false;
 
         // What this run of the queue did, reported once when it drains. A capture that succeeds used to
         // say nothing at all, so "the editor is rendering previews" and "the editor has stopped bothering"

@@ -11,8 +11,10 @@
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Core/MeshResolve.hpp>
+#include <Editor/Widgets/PreviewViewport.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Editor/Widgets/ThumbnailFreshness.hpp>
+#include <Editor/Widgets/ThumbnailService.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <filesystem>
 #include <system_error>
@@ -145,51 +147,97 @@ namespace Desert::Editor
     void StaticMeshComponentWidget::DrawMeshThumbnail( const ECS::StaticMeshComponent& staticMesh,
                                                        float                           size ) const
     {
-        // LIVE first: the panel lends one preview renderer, and it shows what this entity actually renders
-        // — orbitable, and it follows a material edit while you drag the slider. It is safe again because
-        // per-frame GPU state is stored per (frame x renderer slot) now, so a second renderer no longer
-        // overwrites the viewport's camera, lights and shadows (Docs/RENDERER_FRAME_STATE.md).
-        if ( m_Ctx && m_Ctx->DrawPreview( ImVec2( size, size ) ) )
+        // THE REQUEST COMES FIRST, BEFORE THE LIVE PREVIEW IS EVEN CONSIDERED, and the ordering is the
+        // whole lesson of this function.
+        //
+        // The obvious arrangement — show the live preview, and ask for a cached picture only on the frames
+        // there is no live one — asks for the fallback at exactly the moment it cannot be produced. What
+        // takes the live preview away is a shortage of renderer slots, and a capture needs a renderer slot
+        // too; the service refuses to take the last one (Editor/Widgets/PreviewSlotBudget.hpp), and
+        // rightly, so the row would sit on "queued" for as long as the shortage lasted. Measured, not
+        // reasoned: with the request placed after the branch, a selected mesh produced no capture at all
+        // and the log showed the queue draining a material nobody had asked this row for.
+        //
+        // So the cache is warmed WHILE there is room to warm it. It costs one capture per mesh asset, ever
+        // — 360-385 ms over seven runs on this machine, then a PNG that survives restarts — and the service
+        // drops the request outright when the picture on disk is still fresh, which after the first time
+        // it is.
+        //
+        // Asked through the service, never by reading `ThumbnailCache::DiskPath` and hoping. That hope was
+        // the defect: the file existed only if the asset browser had happened to walk past this asset, and
+        // if it had not, the row showed a grey cube glyph for the life of the project with nothing anywhere
+        // saying why — the very wart ThumbnailService's header declares removed for the material slot, and
+        // did not keep for this one. Desert/Tests/Editor/ThumbnailRequesters is the census that keeps every
+        // showing slot a requesting slot.
+        //
+        // THE MESH first: this row is the mesh slot, and showing a material sphere where the model belongs
+        // answers a question nobody asked. The material is the last resort, for an entity whose mesh slot
+        // is empty (a primitive).
+        static ThumbnailCache s_Thumbnails;
+
+        std::shared_ptr<Graphic::Image2D> thumb;
+        std::string                       png;
+        std::string                       source;
+        if ( m_AssetManager )
+        {
+            if ( staticMesh.MeshHandle )
+            {
+                if ( auto mesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle ) )
+                {
+                    source = mesh->GetMetadata().Filepath.generic_string();
+                    // NO material override, and that is a decision rather than an omission. The cache is
+                    // keyed on the ASSET (Editor/Widgets/ThumbnailKey.hpp), so what it holds has to be a
+                    // picture of the asset: handing over THIS entity's slot materials would put two
+                    // entities that share one mesh in a fight over one file, and the second one selected
+                    // would be shown the first one's paint with nothing able to tell them apart. The
+                    // per-entity answer is the live preview BELOW; this one is per-asset by construction.
+                    png = ThumbnailService::Get().RequestMesh( staticMesh.MeshHandle, source );
+                }
+            }
+            if ( png.empty() && !staticMesh.MaterialSlots.empty() && staticMesh.MaterialSlots.front() )
+            {
+                if ( auto mat = m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>(
+                          staticMesh.MaterialSlots.front() ) )
+                {
+                    source = mat->GetMetadata().Filepath.generic_string();
+                    // Cutout/foliage materials garble on a sphere -> flat card, the same rule the browser
+                    // and the material slot next door apply.
+                    const bool flat = mat->Data().GetFloat( "AlphaCutoff" ) > 0.0f;
+                    png = ThumbnailService::Get().RequestMaterial( mat->GetMetadata().Handle, source, flat );
+                }
+            }
+
+            if ( !png.empty() )
+            {
+                // Through the shared rule, not a bare exists(): a picture whose asset has moved on is not
+                // the asset's picture (Editor/Widgets/ThumbnailFreshness.hpp). When it says Capture the
+                // request above has already queued the replacement, so the decoded copy is dropped here —
+                // otherwise this cache would keep handing back the OLD render after the new one lands.
+                if ( ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( png, source ) ) ==
+                     ThumbnailFreshness::Verdict::Show )
+                    thumb = s_Thumbnails.Get( png );
+                else
+                    s_Thumbnails.Invalidate( png );
+            }
+        }
+
+        // NOW the live one, if there is a live one with something in it. It is the better picture —
+        // orbitable, wearing this entity's own materials, and it follows a material edit while you drag the
+        // slider — and it is safe because per-frame GPU state is stored per (frame x renderer slot)
+        // (Docs/RENDERER_FRAME_STATE.md).
+        //
+        // HasContent() IS PART OF THE CONDITION, and it is what makes the cached picture above reachable at
+        // all. ScenePropertiesPanel builds the viewport as soon as a mesh entity is selected and only points
+        // it at the mesh on the NEXT OnPreUpdate, and it declines to build one when every renderer slot is
+        // taken. Asking DrawPreview alone answers "was a widget lent", which was true in every state this
+        // row is ever drawn in — so the fallback underneath was unreachable code wearing a fallback's
+        // clothes. Asking whether the preview has anything to SHOW is the question the row actually has.
+        if ( m_Ctx && m_Ctx->Preview && m_Ctx->Preview->HasContent() &&
+             m_Ctx->DrawPreview( ImVec2( size, size ) ) )
         {
             Utils::ImGuiUtilities::Tooltip( "Live preview — drag to orbit, wheel to zoom" );
             ImGui::SameLine();
             return;
-        }
-
-        // No renderer lent (a panel that does not own one): fall back to the PNG the asset browser already
-        // rendered. THE MESH first — this row is the mesh slot, and showing a material sphere where the
-        // model belongs answers a question nobody asked. The material is only the last resort, for an
-        // entity whose mesh has no thumbnail yet (a primitive).
-        static ThumbnailCache s_Thumbnails;
-
-        std::shared_ptr<Graphic::Image2D> thumb;
-        if ( m_AssetManager )
-        {
-            std::string path;
-            if ( staticMesh.MeshHandle )
-            {
-                if ( auto mesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle ) )
-                    path = mesh->GetMetadata().Filepath.generic_string();
-            }
-            if ( path.empty() && !staticMesh.MaterialSlots.empty() && staticMesh.MaterialSlots.front() )
-            {
-                if ( auto mat = m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>(
-                          staticMesh.MaterialSlots.front() ) )
-                    path = mat->GetMetadata().Filepath.generic_string();
-            }
-
-            if ( !path.empty() )
-            {
-                // Through the shared rule, not a bare exists(): a picture whose asset has moved on is not
-                // the asset's picture, and drawing it here would contradict the two panels that refuse to
-                // (Editor/Widgets/ThumbnailFreshness.hpp).
-                const std::string png = ThumbnailCache::DiskPath( path );
-                if ( ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( png, path ) ) ==
-                     ThumbnailFreshness::Verdict::Show )
-                {
-                    thumb = s_Thumbnails.Get( png );
-                }
-            }
         }
 
         const ImVec2 at = ImGui::GetCursorScreenPos();
@@ -214,7 +262,13 @@ namespace Desert::Editor
                          ImGui::GetColorU32( ImGuiCol_TextDisabled ), icon );
         }
         dl->AddRect( at, br, ImGui::GetColorU32( ImGuiCol_Border ), 2.0f );
-        Utils::ImGuiUtilities::Tooltip( "Thumbnail rendered by the asset browser" );
+        // Not "rendered by the asset browser" any more, and the old wording was the defect written down:
+        // this row now asks for its own picture, so the browser is not what it is waiting for.
+        // Three states, not two: "here it is", "it is coming" and "there is nothing to draw one of" are
+        // different answers, and collapsing the last two would let an empty slot look like a slow one.
+        Utils::ImGuiUtilities::Tooltip( thumb         ? "Cached preview of this asset"
+                                        : png.empty() ? "Nothing in this slot to preview"
+                                                      : "Preview queued — it will appear in a moment" );
 
         ImGui::SameLine();
     }

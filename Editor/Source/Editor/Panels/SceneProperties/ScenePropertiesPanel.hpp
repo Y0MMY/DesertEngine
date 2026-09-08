@@ -48,7 +48,20 @@ namespace Desert::Editor
         // one action that ends the state (create an entity and select it).
         void DrawNoSelectionState();
 
-        void EnsurePreview();  // create the viewport (its renderer, and the slot, come on first Update)
+        /**
+         * @brief Build the viewport if there is a renderer slot to give it. FALSE means there is not.
+         *
+         * IT ANSWERS, and the answer is not decoration. Every line after the call used to dereference
+         * m_Preview unconditionally, correctly, because this function could not fail. Teaching it to
+         * decline when all six slots are taken (Editor/Widgets/PreviewSlotBudget.hpp) put a null back into
+         * a place three callers assumed could not hold one — and the Update() at the end of OnPreUpdate is
+         * driven by a flag raised on the PREVIOUS UI frame, so it outlives the renderer by exactly one
+         * frame. Measured: five open material documents plus one click on a mesh entity killed the editor
+         * on the frame after the refusal was logged. A bool nobody can ignore is the difference.
+         *
+         * The renderer, and with it the slot, are still claimed lazily on the first Update().
+         */
+        [[nodiscard]] bool EnsurePreview();
         void ReleasePreview(); // destroy it, which is what returns the slot
 
     private:
@@ -82,5 +95,9 @@ namespace Desert::Editor
         std::unique_ptr<UI::UIHelper> m_ThumbnailUI;           // texture ids for the preview image + cached PNGs
         uint64_t                      m_PreviewKey    = 0;     // what it shows; a change re-points and re-frames
         bool                          m_PreviewActive = false; // a component drew it during the last UI frame
+        // Already said out loud that there was no slot to build the preview in. Latched so the warning is
+        // one line per stretch of scarcity rather than one per frame, and cleared the moment a slot frees
+        // up — a state the user leaves by closing a window has to be able to be reported again.
+        bool m_PreviewSlotRefused = false;
     };
 } // namespace Desert::Editor
