@@ -3,7 +3,7 @@
 //
 // ── WHY THE REFUSALS ARE THE INTERESTING HALF ────────────────────────────────────────────────────────
 //
-// A cloud material carries thirty-four values and about twenty of them are inputs to a CPU BAKE — a
+// A cloud material carries thirty-five values and twenty of them are inputs to a CPU BAKE — a
 // 256x32x256 volume built over several thousand cloud bodies, measured at 3.3 to 14.1 seconds on the
 // development machine. The graph in this domain runs on the GPU, per sample, inside a march that reads
 // the RESULT of that bake. So a bake input is not merely awkward to reach from a node: it is not in the
@@ -34,11 +34,14 @@
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <set>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace SG = Desert::Editor::ShaderGraph;
 using Desert::Core::Preprocess::DShaderParser;
@@ -572,5 +575,209 @@ TEST( ShaderGraphVolumeDomain, EveryVolumeNodeHasACompilerRule )
         EXPECT_TRUE( compiled.IsSuccess() )
              << "node '" << spec.Kind
              << "' is in the Cloud Medium palette and does not compile: " << compiled.GetError();
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+// THE OTHER DIRECTION: WHAT AN AUTHORED MEDIUM CAN SILENCE, IT MUST BE ABLE TO RESTORE
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Added by О1-D's re-sweep of the authored-control census, from a relation the tree held and nothing
+// stated.
+//
+// A `Medium` graph REPLACES Generated/CloudMedium.glslh. Any value whose only consumer in the whole
+// shader tree is Common/CloudMediumDefault.glslh therefore goes inert the moment a graph declines to
+// call the shipped body — and if the graph cannot read that value back, an artist has silenced a control
+// with no way to honour it. That is DEV_CONTRACT §1.3's dead setting arriving through a door no census
+// watched: the knob is wired end to end and does nothing, in exactly one configuration of the material.
+//
+// It is checked in both halves of what the medium is handed, because the two are restored by different
+// means:
+//
+//   * `params.X` — a MATERIAL value. A graph reads it back with a Cloud Material Param node, so the
+//     answer must be a row of ShaderGraph::VolumeParams(), matched on that row's own Expression so
+//     there is no second spelling of the member name anywhere.
+//   * `field.Y`  — a PRODUCER output. A graph reads it back off the Cloud Sample node, whose pins ARE
+//     the members of `CloudGraphSample` (Common/CloudMediumDefault.glslh says so at the struct).
+//
+// MEASURED WHEN THIS WAS WRITTEN, over the shipped tree: the medium-only material values are
+// DetailStrength and DetailTileKm, and both are readable; the medium-only producer outputs are
+// DensityScale, DetailFactor, DetailType, ExtinctionFactor and NoiseSlot, and four of the five are pins
+// of the Cloud Sample node. The fifth has a row below, because an exception with no reason is
+// unreadable in a month.
+namespace
+{
+    /// A value only the shipped medium reads that a graph CANNOT read back, and why that is where it
+    /// stands rather than a defect somebody forgot.
+    struct MediumOnlyNotReadable
+    {
+        const char* Member;
+        const char* Reason;
+    };
+
+    // A `std::array` AND NOT A C ARRAY, because this register is meant to reach zero rows: the day the
+    // palette gains a node that samples a volume by slot, the row below is deleted and nothing takes its
+    // place. A zero-length C array is a GNU extension clang accepts and MSVC refuses outright (C2466),
+    // and that exact shape reached `dev` twice in one day from two censuses whose goal was an empty
+    // register. A type has to be able to express its own structure's success.
+    // clang-format off
+    constexpr std::array<MediumOnlyNotReadable, 1> kMediumOnlyNotReadable = { {
+        { "NoiseSlot",
+          "the WINNING SPECIES' noise volume, as an index into the layer's four `.dcnv` slots. It is the "
+          "one thing a graph that writes its own density cannot get at: it may call CloudDefaultDensity "
+          "and inherit the authored erosion whole, or build a field from nothing, but it cannot say 'the "
+          "same volume, eroded differently'. Adding the member alone would NOT fix that and would break "
+          "§1.3 in the other direction — the palette has no node that samples a volume by slot, so the "
+          "pin would be an integer an artist can wire nowhere. It is a node in the catalogue plus this "
+          "member, decided together, and that is a task rather than a line. Recorded here so the gap is "
+          "a row somebody has to read instead of a silence." },
+    } };
+    // clang-format on
+
+    /// Every member access `receiver.<Ident>` in @p code, comments removed first — prose about a member
+    /// is not a read of it, and this file's neighbours discuss these members at length.
+    std::set<std::string> MembersRead( const std::string& code, const std::string& receiver )
+    {
+        std::string stripped;
+        stripped.reserve( code.size() );
+        for ( std::size_t i = 0; i < code.size(); )
+        {
+            if ( code.compare( i, 2, "//" ) == 0 )
+            {
+                while ( i < code.size() && code[i] != '\n' )
+                    ++i;
+                continue;
+            }
+            if ( code.compare( i, 2, "/*" ) == 0 )
+            {
+                i += 2;
+                while ( i + 1 < code.size() && code.compare( i, 2, "*/" ) != 0 )
+                    ++i;
+                i = std::min( i + 2, code.size() );
+                continue;
+            }
+            stripped += code[i++];
+        }
+
+        const auto isIdent = []( char c )
+        { return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_'; };
+
+        std::set<std::string> members;
+        const std::string     needle = receiver + ".";
+        for ( std::size_t at = stripped.find( needle ); at != std::string::npos;
+              at             = stripped.find( needle, at + 1 ) )
+        {
+            if ( at != 0 && isIdent( stripped[at - 1] ) )
+                continue; // `myParams.` is a different receiver
+            std::size_t end = at + needle.size();
+            while ( end < stripped.size() && isIdent( stripped[end] ) )
+                ++end;
+            if ( end > at + needle.size() )
+                members.insert( stripped.substr( at + needle.size(), end - at - needle.size() ) );
+        }
+        return members;
+    }
+
+    /// The medium default's members of @p receiver that NO other file in the shader tree reads.
+    std::set<std::string> MediumOnlyMembers( const std::string& receiver )
+    {
+        const std::filesystem::path shaders = RepoRoot() / "Editor/Resources/Shaders";
+        const std::filesystem::path medium  = shaders / "Common/CloudMediumDefault.glslh";
+
+        std::set<std::string> mine = MembersRead( ReadAll( medium ), receiver );
+        std::set<std::string> others;
+        for ( const auto& entry : std::filesystem::recursive_directory_iterator( shaders ) )
+        {
+            if ( !entry.is_regular_file() )
+                continue;
+            const auto extension = entry.path().extension();
+            if ( extension != ".glslh" && extension != ".shader" )
+                continue;
+            if ( std::filesystem::equivalent( entry.path(), medium ) )
+                continue;
+            for ( const std::string& m : MembersRead( ReadAll( entry.path() ), receiver ) )
+                others.insert( m );
+        }
+
+        std::set<std::string> only;
+        for ( const std::string& m : mine )
+            if ( others.count( m ) == 0 )
+                only.insert( m );
+        return only;
+    }
+
+    bool HasRow( const std::string& member )
+    {
+        return std::any_of( std::begin( kMediumOnlyNotReadable ), std::end( kMediumOnlyNotReadable ),
+                            [&member]( const MediumOnlyNotReadable& row ) { return member == row.Member; } );
+    }
+} // namespace
+
+TEST( ShaderGraphVolumeDomain, EveryMaterialValueOnlyTheShippedMediumReadsCanBeReadBackByAGraph )
+{
+    const std::set<std::string> only = MediumOnlyMembers( "params" );
+    ASSERT_FALSE( only.empty() ) << "no material value is read exclusively by the shipped medium, which "
+                                    "would mean this scan found nothing rather than that the relation holds";
+
+    for ( const std::string& member : only )
+    {
+        const bool readable = std::any_of( SG::VolumeParams().begin(), SG::VolumeParams().end(),
+                                           [&member]( const SG::VolumeParam& row )
+                                           { return std::string( row.Expression ) == "params." + member; } );
+
+        EXPECT_TRUE( readable || HasRow( member ) )
+             << "'params." << member
+             << "' is read by Common/CloudMediumDefault.glslh and by nothing else in the shader tree, so "
+                "an authored Medium graph silences it — and no row of ShaderGraph::VolumeParams() lets a "
+                "graph read it back. Either offer it there, or add a row to kMediumOnlyNotReadable saying "
+                "why an artist may not restore a control they can switch off.";
+    }
+}
+
+TEST( ShaderGraphVolumeDomain, EveryProducerOutputOnlyTheShippedMediumReadsIsAPinOfTheCloudSampleNode )
+{
+    const std::set<std::string> only = MediumOnlyMembers( "field" );
+    ASSERT_FALSE( only.empty() ) << "no producer output is read exclusively by the shipped medium, which "
+                                    "would mean this scan found nothing";
+
+    // The Cloud Sample node's pins ARE the members of CloudGraphSample, which is why the struct is read
+    // out of the header rather than mirrored here: a pin renamed without renaming the member is a GLSL
+    // error naming the member, and this assertion is its census.
+    const std::string header = ReadAll( RepoRoot() / "Editor/Resources/Shaders/Common/CloudMediumDefault.glslh" );
+    const std::size_t open   = header.find( "struct CloudGraphSample" );
+    ASSERT_NE( open, std::string::npos ) << "CloudGraphSample is gone, so a graph is handed nothing";
+    const std::size_t begin = header.find( '{', open );
+    const std::size_t end   = header.find( '}', begin );
+    ASSERT_NE( end, std::string::npos );
+    const std::string body = header.substr( begin, end - begin );
+
+    for ( const std::string& member : only )
+    {
+        const bool isPin = body.find( " " + member + ";" ) != std::string::npos;
+
+        EXPECT_TRUE( isPin || HasRow( member ) )
+             << "'field." << member
+             << "' is read by Common/CloudMediumDefault.glslh and by nothing else in the shader tree, so "
+                "an authored Medium graph silences it — and it is not a member of CloudGraphSample, so "
+                "the Cloud Sample node cannot hand it back. Either add it there together with a node that "
+                "can use it, or add a row to kMediumOnlyNotReadable with the reason.";
+    }
+}
+
+TEST( ShaderGraphVolumeDomain, EveryRowExcusingAnUnreadableValueStillDescribesTheTree )
+{
+    // A stale exception is how a real gap hides behind an old excuse — the same both-directions
+    // discipline kCloudUnreadSlots is held to next door.
+    const std::set<std::string> onlyParams = MediumOnlyMembers( "params" );
+    const std::set<std::string> onlyFields = MediumOnlyMembers( "field" );
+
+    for ( const MediumOnlyNotReadable& row : kMediumOnlyNotReadable )
+    {
+        EXPECT_STRNE( row.Reason, "" ) << row.Member << ": a row with an empty reason is not a row";
+        EXPECT_TRUE( onlyParams.count( row.Member ) != 0 || onlyFields.count( row.Member ) != 0 )
+             << "'" << row.Member
+             << "' is excused as a value only the shipped medium reads, and something else in the shader "
+                "tree reads it too — or nothing does. Either way the row no longer describes this tree; "
+                "delete it.";
     }
 }

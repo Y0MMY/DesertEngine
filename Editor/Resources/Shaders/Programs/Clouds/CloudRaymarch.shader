@@ -17,12 +17,13 @@ Shader "CloudRaymarch"
     // exactly as the component fields were — the migration copies scene numbers verbatim. Extinction is
     // per kilometre, as its display name says.
     //
-    // EVERY PROPERTY DECLARES ITS `Timing`, AND THAT IS NOT DECORATION. Twenty of the thirty-four below are
+    // EVERY PROPERTY DECLARES ITS `Timing`, AND THAT IS NOT DECORATION. Twenty of the thirty-five below are
     // inputs to a CPU BAKE of a 256x32x256 volume over several thousand cloud bodies, so moving one of them
     // re-runs that bake — measured at 3.3 to 14.1 s on the development machine — and the sky goes on showing
-    // the PREVIOUS volume until the new one lands. The other fourteen are read per sample by the march below
-    // and answer in the frame that is drawn next. Until this attribute existed the two were indistinguishable
-    // in the Material Editor, and the owner reported the layer as "not updating" twice.
+    // the PREVIOUS volume until the new one lands. The other fifteen answer in the frame that is drawn next:
+    // fourteen are read per sample by the march below, and the fifteenth is the authored Medium, which is
+    // COMPILED INTO it. Until this attribute existed the two were indistinguishable in the Material Editor,
+    // and the owner reported the layer as "not updating" twice.
     //
     // THE CLAIM IS CHECKED, not asserted: Desert/Tests/Engine/CloudMaterialTiming perturbs one value at a
     // time through Graphic::ApplyCloudMaterialToBakeParams and asks Graphic's own rebake decision
@@ -77,7 +78,7 @@ Shader "CloudRaymarch"
         Float MultiScatterContribution ("Multiple Scattering Contribution", Range(0.0, 1.0), Category("Lighting"), Timing(Immediate), Tooltip("How much each successive scattering order contributes. The factor is SQUARED at every octave, so the series falls away quickly and the third order is already a small correction.")) = 0.667
         Float MultiScatterOcclusion ("Multiple Scattering Occlusion", Range(0.0, 1.0), Category("Lighting"), Timing(Immediate), Tooltip("How much less each successive order is absorbed. This is what lets light that has already scattered reach the core of a cloud that the direct beam never gets into - the reason a thick cumulus glows rather than going black. 0.4847 (the cube root of the similarity factor) puts the third octave exactly on the medium's diffusion length; 0.25 is the shipped calibration at 8/km (D-32).")) = 0.25
         Float MultiScatterEccentricity ("Multiple Scattering Eccentricity", Range(0.0, 1.0), Category("Lighting"), Timing(Immediate), Tooltip("How much directionality each successive order keeps. Light that has bounced many times has forgotten where it came from, so the higher orders blend toward an isotropic phase.")) = 0.18
-        ShaderProgram Medium ("Cloud Medium", Category("Medium"), Timing(Immediate), Tooltip("WHAT A CLOUD IS at a point in space - the density, the extinction, the albedo, the emission and the sky occlusion of the medium itself, authored as a node graph. Create one with New Shader Graph > Cloud Medium in the Content Browser, then drop it here. EMPTY IS THE NORMAL STATE and means the engine's own medium, which is what every scene drew before this slot existed and costs exactly the same. A graph with nothing wired into its Volume Output is that same medium again, so authoring starts from the sky you already have rather than from nothing. Note what the graph CANNOT reach: about half of the values in this window are inputs to a CPU bake that has already run by the time the march samples anything, and they are marked as such - a graph reads the three that are still in scope, and the palette offers no way to name the others."))
+        ShaderProgram Medium ("Cloud Medium", Category("Medium"), Timing(Immediate), Tooltip("WHAT A CLOUD IS at a point in space - the density, the extinction, the albedo, the emission and the sky occlusion of the medium itself, authored as a node graph. Create one with New Shader Graph > Cloud Medium in the Content Browser, then drop it here. EMPTY IS THE NORMAL STATE and means the engine's own medium, which is what every scene drew before this slot existed and costs exactly the same. A graph with nothing wired into its Volume Output is that same medium again, so authoring starts from the sky you already have rather than from nothing. Note what the graph CANNOT reach: about half of the values in this window are inputs to a CPU bake that has already run by the time the march samples anything, and they are marked as such - a graph reads only the ones that are still in scope, and the palette offers no way to name the others - Cloud Material Param lists exactly those and nothing else."))
 
         Color3 AmbientScale ("Ambient Scale", Category("Lighting"), Timing(Immediate), Tooltip("Scales the sky's ambient contribution to the clouds. White is the full contribution; black lights them by the sun alone and leaves their shadowed sides black. Lowering it is NOT how the clouds get their form back: deleting it is the largest single knockout in the subsystem (D-25, D-32), and the contrast that appears when it goes is the sun's, uncovered - the frame loses half its light and goes warm.")) = (1.0, 1.0, 1.0)
     }
