@@ -66,6 +66,12 @@ namespace Desert::Assets
     // WHY THE TYPE IS PART OF THE KEY: two asset classes are allowed to sit on one path (the handle
     // derivation deliberately gives them the same number) and they are still two records.
     //
+    // THIS IS THE ENGINE'S ANSWER EVERYWHERE ELSE ALREADY, which is what makes it the shape to converge
+    // on rather than a preference. `FontService::RegisterFont`, `VideoService::RegisterVideo` and
+    // `IconService::RegisterIcon` each key their registry on `AssetHandle::FromCookedPath` — i.e. on this
+    // same derivation — and each says in its own comment that hashing the raw string gave one file two
+    // handles. Three small registries had paid for it and fixed it; the main one had not.
+    //
     // WHY THE STABLE KEY AND NOT THE HANDLE: Texture2D and Material overwrite their handle from an id
     // stored inside their file during Load, so a not-yet-loaded lookup record carries the path-derived
     // value and would never match a loaded one.

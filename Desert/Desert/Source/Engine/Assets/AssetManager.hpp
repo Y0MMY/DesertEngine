@@ -61,7 +61,10 @@ namespace Desert::Assets
         AssetManager( AssetManager&& )                 = delete;
         AssetManager& operator=( AssetManager&& )      = delete;
 
-        using KeyHandle      = Common::Filepath;
+        // `using KeyHandle = Common::Filepath;` stood here with ZERO users anywhere in the repository. It
+        // was the old spelling of "what this registry is keyed on", and leaving a name that says a path
+        // is the key next to a class that has just stopped keying on paths is how the next reader gets
+        // the wrong answer for free. `AssetKey` is that name now.
         using AssetContainer = std::vector<std::pair<AssetMetadata, Asset<AssetBase>>>;
         using AssetIndex     = uint32_t;
 
