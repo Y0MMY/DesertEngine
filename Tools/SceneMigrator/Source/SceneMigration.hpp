@@ -33,6 +33,15 @@
 
 #include <Common/Core/Constants.hpp>
 
+// EVERY REGISTRY BELOW IS AN std::array AND NONE IS A C ARRAY, WHICH IS A CORRECTNESS RULE HERE RATHER
+// THAN A STYLE ONE. A registry of retirements is designed to reach ZERO rows; `T k[] = {}` cannot express
+// that, because C++ has no zero-length array. Clang accepts one as a GNU extension and MSVC rejects it
+// with C2466 plus a cascade from every loop that walks it, so the terminal state of these tables compiles
+// on this machine and fails on Windows 35 minutes later - which happened twice on 2026-09-08, from two
+// censuses that had each reached their goal of an empty register. A type that cannot express the success
+// of its own structure makes someone keep one dead row for ever just to build.
+#include <array>
+
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -765,7 +774,15 @@ namespace Desert::Migration
     // struct that owns them now (Graphic::DebugViewState) — and two of the three are in different targets.
     // A test asserts this list against DebugViewState's own declaration, so a field ADDED there and
     // forgotten here fails rather than quietly stays serializable.
-    inline constexpr const char* kDebugViewKeys[] = {
+    //
+    // The size is deduced, never typed: a hand-written count is one more thing that can disagree with the
+    // rows, and this list already answers to two other declarations.
+    //
+    // UNLIKE kRetiredKeys BELOW, THIS ONE DOES NOT EMPTY ROW BY ROW, and measuring that is what put the
+    // sentence here: dropping it to zero on its own turns SceneDebugFields red twice over, because
+    // DebugViewState still declares the ten fields this must mirror. It reaches zero only by being DELETED
+    // whole, with MigrateDebugViewV12ToV13, when no v12 file can exist.
+    inline constexpr std::array kDebugViewKeys = {
          "ShowGrid",      "ShowColliders", "ShowBoundingBoxes", "BoundingBoxColor", "BoundingBoxLineWidth",
          "WireframeMode", "ShowNormals",   "LightingDebug",     "ShadowDebug",      "DeferredDebug",
     };
@@ -831,10 +848,15 @@ namespace Desert::Migration
     // A row is deleted once no file below the version that introduced it can exist - which, because the
     // loader refuses anything that is not at kSceneVersion, is as soon as the corpus has been run through.
     // The rows are kept for one generation so that a branch merged late still gets converted.
-    inline constexpr RetiredKey kRetiredKeys[] = {
-         { "Settings", "EnableSSGI",
-           "the screen-space GI toggle was replaced by the GlobalIllumination mode on 2026-08-06 "
-           "(commit 0b788b1b); nothing has read it since" },
+    //
+    // AN EMPTY TABLE IS THIS LIST SUCCEEDING, so the type has to be able to spell one: when the last row
+    // goes, this declaration becomes `inline constexpr std::array<RetiredKey, 0> kRetiredKeys = {};` and
+    // every loop below keeps compiling on both toolchains. `RetiredKey k[] = {}` is not a legal C++
+    // declaration at all, which is how a table meant to empty acquires a permanent last row.
+    inline constexpr std::array kRetiredKeys = {
+         RetiredKey{ "Settings", "EnableSSGI",
+                     "the screen-space GI toggle was replaced by the GlobalIllumination mode on 2026-08-06 "
+                     "(commit 0b788b1b); nothing has read it since" },
 
          // K3's five, and they are a different kind of row from the one above: EnableSSGI named a value
          // nothing read, these name values that are still read and are read SOMEWHERE ELSE. Each says so,
@@ -848,22 +870,22 @@ namespace Desert::Migration
          // defaults digit for digit (Common/Settings/MachineSettings.hpp), so a scene that stated a
          // default renders exactly the frame it rendered before; one that stated something else is named
          // in the log with the value it stated, so the operator can set it once, for the machine.
-         { "Settings", "AA",
-           "post-process anti-aliasing is machine quality (K3): it moved to "
-           "Common::Settings::MachineSettings::AA, which the editor reads from "
-           "~/.desertengine/machine.json and a packaged game from the player's own directory" },
-         { "Settings", "MeshLOD",
-           "distance mesh LOD is machine quality (K3) - LOD0 is byte-identical geometry near the camera, "
-           "so off vs on is fidelity and not authoring; it moved to MachineSettings::MeshLOD" },
-         { "Settings", "TextureFilterMode",
-           "the sampler filter is machine quality (K3) - the same picture, sharper or blurrier; it moved "
-           "to MachineSettings::TextureFilterMode" },
-         { "Settings", "Anisotropy",
-           "sampler anisotropy is machine quality (K3), for the same reason as the filter it belongs to; "
-           "it moved to MachineSettings::Anisotropy" },
-         { "Settings", "CloudQualityTier",
-           "the cloud march's occlusion budget is machine quality (K3) - High reproduces the calibrated "
-           "constants to the digit; it moved to MachineSettings::CloudQualityTier" },
+         RetiredKey{ "Settings", "AA",
+                     "post-process anti-aliasing is machine quality (K3): it moved to "
+                     "Common::Settings::MachineSettings::AA, which the editor reads from "
+                     "~/.desertengine/machine.json and a packaged game from the player's own directory" },
+         RetiredKey{ "Settings", "MeshLOD",
+                     "distance mesh LOD is machine quality (K3) - LOD0 is byte-identical geometry near the "
+                     "camera, so off vs on is fidelity and not authoring; it moved to MachineSettings::MeshLOD" },
+         RetiredKey{ "Settings", "TextureFilterMode",
+                     "the sampler filter is machine quality (K3) - the same picture, sharper or blurrier; it "
+                     "moved to MachineSettings::TextureFilterMode" },
+         RetiredKey{ "Settings", "Anisotropy",
+                     "sampler anisotropy is machine quality (K3), for the same reason as the filter it belongs "
+                     "to; it moved to MachineSettings::Anisotropy" },
+         RetiredKey{ "Settings", "CloudQualityTier",
+                     "the cloud march's occlusion budget is machine quality (K3) - High reproduces the "
+                     "calibrated constants to the digit; it moved to MachineSettings::CloudQualityTier" },
     };
 
     // What MigrateRetiredKeys removed from one file.

@@ -25,6 +25,7 @@
 #include <rflcpp/rfl/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <optional>
@@ -58,7 +59,12 @@ namespace Desert::Migration
         // What is deliberately NOT here: SkyboxHandle and Intensity stay under "Skybox" (they are the HDR
         // path, which did not move) - this
         // function neither reads nor removes them.
-        constexpr SkyFieldMapping kSkyFieldMappings[] = {
+        //
+        // std::to_array rather than a C array, like every table in this tool: see the rule at the top of
+        // SceneMigration.hpp. Here it also keeps the row count out of the source - `std::array<T, 14>`
+        // would ZERO-FILL a miscount rather than reject it, and a { nullptr, nullptr } mapping row is the
+        // one shape the static_assert below cannot see.
+        constexpr auto kSkyFieldMappings = std::to_array<SkyFieldMapping>( {
              { "Procedural", "Enabled", MappedKind::Bool },
              { "SkyBrightness", "SkyBrightness", MappedKind::Scalar },
              { "HorizonFalloff", "HorizonFalloff", MappedKind::Scalar },
@@ -73,7 +79,7 @@ namespace Desert::Migration
              { "SunsetColor", "SunsetColor", MappedKind::Color3 },
              { "SunsetIntensity", "SunsetIntensity", MappedKind::Scalar },
              { "StarIntensity", "StarIntensity", MappedKind::Scalar },
-        };
+        } );
 
         constexpr int kMappedFieldCount = static_cast<int>( std::size( kSkyFieldMappings ) );
 
@@ -277,7 +283,7 @@ namespace Desert::Migration
             Arity       Kind;
         };
 
-        constexpr ScaledField kScaledFields[] = {
+        constexpr auto kScaledFields = std::to_array<ScaledField>( {
              { "Camera", "Near", Arity::Scalar },
              { "Camera", "Far", Arity::Scalar },
              { "PointLight", "Radius", Arity::Scalar },
@@ -293,7 +299,7 @@ namespace Desert::Migration
              { "Terrain", "HeightScale", Arity::Scalar },
              { "Terrain", "GrassHeight", Arity::Scalar },
              { "Text", "Size", Arity::Scalar },
-        };
+        } );
 
         // Multiplies one value in place. Returns false when the key was there but unusable, which is the
         // only case worth reporting - an absent key is a scene that predates the field, not a failure.
@@ -496,8 +502,8 @@ namespace Desert::Migration
     {
         // The four keys the GPU bake was parameterised by. Named as data rather than tested for one at a
         // time so the list can be read in one look and so the count in the report cannot drift from it.
-        static constexpr const char* kRemovedBakeKeys[] = { "WeatherSeed", "WeatherOctaves", "DetailSeed",
-                                                            "DetailOctaves" };
+        static constexpr std::array kRemovedBakeKeys = { "WeatherSeed", "WeatherOctaves", "DetailSeed",
+                                                         "DetailOctaves" };
 
         CloudNoiseMigrationReport report;
 
@@ -549,7 +555,7 @@ namespace Desert::Migration
     {
         // The three keys with nowhere to go. Named as data rather than tested one at a time so the list
         // reads in one look and the count in the report cannot drift from it.
-        static constexpr const char* kRemovedKeys[] = { "LayerBottomAltitude", "LayerThickness",
+        static constexpr std::array  kRemovedKeys   = { "LayerBottomAltitude", "LayerThickness",
                                                         "CloudTypeVariance" };
         static constexpr const char* kTypeKey       = "CloudType";
         static constexpr const char* kSpeciesKey    = "Species";
@@ -656,7 +662,7 @@ namespace Desert::Migration
         // each name is the stem of a shipped `.decloudtype` carrying the same twelve numbers T0 compiled
         // in. Two statements of one library, and Desert/Tests/Engine/CloudType is what keeps them equal —
         // it opens each file this array names and compares it against what T0 shipped.
-        static constexpr const char* kSpeciesOrder[] = {
+        static constexpr std::array kSpeciesOrder = {
              Assets::kCloudTypeStratus,
              Assets::kCloudTypeCumulusMediocris,
              Assets::kCloudTypeCumulusCongestus,
@@ -930,12 +936,12 @@ namespace Desert::Migration
             bool        IsList;
         };
 
-        constexpr MaterialPathSite kMaterialPathSites[] = {
+        constexpr auto kMaterialPathSites = std::to_array<MaterialPathSite>( {
              { "StaticMesh", "MaterialPaths", true },
              { "InstancedStaticMesh", "MaterialPaths", true },
              { "SkinnedMesh", "MaterialPaths", true },
              { "Terrain", "Material", false },
-        };
+        } );
 
         // The path `stored` names, expressed relative to `assetsRoot`, or nullopt when it already is (or
         // lies outside the root, or is empty).
@@ -1640,12 +1646,12 @@ namespace Desert::Migration
             const char* OldKey; // the key a v16 file states
             const char* NewKey; // what it is called from v17 on; equal to OldKey where nothing renames
         };
-        static constexpr Site kSites[] = {
+        static constexpr auto kSites = std::to_array<Site>( {
              { "Text", "FontPath", "Font" }, // renamed WITH the value: it is not a path any more
              { "UIText", "Font", "Font" },
              { "UIIcon", "Icon", "Icon" },
              { "UIPanel", "Video", "Video" },
-        };
+        } );
 
         ServiceAssetRootMigrationReport report;
 
@@ -1864,7 +1870,7 @@ namespace Desert::Migration
             const char* Key;
             int         Components;
         };
-        static constexpr MovedValue kValues[] = {
+        static constexpr auto       kValues     = std::to_array<MovedValue>( {
              { "Coverage", 1 },
              { "CoverageContrast", 1 },
              { "WeatherTileSize", 1 },
@@ -1893,10 +1899,10 @@ namespace Desert::Migration
              { "MultiScatterOcclusion", 1 },
              { "MultiScatterEccentricity", 1 },
              { "AmbientScale", 3 },
-        };
-        static constexpr const char* kAssets[]   = { "CloudType1", "CloudType2", "CloudType3", "CloudType4",
-                                                     "CloudLayout" };
-        static constexpr size_t      kMovedCount = std::size( kValues ) + std::size( kAssets );
+        } );
+        static constexpr std::array kAssets     = { "CloudType1", "CloudType2", "CloudType3", "CloudType4",
+                                                    "CloudLayout" };
+        static constexpr size_t     kMovedCount = std::size( kValues ) + std::size( kAssets );
 
         const auto isMovedValue = []( const std::string& key ) -> const MovedValue*
         {

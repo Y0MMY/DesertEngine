@@ -170,7 +170,7 @@ namespace
         return fields;
     }
 
-    // The string literals of `kDebugViewKeys[] = { ... }` in the migration header — the migration's own
+    // The string literals of `std::array kDebugViewKeys = { ... }` in the migration header — the migration's own
     // statement of what it strips, read as data so this suite can compare it with the struct without
     // linking the tool.
     std::vector<std::string> MigrationKeys( const std::string& source )
