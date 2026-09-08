@@ -189,8 +189,8 @@ TEST( PrefabVersionGate, TheRefusalNamesTheFileTheVersionTheTargetAndTheCommand 
     EXPECT_TRUE( Mentions( message, "v" + std::to_string( kSceneVersion ) ) ) << message;
     EXPECT_TRUE( Mentions( message, "v" + std::to_string( kUnitVersion ) ) ) << message;
     // The command — the tool AND the argument, not just the tool's name.
-    EXPECT_TRUE( Mentions( message, "PrefabMigrator" ) ) << message;
-    EXPECT_TRUE( Mentions( message, "PrefabMigrator \"Assets/Prefabs/Old.deprefab\"" ) ) << message;
+    EXPECT_TRUE( Mentions( message, "SceneMigrator" ) ) << message;
+    EXPECT_TRUE( Mentions( message, "SceneMigrator \"Assets/Prefabs/Old.deprefab\"" ) ) << message;
 }
 
 TEST( PrefabVersionGate, TheRefusalSaysNothingWasLoaded )
@@ -234,7 +234,7 @@ TEST( PrefabVersionGate, EveryOtherGenerationIsRefusedAndNamedByItsOwnNumber )
         ASSERT_FALSE( static_cast<bool>( loadable ) ) << "scene schema v" << version << " was accepted";
         EXPECT_TRUE( Mentions( loadable.GetError(), "v" + std::to_string( version ) ) )
              << "the refusal for v" << version << " does not say which version it found: " << loadable.GetError();
-        EXPECT_TRUE( Mentions( loadable.GetError(), "PrefabMigrator" ) ) << loadable.GetError();
+        EXPECT_TRUE( Mentions( loadable.GetError(), "SceneMigrator" ) ) << loadable.GetError();
     }
 }
 
@@ -249,7 +249,7 @@ TEST( PrefabVersionGate, AnUnversionedPrefabParsesAndIsRefusedAsVersionZero )
 
     ASSERT_FALSE( static_cast<bool>( loadable ) );
     EXPECT_TRUE( Mentions( loadable.GetError(), "v0" ) ) << loadable.GetError();
-    EXPECT_TRUE( Mentions( loadable.GetError(), "PrefabMigrator" ) ) << loadable.GetError();
+    EXPECT_TRUE( Mentions( loadable.GetError(), "SceneMigrator" ) ) << loadable.GetError();
 }
 
 // Text that is not a prefab at all fails as a READ rather than as a version. The two failures are worth
@@ -261,7 +261,7 @@ TEST( PrefabVersionGate, TextThatIsNotAPrefabFailsAsAReadAndStillNamesTheFile )
     ASSERT_FALSE( static_cast<bool>( loadable ) );
     EXPECT_TRUE( Mentions( loadable.GetError(), "Broken.deprefab" ) ) << loadable.GetError();
     EXPECT_TRUE( Mentions( loadable.GetError(), "not a readable prefab file" ) ) << loadable.GetError();
-    EXPECT_FALSE( Mentions( loadable.GetError(), "PrefabMigrator" ) )
+    EXPECT_FALSE( Mentions( loadable.GetError(), "SceneMigrator" ) )
          << "a file that is not a prefab is not fixed by migrating it: " << loadable.GetError();
 }
 
@@ -269,7 +269,7 @@ TEST( PrefabVersionGate, TextThatIsNotAPrefabFailsAsAReadAndStillNamesTheFile )
 // 4. THE SAVER AND THE GATE — one relation, held from the writing side
 // ---------------------------------------------------------------------------------------------------
 
-// WritePrefabJson is the one writer of .deprefab text (PrefabAsset::Serialize and PrefabMigrator both go
+// WritePrefabJson is the one writer of .deprefab text (PrefabAsset::Serialize and SceneMigrator both go
 // through it), and everything it writes must satisfy the gate that will read it back. Delete the stamp
 // inside WritePrefabJson and this is the test that goes red — verified by that exact mutation.
 TEST( PrefabVersionGate, WhatTheSaverWritesTheGateAccepts )

@@ -8,22 +8,29 @@ project(test_name)
     targetdir ("%{wks.location}/build/Bin/Tests/%{cfg.buildcfg}")
     objdir ("%{wks.location}/build/Tests/Intermediates/%{cfg.buildcfg}")
 
-    -- The migration and the engine gate it must agree with, and nothing else. The migration is a pure
-    -- function over the parsed tree and the gate is a pure function over the same tree; this project
-    -- linking without a renderer, an asset manager or a scene is the proof, exactly as it is for the
-    -- scene migration suites beside this one.
+    -- Reflection.gen.cpp is written by DesertHeaderTool as a PREBUILD STEP OF `Desert`. Without this edge
+    -- a parallel build can compile a stale table in and the assertions would report on yesterday's struct.
+    dependson { "Desert" }
+
+    -- The SHARED step chain (SceneMigration.cpp — the prefab entry point lives there, beside the scene
+    -- one, because they are the same steps) and the engine gate the migration must agree with. Nothing
+    -- else: both are pure functions over the parsed tree, and this project linking without a renderer,
+    -- an asset manager or a scene is the proof, exactly as it is for the scene migration suites beside it.
     files {
         test_files,
-        "%{wks.location}/Tools/PrefabMigrator/Source/PrefabMigration.cpp",
+        "%{wks.location}/Tools/SceneMigrator/Source/SceneMigration.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/Prefab/PrefabFormat.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionRegistry.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionSerializer.cpp",
     }
 
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
         -- The migration lives in the TOOL (the engine loader only refuses; see PrefabFormat.hpp). This
-        -- is what makes `#include <PrefabMigration.hpp>` resolve.
-        "%{wks.location}/Tools/PrefabMigrator/Source",
+        -- is what makes `#include <SceneMigration.hpp>` resolve.
+        "%{wks.location}/Tools/SceneMigrator/Source",
     }
     externalincludedirs {
         "%{wks.location}/ThirdParty/entt/include/",       -- PrefabData reaches ECS headers

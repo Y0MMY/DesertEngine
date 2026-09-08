@@ -193,7 +193,7 @@ namespace Desert::Assets
         // remembered prefabs or not. Before Д28 nothing here said which generation a .deprefab was — a
         // format change broke prefabs silently and the user's load was where it surfaced (the crash Ф1
         // fixed was this class of defect). The saver stamps both (WritePrefabJson), the loader requires
-        // both (ParseLoadablePrefab in PrefabFormat.hpp), and Tools/PrefabMigrator converts anything else.
+        // both (ParseLoadablePrefab in PrefabFormat.hpp), and Tools/SceneMigrator converts anything else.
         //
         // Optional so an OLD file still PARSES - into a tree the gate then refuses BY NAME instead of a
         // read error. Absent = version 0, not "current" (see PrefabIsAtCurrentVersion).

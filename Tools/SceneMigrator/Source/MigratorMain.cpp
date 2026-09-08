@@ -27,7 +27,14 @@
 // in that case, a layout slot the shader no longer declares. A `.demat` has no version field, so that step
 // is content-detected and idempotent rather than version-gated; see MigrateCloudMaterialLayoutInputs.
 //
-//   SceneMigrator <path>...        .desce and .demat files, or directories searched recursively
+// AND `.deprefab` FILES, since И11, and this is why there is no second tool. A prefab carries the scene's
+// own EntityData and SHARES the scene's two version integers, so raising the head moves prefabs too — but
+// the conversion used to live in a separate binary with a separate corpus, so raising the head and running
+// only this one left every prefab in the tree at the old number, refused by the loader and by its own
+// migrator alike. One number, one chain (Source/SceneMigration.cpp), one command.
+//
+//   SceneMigrator <path>...          .desce, .demat and .deprefab files, or directories searched
+//                                    recursively
 //   SceneMigrator --check <path>...  report what would change and write nothing (exit 1 if any would)
 
 #include "MigratorMain.hpp"
@@ -57,8 +64,16 @@ namespace
     // longer declares.
     constexpr const char* kMaterialExtension = ".demat";
 
+    // PREFABS ARE COLLECTED TOO, since И11, and by THIS tool rather than a second one. A `.deprefab`
+    // carries the scene's own EntityData and shares the scene's two version integers, so it moves
+    // through the same generations and is raised by the same chain — and the two-binaries arrangement it
+    // replaces meant that raising the head required remembering to run a SECOND command over a SECOND
+    // corpus. Forgetting it is precisely the data loss the shared version number creates: prefabs left
+    // at the old number, refused by the loader and by their own migrator alike.
+    constexpr const char* kPrefabExtension = ".deprefab";
+
     void Collect( const std::filesystem::path& root, std::vector<std::filesystem::path>& scenes,
-                  std::vector<std::filesystem::path>& materials )
+                  std::vector<std::filesystem::path>& materials, std::vector<std::filesystem::path>& prefabs )
     {
         std::error_code ec;
         if ( std::filesystem::is_directory( root, ec ) )
@@ -71,12 +86,16 @@ namespace
                     scenes.push_back( entry.path() );
                 else if ( entry.path().extension() == kMaterialExtension )
                     materials.push_back( entry.path() );
+                else if ( entry.path().extension() == kPrefabExtension )
+                    prefabs.push_back( entry.path() );
             }
             return;
         }
 
         if ( root.extension() == kMaterialExtension )
             materials.push_back( root );
+        else if ( root.extension() == kPrefabExtension )
+            prefabs.push_back( root );
         else
             scenes.push_back( root );
     }
@@ -88,22 +107,385 @@ namespace
         buffer << in.rdbuf();
         return buffer.str();
     }
+
+    // THE `.demat` FILES A v11 -> v12 RAISE PRODUCED, written FIRST and atomically, before the file that
+    // names them: a file naming a material which does not exist is worse than one not yet migrated, so if
+    // a material cannot be written its source is not either. Returns false on failure, having named it,
+    // and the caller then leaves the source file exactly as it found it.
+    //
+    // Shared by scenes and prefabs since И11 — a prefab can carry a VolumetricCloud entity like any other,
+    // and the collision guard below has to see BOTH file classes through ONE `claimed` map, or two files
+    // of different classes minting the same material name would overwrite each other unseen.
+    bool WriteCloudMaterials( const std::vector<Desert::Migration::CloudMaterialFile>& produced,
+                              const std::filesystem::path& assetsRoot, const std::filesystem::path& source,
+                              std::map<std::string, std::string>& claimed, std::ostream& out, std::ostream& err )
+    {
+        for ( const auto& mat : produced )
+        {
+            // Under the SAME root the migration was measured against: the relative path inside the file
+            // and the file on disk must agree about one root, or the source names a material that is not
+            // where it says. That root is the SOURCE FILE'S and not the process's working directory —
+            // see the header for what the working directory cost.
+            const std::filesystem::path matPath = ( assetsRoot / mat.RelativePath ).lexically_normal();
+
+            // TWO FILES MUST NOT LAND ON ONE MATERIAL FILE. The name is derived from the source's own
+            // name, which is NOT unique by construction — a .desce copied from another and edited keeps
+            // the original's name, and this repository's own verification protocol relies on exactly that
+            // copying. Two such files would produce one path here, the second write would take the
+            // first's look, and BOTH would then name a file that describes only one of them: a silent
+            // whole-sky loss with nothing in the log. The migration function is pure and per-file, so it
+            // cannot see the collision; this loop is the only place in the run that can. Named and fatal,
+            // never resolved by guessing at a suffix — the fix is to give the file its own name, which is
+            // what the operator has to know.
+            const auto entry = claimed.emplace( matPath.generic_string(), source.string() );
+            if ( !entry.second && entry.first->second != source.string() )
+            {
+                err << "FAIL   " << source.string() << " — its cloud material would be written to "
+                    << matPath.string() << ", which " << entry.first->second
+                    << " already claimed in this run: both state the same name. Give one of them its own "
+                    << "name and re-run; neither file is modified.\n";
+                return false;
+            }
+
+            std::error_code ec;
+            std::filesystem::create_directories( matPath.parent_path(), ec );
+            if ( !Common::Utils::FileSystem::WriteContentToFileAtomic( matPath, mat.Json ) )
+            {
+                err << "FAIL   " << matPath.string() << " — the cloud material could not be written; "
+                    << source.string() << " is left at its old version\n";
+                return false;
+            }
+            // The FULL path, not the relative name it used to print. An operator reading "wrote
+            // Materials/M_X.demat" cannot tell which of two trees it landed in, which is precisely the
+            // question this defect turned on; the line now answers it.
+            out << "        wrote " << matPath.string() << "\n";
+        }
+        return true;
+    }
+
+    // WHAT THE CHAIN DID, in one line, for a scene OR a prefab: the same report comes back from
+    // both entry points, so the same function prints it and no step can be reported in one file class
+    // and silently omitted in the other. §4.7 - a migration that says nothing is a migration nobody can
+    // check.
+    //
+    // `canonical` is null for a prefab, which has no scene-wide Settings block to canonicalise - the
+    // same structural argument the chain itself makes with its settings pointer.
+    void PrintSteps( std::ostream& out, const Desert::Migration::FileMigrationReport& report,
+                     const Desert::Migration::SettingsCanonicalisationReport* canonical )
+    {
+        if ( report.SkyRaised )
+            out << " sky v0->v" << Desert::Migration::kSceneVersionSky << " (" << report.Sky.Entities
+                << " entity(ies), " << report.Sky.FieldsCarried << " carried, " << report.Sky.FieldsRejected
+                << " rejected)";
+        if ( report.TonemapperRaised )
+            out << " scene v" << Desert::Migration::kSceneVersionSky << "->v"
+                << Desert::Migration::kSceneVersionTonemap << " ("
+                << ( report.Tonemap.OperatorPinned ? "tonemapper pinned to Reinhard"
+                                                   : "tonemapper NOT pinned — see the warning above" )
+                << ( report.Tonemap.SettingsCreated ? ", settings block created" : "" ) << ")";
+        if ( report.CloudNoiseRaised )
+        {
+            out << " scene v" << Desert::Migration::kSceneVersionTonemap << "->v"
+                << Desert::Migration::kSceneVersionCloudNoise << " (";
+            if ( report.CloudNoise.Entities > 0 )
+                out << report.CloudNoise.FieldsDropped << " cloud bake setting(s) dropped from "
+                    << report.CloudNoise.Entities << " entity(ies)";
+            else
+                out << "stamp only — no cloud layer carried a bake setting";
+            out << ")";
+        }
+        // The three cloud steps below went unreported until 2026-09-06: Changed() was true, the file
+        // was rewritten, and the report line skipped straight from v3 to v6 — a silent migration,
+        // which §4.7 forbids ("log which scene, from which version to which, and how many fields
+        // moved"). Their counters existed all along; only the printing was missing.
+        if ( report.CloudSpeciesRaised )
+        {
+            out << " scene v" << Desert::Migration::kSceneVersionCloudNoise << "->v"
+                << Desert::Migration::kSceneVersionCloudSpecies << " (";
+            if ( report.CloudSpecies.Entities > 0 )
+                out << report.CloudSpecies.FieldsDropped << " authored shell field(s) dropped and "
+                    << report.CloudSpecies.SpeciesSet << " scalar type(s) turned into a species on "
+                    << report.CloudSpecies.Entities << " entity(ies)";
+            else
+                out << "stamp only — no cloud layer carried the scalar-type shape";
+            out << ")";
+        }
+        if ( report.CloudTypeRaised )
+        {
+            out << " scene v" << Desert::Migration::kSceneVersionCloudSpecies << "->v"
+                << Desert::Migration::kSceneVersionCloudType << " (";
+            if ( report.CloudType.Entities > 0 )
+            {
+                out << report.CloudType.TypesSet << " species enumerator(s) became a .decloudtype path on "
+                    << report.CloudType.Entities << " entity(ies)";
+                // Named loud, not folded into the count: these two are the cases the operator has to
+                // act on — a layer that lost its noise volume renders a different sky until re-pointed.
+                if ( report.CloudType.VolumesLost > 0 )
+                    out << "; " << report.CloudType.VolumesLost
+                        << " layer noise volume(s) DROPPED — re-point them on the cloud type";
+                if ( report.CloudType.FieldsBroken > 0 )
+                    out << "; " << report.CloudType.FieldsBroken
+                        << " unreadable species value(s) left at the default";
+            }
+            else
+            {
+                out << "stamp only — no cloud layer named a species";
+            }
+            out << ")";
+        }
+        if ( report.CloudSetRaised )
+        {
+            out << " scene v" << Desert::Migration::kSceneVersionCloudType << "->v"
+                << Desert::Migration::kSceneVersionCloudSet << " (";
+            if ( report.CloudSet.Entities > 0 )
+                out << report.CloudSet.SlotsCarried << " cloud type(s) moved into slot 1 of the set on "
+                    << report.CloudSet.Entities << " entity(ies), " << report.CloudSet.SlotsEmpty
+                    << " of them the empty handle";
+            else
+                out << "stamp only — no cloud layer carried a single-type key";
+            out << ")";
+        }
+        if ( report.TerrainMaterialRaised )
+        {
+            out << " scene v" << Desert::Migration::kSceneVersionCloudSet << "->v"
+                << Desert::Migration::kSceneVersionTerrainMaterial << " (";
+            if ( report.TerrainMaterial.Entities > 0 )
+            {
+                // Named, not counted, and for the same reason the loader names them: this step DROPS the
+                // values it finds, so the operator running this tool has to be able to see what left.
+                out << "inline terrain material removed from " << report.TerrainMaterial.Entities
+                    << " entity(ies), dropping " << report.TerrainMaterial.Params << " param(s) and "
+                    << report.TerrainMaterial.Textures << " texture(s):";
+                for ( const auto& name : report.TerrainMaterial.DroppedNames )
+                    out << " " << name;
+            }
+            else
+            {
+                out << "stamp only — no terrain entity carried an inline material";
+            }
+            out << ")";
+        }
+        if ( report.MaterialPathRaised )
+        {
+            out << " scene v" << Desert::Migration::kSceneVersionTerrainMaterial << "->v"
+                << Desert::Migration::kSceneVersionMaterialPath << " (";
+            if ( report.MaterialPath.Paths > 0 )
+                out << report.MaterialPath.Paths << " material path(s) made relative to the assets "
+                    << "root in " << report.MaterialPath.Entities << " entity(ies)";
+            else
+                out << "stamp only - no entity named a material by an absolute path";
+            // Named, not counted, for the reason the terrain step names its drops: these are the ones the
+            // step could not fix, and the operator has to be able to see which slot to re-point.
+            for ( const auto& name : report.MaterialPath.OutsideNames )
+                out << "; OUTSIDE the assets root, left absolute: " << name;
+            out << ")";
+        }
+        if ( report.GravityUnitsRaised )
+        {
+            out << " scene v" << Desert::Migration::kSceneVersionMaterialPath << "->v"
+                << Desert::Migration::kSceneVersionGravityUnits << " (";
+            if ( !report.GravityUnits.Found )
+                out << "stamp only - the scene states no gravity";
+            else if ( report.GravityUnits.Scaled )
+                out << "gravity " << report.GravityUnits.Before << " -> " << report.GravityUnits.After
+                    << " cm/s2 (metre-era value, x100)";
+            else if ( report.GravityUnits.Unrecognised )
+                // Named rather than counted, for the same reason the two steps above name what they could
+                // not fix: this is the one case the operator has to look at by hand.
+                out << "gravity " << report.GravityUnits.Before
+                    << " LEFT UNCHANGED - neither Earth in metres nor in centimetres, so it was not "
+                       "guessed at";
+            else if ( report.GravityUnits.Tidied )
+                out << "gravity " << report.GravityUnits.Before << " -> " << report.GravityUnits.After
+                    << " cm/s2 (already centimetres; dropped the earlier pass's rounding)";
+            else
+                out << "gravity already " << report.GravityUnits.After << " cm/s2, unchanged";
+            out << ")";
+        }
+        if ( report.UIVisibilityRaised )
+        {
+            out << " scene v" << Desert::Migration::kSceneVersionGravityUnits << "->v"
+                << Desert::Migration::kSceneVersionUIVisibility << " (";
+            if ( report.UIVisibility.Entities > 0 )
+                out << report.UIVisibility.FlagsDropped << " interaction flag(s) folded into Hit Test on "
+                    << report.UIVisibility.Entities << " element(s), " << report.UIVisibility.HitTestSet
+                    << " of which stopped being the default";
+            else
+                out << "stamp only - no UI element stated an interaction flag";
+            // Named, not counted, for the reason the two steps above name what they could not carry: an
+            // element whose flag was unreadable keeps the default, and the operator has to see which one.
+            for ( const auto& name : report.UIVisibility.BrokenNames )
+                out << "; NOT a boolean, left at the default Hit Test: " << name;
+            out << ")";
+        }
+        if ( report.SSRUnitsRaised )
+        {
+            out << " scene v" << Desert::Migration::kSceneVersionUIVisibility << "->v"
+                << Desert::Migration::kSceneVersionSSRUnits << " (";
+            if ( report.SSRUnits.Scaled )
+                out << "SSR max distance " << report.SSRUnits.Before << " -> " << report.SSRUnits.After
+                    << " cm (metre-era slider value, x100)";
+            else
+                out << "stamp only - the scene states no SSR max distance";
+            out << ")";
+        }
+        if ( report.CloudMaterialRaised )
+        {
+            out << " scene v" << Desert::Migration::kSceneVersionSSRUnits << "->v"
+                << Desert::Migration::kSceneVersionCloudMaterial << " (";
+            if ( report.CloudMaterial.Entities > 0 )
+            {
+                out << report.CloudMaterial.ValuesMoved << " value(s) and " << report.CloudMaterial.AssetsMoved
+                    << " asset slot(s) moved into " << report.CloudMaterial.Materials.size()
+                    << " bespoke cloud material(s), " << report.CloudMaterial.DefaultsAssigned
+                    << " layer(s) pointed at the shared " << Desert::Migration::kDefaultCloudMaterialRelativePath
+                    << " (D-37), " << report.CloudMaterial.Defaulted << " field(s) left at the schema default";
+            }
+            else
+                out << "stamp only - no VolumetricCloud payload in this scene";
+            // Named, not counted, like every step above that can refuse a value: a rejected number is
+            // an authored one that will now read as the default, and the operator has to see which.
+            for ( const auto& name : report.CloudMaterial.RejectedNames )
+                out << "; NOT carried, schema default stands: " << name;
+            out << ")";
+        }
+        if ( report.DebugViewRaised )
+        {
+            out << " scene v" << Desert::Migration::kSceneVersionCloudMaterial << "->v"
+                << Desert::Migration::kSceneVersionDebugView << " (";
+            if ( report.DebugView.KeysRemoved > 0 )
+            {
+                // Named with their values, not counted: these were AUTHORED flags, and the operator has
+                // to see that (say) the collider wireframes stopped because the file stopped deciding
+                // them - not because something broke.
+                out << report.DebugView.KeysRemoved << " viewport debug key(s) removed - the view owns "
+                    << "them now (editor Show flags / View Mode):";
+                for ( const auto& name : report.DebugView.RemovedNames )
+                    out << " " << name;
+            }
+            else
+            {
+                out << "stamp only - the scene stated no viewport debug flag";
+            }
+            out << ")";
+        }
+        if ( report.ScriptRootRaised )
+        {
+            // v15, not the previous PRINTED step (v13): 14 and 15 are rows of kRetiredKeys rather
+            // than steps of their own, so the last line above this one names 13 and a file arriving
+            // here is at 15. Printing the previous printed number would report a transition no file
+            // made — the same wrong-transition trap the retired-keys line below documents.
+            out << " scene v" << Desert::Migration::kSceneVersionMachineQuality << "->v"
+                << Desert::Migration::kSceneVersionScriptRoot << " (";
+            if ( report.ScriptRoot.Slots > 0 )
+                out << report.ScriptRoot.Slots << " script reference(s) root-tagged on "
+                    << report.ScriptRoot.Entities << " entity(ies), " << report.ScriptRoot.Empty
+                    << " of them an empty slot";
+            else if ( report.ScriptRoot.UnrootedNames.empty() )
+                out << "stamp only - no entity named a script";
+            else
+                out << "no reference could be root-tagged";
+            // Named, not counted, like every step above that can refuse a value: a reference the
+            // census could not place still does not resolve in a packaged game, and the operator has
+            // to see which entity to re-point.
+            for ( const auto& name : report.ScriptRoot.UnrootedNames )
+                out << "; NOT under a Scripts/ folder, carried over untagged: " << name;
+            out << ")";
+        }
+        if ( report.ServiceAssetRootRaised )
+        {
+            out << " scene v" << Desert::Migration::kSceneVersionScriptRoot << "->v"
+                << Desert::Migration::kSceneVersionServiceAssetRoot << " (";
+            if ( report.ServiceAssetRoot.Refs > 0 )
+                out << report.ServiceAssetRoot.Refs << " font/icon/video reference(s) root-tagged on "
+                    << report.ServiceAssetRoot.Entities << " entity(ies), " << report.ServiceAssetRoot.Empty
+                    << " of them an empty slot";
+            else if ( report.ServiceAssetRoot.UnrootedNames.empty() )
+                out << "stamp only - no entity named a font, an icon or a video";
+            else
+                out << "no reference could be root-tagged";
+            // Named, not counted, like every step above that can refuse a value: a reference neither
+            // root can place still does not resolve in a packaged game.
+            for ( const auto& name : report.ServiceAssetRoot.UnrootedNames )
+                out << "; under NEITHER content root, carried over untagged: " << name;
+            out << ")";
+        }
+        if ( report.RetiredKeysRaised )
+        {
+            // NOT a step's own pair of numbers, unlike every line above: the retirement pass is
+            // gated on the head and sweeps a file from WHEREVER it was to wherever the head is now
+            // (see MigrateRetiredKeys). Printing a fixed 13->14 here would have reported the wrong
+            // transition for every file K3 converted, which stood at 14.
+            out << " retired keys -> v" << Desert::Migration::kSceneVersion << " (";
+            if ( report.RetiredKeys.KeysRemoved > 0 )
+            {
+                // Named with their values AND the reason, because from v14 on this is the ONLY way a
+                // key ever leaves a file: the saver preserves everything it does not declare, so a
+                // removal is always a decision somebody made and the operator is entitled to see it.
+                out << report.RetiredKeys.KeysRemoved << " retired key(s) removed:";
+                for ( const auto& name : report.RetiredKeys.RemovedNames )
+                    out << " " << name;
+            }
+            else
+            {
+                out << "stamp only - the scene stated no retired key";
+            }
+            // A prefab has no Settings block, so there is nothing to canonicalise and no clause to
+            // print — not an omission from the line, an absence in the file.
+            if ( canonical != nullptr )
+            {
+                if ( canonical->Refused )
+                {
+                    out << "; Settings NOT canonicalised - see the error above";
+                }
+                else
+                {
+                    out << "; Settings canonical (";
+                    if ( canonical->BlockCreated )
+                        out << "block created, ";
+                    out << canonical->KeysAdded << " field(s) the file did not state, "
+                        << canonical->ValuesRestated << " restated at float precision)";
+                }
+            }
+            out << ")";
+        }
+        if ( report.UnitsRaised )
+            out << " units v0->v" << Desert::Migration::kUnitVersion << " (" << report.Units.Entities
+                << " entity(ies), " << report.Units.Values << " value(s) x100, " << report.Units.Rejected
+                << " rejected)";
+    }
+
 } // namespace
 
 namespace Desert::Migration
 {
+    namespace
+    {
+        // The one sentence both output-root functions are: derive the assets root from the FILE, through
+        // the census row for the folder its own class lives in, and never from where the process stands.
+        std::filesystem::path OutputRootFor( Common::Constants::Path::ContentDir dir,
+                                             const std::filesystem::path&        contentPath )
+        {
+            if ( const auto root = Common::Constants::Path::RootForContentPath( dir, contentPath ) )
+                return *root;
+
+            // Not under the census folder, so it has nothing to say: the file's own directory is the
+            // root. `parent_path()` is empty for a bare `x.desce`, and an empty root would resolve the
+            // material against the working directory by a different route — the very thing being fixed —
+            // so it is spelled as the current directory explicitly.
+            const std::filesystem::path directory = contentPath.parent_path();
+            return directory.empty() ? std::filesystem::path( "." ) : directory;
+        }
+    } // namespace
+
     std::filesystem::path SceneOutputRoot( const std::filesystem::path& scenePath )
     {
-        if ( const auto root = Common::Constants::Path::RootForContentPath(
-                  Common::Constants::Path::ContentDir::Scene, scenePath ) )
-            return *root;
+        return OutputRootFor( Common::Constants::Path::ContentDir::Scene, scenePath );
+    }
 
-        // Not under a `Scenes/` folder, so the census has nothing to say: the scene's own directory is
-        // the root. `parent_path()` is empty for a bare `x.desce`, and an empty root would resolve the
-        // material against the working directory by a different route — the very thing being fixed — so
-        // it is spelled as the current directory explicitly.
-        const std::filesystem::path directory = scenePath.parent_path();
-        return directory.empty() ? std::filesystem::path( "." ) : directory;
+    std::filesystem::path PrefabOutputRoot( const std::filesystem::path& prefabPath )
+    {
+        return OutputRootFor( Common::Constants::Path::ContentDir::Prefab, prefabPath );
     }
 
     int RunSceneMigrator( const std::vector<std::string>& args, std::ostream& out, std::ostream& err )
@@ -121,18 +503,21 @@ namespace Desert::Migration
 
         if ( roots.empty() )
         {
-            err << "usage: SceneMigrator [--check] <scene.desce | material.demat | directory>...\n";
+            err << "usage: SceneMigrator [--check] <scene.desce | material.demat | prefab.deprefab | "
+                   "directory>...\n";
             return 2;
         }
 
         std::vector<std::filesystem::path> scenes;
         std::vector<std::filesystem::path> materials;
+        std::vector<std::filesystem::path> prefabs;
         for ( const auto& root : roots )
-            Collect( root, scenes, materials );
+            Collect( root, scenes, materials, prefabs );
 
-        if ( scenes.empty() && materials.empty() )
+        if ( scenes.empty() && materials.empty() && prefabs.empty() )
         {
-            err << "SceneMigrator: no " << kSceneExtension << " or " << kMaterialExtension << " files found\n";
+            err << "SceneMigrator: no " << kSceneExtension << ", " << kMaterialExtension << " or "
+                << kPrefabExtension << " files found\n";
             return 2;
         }
 
@@ -171,8 +556,18 @@ namespace Desert::Migration
             // written into the scene could name a place the file was not.
             const std::filesystem::path assetsRoot = SceneOutputRoot( path );
 
-            const Desert::Migration::SceneMigrationReport report =
+            const Desert::Migration::FileMigrationReport report =
                  Desert::Migration::MigrateScene( parsed.value(), assetsRoot );
+
+            // A scene from a LATER build: nothing ran and nothing was stamped, so this is a FAILED file
+            // and not an "ok". It used to be neither — the tree fell through every gate and was stamped
+            // DOWN to this tool's head, then reported as already current.
+            if ( !report.Refused.empty() )
+            {
+                err << "FAIL   " << path.string() << " — " << report.Refused << "\n";
+                ++failed;
+                continue;
+            }
 
             // CANONICALISATION IS THE TOOL'S, NOT A SCHEMA STEP'S, and the split is structural rather
             // than tidiness. Every function in SceneMigration.hpp is pure over the parsed tree, which is
@@ -193,282 +588,7 @@ namespace Desert::Migration
             }
 
             out << ( check ? "WOULD  " : "raised " ) << path.string() << " —";
-            if ( report.SkyRaised )
-                out << " sky v0->v" << Desert::Migration::kSceneVersionSky << " (" << report.Sky.Entities
-                    << " entity(ies), " << report.Sky.FieldsCarried << " carried, " << report.Sky.FieldsRejected
-                    << " rejected)";
-            if ( report.TonemapperRaised )
-                out << " scene v" << Desert::Migration::kSceneVersionSky << "->v"
-                    << Desert::Migration::kSceneVersionTonemap << " ("
-                    << ( report.Tonemap.OperatorPinned ? "tonemapper pinned to Reinhard"
-                                                       : "tonemapper NOT pinned — see the warning above" )
-                    << ( report.Tonemap.SettingsCreated ? ", settings block created" : "" ) << ")";
-            if ( report.CloudNoiseRaised )
-            {
-                out << " scene v" << Desert::Migration::kSceneVersionTonemap << "->v"
-                    << Desert::Migration::kSceneVersionCloudNoise << " (";
-                if ( report.CloudNoise.Entities > 0 )
-                    out << report.CloudNoise.FieldsDropped << " cloud bake setting(s) dropped from "
-                        << report.CloudNoise.Entities << " entity(ies)";
-                else
-                    out << "stamp only — no cloud layer carried a bake setting";
-                out << ")";
-            }
-            // The three cloud steps below went unreported until 2026-09-06: Changed() was true, the file
-            // was rewritten, and the report line skipped straight from v3 to v6 — a silent migration,
-            // which §4.7 forbids ("log which scene, from which version to which, and how many fields
-            // moved"). Their counters existed all along; only the printing was missing.
-            if ( report.CloudSpeciesRaised )
-            {
-                out << " scene v" << Desert::Migration::kSceneVersionCloudNoise << "->v"
-                    << Desert::Migration::kSceneVersionCloudSpecies << " (";
-                if ( report.CloudSpecies.Entities > 0 )
-                    out << report.CloudSpecies.FieldsDropped << " authored shell field(s) dropped and "
-                        << report.CloudSpecies.SpeciesSet << " scalar type(s) turned into a species on "
-                        << report.CloudSpecies.Entities << " entity(ies)";
-                else
-                    out << "stamp only — no cloud layer carried the scalar-type shape";
-                out << ")";
-            }
-            if ( report.CloudTypeRaised )
-            {
-                out << " scene v" << Desert::Migration::kSceneVersionCloudSpecies << "->v"
-                    << Desert::Migration::kSceneVersionCloudType << " (";
-                if ( report.CloudType.Entities > 0 )
-                {
-                    out << report.CloudType.TypesSet << " species enumerator(s) became a .decloudtype path on "
-                        << report.CloudType.Entities << " entity(ies)";
-                    // Named loud, not folded into the count: these two are the cases the operator has to
-                    // act on — a layer that lost its noise volume renders a different sky until re-pointed.
-                    if ( report.CloudType.VolumesLost > 0 )
-                        out << "; " << report.CloudType.VolumesLost
-                            << " layer noise volume(s) DROPPED — re-point them on the cloud type";
-                    if ( report.CloudType.FieldsBroken > 0 )
-                        out << "; " << report.CloudType.FieldsBroken
-                            << " unreadable species value(s) left at the default";
-                }
-                else
-                {
-                    out << "stamp only — no cloud layer named a species";
-                }
-                out << ")";
-            }
-            if ( report.CloudSetRaised )
-            {
-                out << " scene v" << Desert::Migration::kSceneVersionCloudType << "->v"
-                    << Desert::Migration::kSceneVersionCloudSet << " (";
-                if ( report.CloudSet.Entities > 0 )
-                    out << report.CloudSet.SlotsCarried << " cloud type(s) moved into slot 1 of the set on "
-                        << report.CloudSet.Entities << " entity(ies), " << report.CloudSet.SlotsEmpty
-                        << " of them the empty handle";
-                else
-                    out << "stamp only — no cloud layer carried a single-type key";
-                out << ")";
-            }
-            if ( report.TerrainMaterialRaised )
-            {
-                out << " scene v" << Desert::Migration::kSceneVersionCloudSet << "->v"
-                    << Desert::Migration::kSceneVersionTerrainMaterial << " (";
-                if ( report.TerrainMaterial.Entities > 0 )
-                {
-                    // Named, not counted, and for the same reason the loader names them: this step DROPS the
-                    // values it finds, so the operator running this tool has to be able to see what left.
-                    out << "inline terrain material removed from " << report.TerrainMaterial.Entities
-                        << " entity(ies), dropping " << report.TerrainMaterial.Params << " param(s) and "
-                        << report.TerrainMaterial.Textures << " texture(s):";
-                    for ( const auto& name : report.TerrainMaterial.DroppedNames )
-                        out << " " << name;
-                }
-                else
-                {
-                    out << "stamp only — no terrain entity carried an inline material";
-                }
-                out << ")";
-            }
-            if ( report.MaterialPathRaised )
-            {
-                out << " scene v" << Desert::Migration::kSceneVersionTerrainMaterial << "->v"
-                    << Desert::Migration::kSceneVersionMaterialPath << " (";
-                if ( report.MaterialPath.Paths > 0 )
-                    out << report.MaterialPath.Paths << " material path(s) made relative to the assets "
-                        << "root in " << report.MaterialPath.Entities << " entity(ies)";
-                else
-                    out << "stamp only - no entity named a material by an absolute path";
-                // Named, not counted, for the reason the terrain step names its drops: these are the ones the
-                // step could not fix, and the operator has to be able to see which slot to re-point.
-                for ( const auto& name : report.MaterialPath.OutsideNames )
-                    out << "; OUTSIDE the assets root, left absolute: " << name;
-                out << ")";
-            }
-            if ( report.GravityUnitsRaised )
-            {
-                out << " scene v" << Desert::Migration::kSceneVersionMaterialPath << "->v"
-                    << Desert::Migration::kSceneVersionGravityUnits << " (";
-                if ( !report.GravityUnits.Found )
-                    out << "stamp only - the scene states no gravity";
-                else if ( report.GravityUnits.Scaled )
-                    out << "gravity " << report.GravityUnits.Before << " -> " << report.GravityUnits.After
-                        << " cm/s2 (metre-era value, x100)";
-                else if ( report.GravityUnits.Unrecognised )
-                    // Named rather than counted, for the same reason the two steps above name what they could
-                    // not fix: this is the one case the operator has to look at by hand.
-                    out << "gravity " << report.GravityUnits.Before
-                        << " LEFT UNCHANGED - neither Earth in metres nor in centimetres, so it was not "
-                           "guessed at";
-                else if ( report.GravityUnits.Tidied )
-                    out << "gravity " << report.GravityUnits.Before << " -> " << report.GravityUnits.After
-                        << " cm/s2 (already centimetres; dropped the earlier pass's rounding)";
-                else
-                    out << "gravity already " << report.GravityUnits.After << " cm/s2, unchanged";
-                out << ")";
-            }
-            if ( report.UIVisibilityRaised )
-            {
-                out << " scene v" << Desert::Migration::kSceneVersionGravityUnits << "->v"
-                    << Desert::Migration::kSceneVersionUIVisibility << " (";
-                if ( report.UIVisibility.Entities > 0 )
-                    out << report.UIVisibility.FlagsDropped << " interaction flag(s) folded into Hit Test on "
-                        << report.UIVisibility.Entities << " element(s), " << report.UIVisibility.HitTestSet
-                        << " of which stopped being the default";
-                else
-                    out << "stamp only - no UI element stated an interaction flag";
-                // Named, not counted, for the reason the two steps above name what they could not carry: an
-                // element whose flag was unreadable keeps the default, and the operator has to see which one.
-                for ( const auto& name : report.UIVisibility.BrokenNames )
-                    out << "; NOT a boolean, left at the default Hit Test: " << name;
-                out << ")";
-            }
-            if ( report.SSRUnitsRaised )
-            {
-                out << " scene v" << Desert::Migration::kSceneVersionUIVisibility << "->v"
-                    << Desert::Migration::kSceneVersionSSRUnits << " (";
-                if ( report.SSRUnits.Scaled )
-                    out << "SSR max distance " << report.SSRUnits.Before << " -> " << report.SSRUnits.After
-                        << " cm (metre-era slider value, x100)";
-                else
-                    out << "stamp only - the scene states no SSR max distance";
-                out << ")";
-            }
-            if ( report.CloudMaterialRaised )
-            {
-                out << " scene v" << Desert::Migration::kSceneVersionSSRUnits << "->v"
-                    << Desert::Migration::kSceneVersionCloudMaterial << " (";
-                if ( report.CloudMaterial.Entities > 0 )
-                {
-                    out << report.CloudMaterial.ValuesMoved << " value(s) and " << report.CloudMaterial.AssetsMoved
-                        << " asset slot(s) moved into " << report.CloudMaterial.Materials.size()
-                        << " bespoke cloud material(s), " << report.CloudMaterial.DefaultsAssigned
-                        << " layer(s) pointed at the shared "
-                        << Desert::Migration::kDefaultCloudMaterialRelativePath << " (D-37), "
-                        << report.CloudMaterial.Defaulted << " field(s) left at the schema default";
-                }
-                else
-                    out << "stamp only - no VolumetricCloud payload in this scene";
-                // Named, not counted, like every step above that can refuse a value: a rejected number is
-                // an authored one that will now read as the default, and the operator has to see which.
-                for ( const auto& name : report.CloudMaterial.RejectedNames )
-                    out << "; NOT carried, schema default stands: " << name;
-                out << ")";
-            }
-            if ( report.DebugViewRaised )
-            {
-                out << " scene v" << Desert::Migration::kSceneVersionCloudMaterial << "->v"
-                    << Desert::Migration::kSceneVersionDebugView << " (";
-                if ( report.DebugView.KeysRemoved > 0 )
-                {
-                    // Named with their values, not counted: these were AUTHORED flags, and the operator has
-                    // to see that (say) the collider wireframes stopped because the file stopped deciding
-                    // them - not because something broke.
-                    out << report.DebugView.KeysRemoved << " viewport debug key(s) removed - the view owns "
-                        << "them now (editor Show flags / View Mode):";
-                    for ( const auto& name : report.DebugView.RemovedNames )
-                        out << " " << name;
-                }
-                else
-                {
-                    out << "stamp only - the scene stated no viewport debug flag";
-                }
-                out << ")";
-            }
-            if ( report.ScriptRootRaised )
-            {
-                // v15, not the previous PRINTED step (v13): 14 and 15 are rows of kRetiredKeys rather
-                // than steps of their own, so the last line above this one names 13 and a file arriving
-                // here is at 15. Printing the previous printed number would report a transition no file
-                // made — the same wrong-transition trap the retired-keys line below documents.
-                out << " scene v" << Desert::Migration::kSceneVersionMachineQuality << "->v"
-                    << Desert::Migration::kSceneVersionScriptRoot << " (";
-                if ( report.ScriptRoot.Slots > 0 )
-                    out << report.ScriptRoot.Slots << " script reference(s) root-tagged on "
-                        << report.ScriptRoot.Entities << " entity(ies), " << report.ScriptRoot.Empty
-                        << " of them an empty slot";
-                else if ( report.ScriptRoot.UnrootedNames.empty() )
-                    out << "stamp only - no entity named a script";
-                else
-                    out << "no reference could be root-tagged";
-                // Named, not counted, like every step above that can refuse a value: a reference the
-                // census could not place still does not resolve in a packaged game, and the operator has
-                // to see which entity to re-point.
-                for ( const auto& name : report.ScriptRoot.UnrootedNames )
-                    out << "; NOT under a Scripts/ folder, carried over untagged: " << name;
-                out << ")";
-            }
-            if ( report.ServiceAssetRootRaised )
-            {
-                out << " scene v" << Desert::Migration::kSceneVersionScriptRoot << "->v"
-                    << Desert::Migration::kSceneVersionServiceAssetRoot << " (";
-                if ( report.ServiceAssetRoot.Refs > 0 )
-                    out << report.ServiceAssetRoot.Refs << " font/icon/video reference(s) root-tagged on "
-                        << report.ServiceAssetRoot.Entities << " entity(ies), " << report.ServiceAssetRoot.Empty
-                        << " of them an empty slot";
-                else if ( report.ServiceAssetRoot.UnrootedNames.empty() )
-                    out << "stamp only - no entity named a font, an icon or a video";
-                else
-                    out << "no reference could be root-tagged";
-                // Named, not counted, like every step above that can refuse a value: a reference neither
-                // root can place still does not resolve in a packaged game.
-                for ( const auto& name : report.ServiceAssetRoot.UnrootedNames )
-                    out << "; under NEITHER content root, carried over untagged: " << name;
-                out << ")";
-            }
-            if ( report.RetiredKeysRaised )
-            {
-                // NOT a step's own pair of numbers, unlike every line above: the retirement pass is
-                // gated on the head and sweeps a file from WHEREVER it was to wherever the head is now
-                // (see MigrateRetiredKeys). Printing a fixed 13->14 here would have reported the wrong
-                // transition for every file K3 converted, which stood at 14.
-                out << " retired keys -> v" << Desert::Migration::kSceneVersion << " (";
-                if ( report.RetiredKeys.KeysRemoved > 0 )
-                {
-                    // Named with their values AND the reason, because from v14 on this is the ONLY way a
-                    // key ever leaves a file: the saver preserves everything it does not declare, so a
-                    // removal is always a decision somebody made and the operator is entitled to see it.
-                    out << report.RetiredKeys.KeysRemoved << " retired key(s) removed:";
-                    for ( const auto& name : report.RetiredKeys.RemovedNames )
-                        out << " " << name;
-                }
-                else
-                {
-                    out << "stamp only - the scene stated no retired key";
-                }
-                if ( canonical.Refused )
-                {
-                    out << "; Settings NOT canonicalised - see the error above";
-                }
-                else
-                {
-                    out << "; Settings canonical (";
-                    if ( canonical.BlockCreated )
-                        out << "block created, ";
-                    out << canonical.KeysAdded << " field(s) the file did not state, " << canonical.ValuesRestated
-                        << " restated at float precision)";
-                }
-                out << ")";
-            }
-            if ( report.UnitsRaised )
-                out << " units v0->v" << Desert::Migration::kUnitVersion << " (" << report.Units.Entities
-                    << " entity(ies), " << report.Units.Values << " value(s) x100, " << report.Units.Rejected
-                    << " rejected)";
+            PrintSteps( out, report, &canonical );
             out << "\n";
 
             if ( check )
@@ -477,54 +597,8 @@ namespace Desert::Migration
                 continue;
             }
 
-            // The material files the v11 -> v12 step produced, written FIRST and atomically, like the
-            // scene below: a scene that names a material which does not exist is worse than a scene not
-            // yet migrated, so if a material cannot be written the scene is not either.
-            bool materialsFailed = false;
-            for ( const auto& mat : report.CloudMaterial.Materials )
-            {
-                // Under the SAME root MigrateScene was measured against, one page above: the relative path
-                // inside the scene and the file on disk must agree about one root or the scene names a
-                // material that is not where it says. That root is the SCENE'S (SceneOutputRoot) and not
-                // the process's working directory — see the header for what the working directory cost.
-                const std::filesystem::path matPath = ( assetsRoot / mat.RelativePath ).lexically_normal();
-
-                // TWO SCENES MUST NOT LAND ON ONE MATERIAL FILE. The name is derived from the scene's
-                // SceneName, which is NOT unique by construction — a .desce copied from another and
-                // edited keeps the original's name, and this repository's own verification protocol
-                // relies on exactly that copying. Two such scenes would produce one path here, the
-                // second write would take the first's look, and BOTH scenes would then name a file that
-                // describes only one of them: a silent whole-sky loss with nothing in the log. The
-                // migration function is pure and per-scene, so it cannot see the collision; this loop is
-                // the only place in the run that can. Named and fatal, never resolved by guessing at a
-                // suffix — the fix is to give the scene its own SceneName, which is what the operator
-                // has to know.
-                const auto claimed = writtenMaterials.emplace( matPath.generic_string(), path.string() );
-                if ( !claimed.second && claimed.first->second != path.string() )
-                {
-                    err << "FAIL   " << path.string() << " — its cloud material would be written to "
-                        << matPath.string() << ", which " << claimed.first->second
-                        << " already claimed in this run: both scenes state the same SceneName. Give one "
-                        << "of them its own name and re-run; neither scene is modified.\n";
-                    materialsFailed = true;
-                    break;
-                }
-
-                std::error_code ec;
-                std::filesystem::create_directories( matPath.parent_path(), ec );
-                if ( !Common::Utils::FileSystem::WriteContentToFileAtomic( matPath, mat.Json ) )
-                {
-                    err << "FAIL   " << matPath.string() << " — the cloud material could not be written; "
-                        << path.string() << " is left at its old version\n";
-                    materialsFailed = true;
-                    break;
-                }
-                // The FULL path, not the relative name it used to print. An operator reading "wrote
-                // Materials/M_X.demat" cannot tell which of two trees it landed in, which is precisely the
-                // question this defect turned on; the line now answers it.
-                out << "        wrote " << matPath.string() << "\n";
-            }
-            if ( materialsFailed )
+            if ( !WriteCloudMaterials( report.CloudMaterial.Materials, assetsRoot, path, writtenMaterials, out,
+                                       err ) )
             {
                 ++failed;
                 continue;
@@ -599,12 +673,112 @@ namespace Desert::Migration
             ++materialsChanged;
         }
 
+        // THE PREFABS, through the SAME chain the scenes went through (И11). They come last for the
+        // reason the materials do: a prefab's v11 -> v12 raise can produce a `.demat` under a name a
+        // scene may already have claimed in this run, and `writtenMaterials` is the one map that sees it.
+        int prefabsChanged = 0;
+        for ( const auto& path : prefabs )
+        {
+            const std::string source = ReadAll( path );
+            if ( source.empty() )
+            {
+                err << "FAIL   " << path.string() << " — unreadable or empty\n";
+                ++failed;
+                continue;
+            }
+
+            // rfl::json::read and NOT the engine's ParseLoadablePrefab: that gate REFUSES everything but
+            // the head, which is precisely the population this tool exists to convert. The gate is
+            // applied to the OUTPUT instead, below, where it belongs.
+            auto parsed = rfl::json::read<Desert::Assets::PrefabData>( source );
+            if ( !parsed )
+            {
+                err << "FAIL   " << path.string() << " — " << parsed.error().what() << "\n";
+                ++failed;
+                continue;
+            }
+
+            const std::filesystem::path assetsRoot = PrefabOutputRoot( path );
+
+            const Desert::Migration::PrefabMigrationOutcome outcome =
+                 Desert::Migration::MigratePrefab( parsed.value(), assetsRoot );
+
+            if ( !outcome.Refused.empty() )
+            {
+                err << "FAIL   " << path.string() << " — " << outcome.Refused << "\n";
+                ++failed;
+                continue;
+            }
+            if ( outcome.AlreadyCurrent )
+            {
+                out << "ok     " << path.string() << " — already at scene v" << Desert::Migration::kSceneVersion
+                    << " / units v" << Desert::Migration::kUnitVersion << "\n";
+                continue;
+            }
+
+            out << ( check ? "WOULD  " : "raised " ) << path.string() << " —";
+            if ( outcome.StampOnly )
+            {
+                // The one case with no step behind it, and it says so rather than printing an empty
+                // line: an operator whose prefab looks wrong afterwards has to be able to see that this
+                // file was stamped on an ASSUMPTION about its generation, not migrated.
+                out << " unversioned (v0/v0) stamped to scene v" << Desert::Migration::kSceneVersion
+                    << " / units v" << Desert::Migration::kUnitVersion
+                    << " (stamp only; entities untouched — an unstamped prefab states no generation to "
+                       "migrate FROM)";
+            }
+            else
+            {
+                out << " from scene v" << outcome.FoundSceneVersion << ":";
+                // No canonicalisation clause: a prefab has no Settings block (see PrintSteps).
+                PrintSteps( out, outcome.Steps, nullptr );
+            }
+            out << "\n";
+
+            if ( check )
+            {
+                ++prefabsChanged;
+                continue;
+            }
+
+            if ( !WriteCloudMaterials( outcome.Steps.CloudMaterial.Materials, assetsRoot, path, writtenMaterials,
+                                       out, err ) )
+            {
+                ++failed;
+                continue;
+            }
+
+            // Serialized through the ENGINE'S OWN writer, so the bytes written are the bytes the saver
+            // would produce, and then gate-checked with the ENGINE'S OWN loader gate before a byte
+            // reaches the target: "the tool wrote it" and "the engine will load it" cannot drift. The
+            // write itself is the shared atomic primitive — the original is byte-identical on any
+            // failure, which is the guarantee И2 had to add after this tool truncated a file it then
+            // reported as raised.
+            const std::string migrated = Desert::Assets::WritePrefabJson( parsed.value() );
+            if ( auto loadable = Desert::Assets::ParseLoadablePrefab( path.string(), migrated ); !loadable )
+            {
+                err << "FAIL   " << path.string() << " — the migrated text does not pass the engine's own "
+                    << "gate: " << loadable.GetError() << " (original untouched)\n";
+                ++failed;
+                continue;
+            }
+            if ( !Common::Utils::FileSystem::WriteContentToFileAtomic( path, migrated ) )
+            {
+                err << "FAIL   " << path.string() << " — the raise could not be written; the original file "
+                    << "is untouched\n";
+                ++failed;
+                continue;
+            }
+            ++prefabsChanged;
+        }
+
         out << "SceneMigrator: " << scenes.size() << " scene(s), " << changed
             << ( check ? " would change, " : " raised, " ) << materials.size() << " material(s), "
-            << materialsChanged << ( check ? " would change, " : " raised, " ) << failed << " failed\n";
+            << materialsChanged << ( check ? " would change, " : " raised, " ) << prefabs.size() << " prefab(s), "
+            << prefabsChanged << ( check ? " would change, " : " raised, " ) << failed << " failed\n";
 
         if ( failed > 0 )
             return 1;
-        return ( check && ( changed > 0 || materialsChanged > 0 ) ) ? 1 : 0;
+        return ( check && ( changed > 0 || materialsChanged > 0 || prefabsChanged > 0 ) ) ? 1 : 0;
     }
 } // namespace Desert::Migration

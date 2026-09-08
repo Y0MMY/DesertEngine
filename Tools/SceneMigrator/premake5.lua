@@ -32,6 +32,13 @@ project "SceneMigrator"
         "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionSerializer.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionRegistry.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp",
+
+        -- THE PREFAB GATE AND THE ONE WRITER OF .deprefab TEXT, since И11. The tool converts prefabs
+        -- too, and the bytes it writes must be the bytes the engine's saver produces and must pass the
+        -- engine's own loader gate — so it calls WritePrefabJson / ParseLoadablePrefab rather than
+        -- restating either. Pure over the parsed tree, like everything else in this project: no GPU, no
+        -- asset manager.
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/Prefab/PrefabFormat.cpp",
     }
 
     dependson { "Desert" }

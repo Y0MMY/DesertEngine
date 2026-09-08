@@ -11,10 +11,15 @@ namespace Desert::Assets
         // Where the build this message came from actually put the tool — same NDEBUG choice, and for the
         // same reason, as SceneFormat.cpp: naming a directory the binary is not in is the same dead end
         // as naming no command at all.
+        //
+        // IT IS THE SCENE'S TOOL, and that is the point rather than an accident of naming: a prefab
+        // shares the scene's two version integers, so it moves through the same generations and is
+        // raised by the same step chain. Naming a separate PrefabMigrator here was naming a second
+        // command over a second corpus that a version bump had to remember (И11).
 #ifdef NDEBUG
-        constexpr const char* kMigratorPath = "build/Bin/Release/PrefabMigrator";
+        constexpr const char* kMigratorPath = "build/Bin/Release/SceneMigrator";
 #else
-        constexpr const char* kMigratorPath = "build/Bin/Debug/PrefabMigrator";
+        constexpr const char* kMigratorPath = "build/Bin/Debug/SceneMigrator";
 #endif
     } // namespace
 
@@ -24,7 +29,7 @@ namespace Desert::Assets
              "[PrefabAsset] '{0}' is at scene schema v{1} / world units v{2}, and this engine loads "
              "scene schema v{3} / world units v{4} only. NOTHING WAS LOADED - no entity was taken from "
              "this file, and the scene is exactly as it was. A prefab carries the same entity payloads a "
-             "scene does, so it moves through the same generations; Tools/PrefabMigrator converts it, "
+             "scene does, so it moves through the same generations; Tools/SceneMigrator converts it, "
              "once, and writes the file back. Run:  {5} \"{0}\"",
              source, foundSceneVersion, foundUnitVersion, Core::kSceneVersion, Core::kUnitVersion, kMigratorPath );
     }
