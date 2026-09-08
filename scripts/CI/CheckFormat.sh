@@ -28,16 +28,26 @@ cd "$(dirname "$0")/../.."
 #
 # The consequence is not cosmetic either way: this job GATES Windows and macOS, so a wrong red here
 # SKIPS both, and a batch lands with no platform evidence at all.
+# TWO BINARIES ARE NEEDED, NOT ONE, and conflating them cost a third red run. `clang-format` is the
+# formatter; `git-clang-format` is a separate Python wrapper that computes the changed-line ranges and
+# calls it. Debian ships them under versioned names (clang-format-18, git-clang-format-18), and there
+# is NO unversioned alias — so `git clang-format` is not a git subcommand at all on a runner, however
+# correctly `--binary` names the formatter. The wrapper is invoked DIRECTLY here for that reason.
 CF=""
 for candidate in clang-format-18 clang-format; do
     if command -v "$candidate" >/dev/null 2>&1; then CF="$candidate"; break; fi
 done
-if [ -z "$CF" ]; then
-    echo "clang-format: NO FORMATTER FOUND (looked for clang-format-18, clang-format)." >&2
+GITCF=""
+for candidate in git-clang-format-18 git-clang-format; do
+    if command -v "$candidate" >/dev/null 2>&1; then GITCF="$candidate"; break; fi
+done
+if [ -z "$CF" ] || [ -z "$GITCF" ]; then
+    echo "clang-format: MISSING TOOL — formatter='${CF:-not found}' wrapper='${GITCF:-not found}'." >&2
+    echo "Looked for clang-format-18/clang-format and git-clang-format-18/git-clang-format." >&2
     echo "This is an environment failure, NOT a formatting violation — do not go looking at the diff." >&2
     exit 2
 fi
-echo "clang-format gate using: $("$CF" --version)"
+echo "clang-format gate using: $("$CF" --version)  (wrapper: $GITCF)"
 
 BASE_INPUT="${1:-origin/dev}"
 
@@ -53,7 +63,7 @@ fi
 # output can tell those apart. Anything that is neither a clean report nor a diff is an environment
 # failure and exits 2 — a code no formatting violation can produce.
 set +e
-OUT=$(git clang-format --binary "$CF" --diff "$BASE" -- '*.cpp' '*.hpp' 2>&1)
+OUT=$("$GITCF" --binary "$CF" --diff "$BASE" -- '*.cpp' '*.hpp' 2>&1)
 RC=$?
 set -e
 
