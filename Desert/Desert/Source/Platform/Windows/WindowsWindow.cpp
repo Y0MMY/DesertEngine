@@ -62,13 +62,16 @@ namespace Desert::Platform::Windows
             }
             else
             {
-                // MAXIMIZED to the work area, leaving the taskbar visible. The OS positions/sizes it; we
-                // just give a sane restore size.
+                // MAXIMIZED to the work area, leaving the taskbar visible. As on macOS, the size handed to
+                // glfwCreateWindow is the RESTORE size — the hint zooms the window straight afterwards —
+                // and the work area was the wrong answer for it: "restore down" then gave back a window
+                // the size of the screen, which is not a restore. See the longer note in MacOSWindow::Init
+                // for the measurement, including the 28 px overhang the old value produced there.
                 glfwWindowHint( GLFW_MAXIMIZED, GLFW_TRUE );
                 int wx, wy, ww, wh;
                 glfwGetMonitorWorkarea( monitor, &wx, &wy, &ww, &wh );
-                width  = (uint32_t)ww;
-                height = (uint32_t)wh;
+                width  = (uint32_t)( ww * 4 / 5 );
+                height = (uint32_t)( wh * 4 / 5 );
             }
 
             m_Data.Specification.Width  = width;

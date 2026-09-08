@@ -68,13 +68,22 @@ namespace Desert::Platform::MacOS
             }
             else
             {
-                // MAXIMIZED to the work area: leaves the menu bar/Dock visible. The OS positions/sizes
-                // it; we just give a sane restore size.
+                // MAXIMIZED to the work area: leaves the menu bar/Dock visible.
+                //
+                // WHAT IS PASSED TO glfwCreateWindow HERE IS THE RESTORE SIZE, NOT THE OPEN SIZE — the hint
+                // zooms the window immediately, and the rect handed over is the one the OS returns to when
+                // the window is un-maximized. It used to be the whole work area, which made "restore down"
+                // a no-op, and worse once the title bar was dropped: changing the style mask keeps the
+                // FRAME rect and grows the CONTENT rect by the bar's height, so the already-recorded
+                // restore frame came back 28 px taller than the screen. Measured through the control
+                // channel: Window ▸ Restore gave 2056x1317 against a 1289-tall work area, hanging off the
+                // bottom. Four fifths of the work area is a window that is obviously not maximized and
+                // obviously still usable.
                 glfwWindowHint( GLFW_MAXIMIZED, GLFW_TRUE );
                 int wx, wy, ww, wh;
                 glfwGetMonitorWorkarea( monitor, &wx, &wy, &ww, &wh );
-                width  = (uint32_t)ww;
-                height = (uint32_t)wh;
+                width  = (uint32_t)( ww * 4 / 5 );
+                height = (uint32_t)( wh * 4 / 5 );
             }
 
             m_Data.Specification.Width  = width;
