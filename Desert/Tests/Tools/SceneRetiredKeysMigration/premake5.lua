@@ -8,32 +8,31 @@ project(test_name)
     targetdir ("%{wks.location}/build/Bin/Tests/%{cfg.buildcfg}")
     objdir ("%{wks.location}/build/Tests/Intermediates/%{cfg.buildcfg}")
 
-    -- Unlike the suites beside it, this one compiles the TOOL and not only the migrations: the claim
-    -- under test is the file loop itself (read, write back atomically, exit code), which lives in
-    -- MigratorMain.cpp behind RunSceneMigrator. SceneMigration.cpp comes along because the loop
-    -- calls MigrateScene on every file it parses.
+    -- Reflection.gen.cpp is written by DesertHeaderTool as a PREBUILD STEP OF `Desert`. Without this edge
+    -- a parallel build can compile a stale table in and the assertions would report on yesterday's struct.
+    dependson { "Desert" }
+
+    -- The migration, the reflection table it writes for, and the reflected (de)serializer that turns the
+    -- migrated payload into the scene settings block. Nothing else - the migration is a pure
+    -- function over the parsed tree, and this project failing to link without a renderer is the proof.
     files {
         test_files,
-        "%{wks.location}/Tools/SceneMigrator/Source/MigratorMain.cpp",
         "%{wks.location}/Tools/SceneMigrator/Source/SceneMigration.cpp",
-        -- The tool's loop canonicalises the Settings block through the ENGINE'S reflection table, so a
-        -- suite that compiles MigratorMain.cpp has to bring the table with it. It is deliberately not in
-        -- SceneMigration.cpp: the fifteen suites that test one schema step each must stay free of it.
+        -- The canonicalisation half of the v13 -> v14 step. It is a separate translation unit precisely
+        -- so the fifteen other step suites do not have to link the engine's reflection table; this suite
+        -- tests it, so it takes it.
         "%{wks.location}/Tools/SceneMigrator/Source/SettingsCanonical.cpp",
-        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionSerializer.cpp",
-        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionRegistry.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionRegistry.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionSerializer.cpp",
     }
-
-    -- Reflection.gen.cpp is emitted by DesertHeaderTool as a prebuild step of `Desert`.
-    dependson { "Desert" }
 
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
-        -- The migrations and the tool's loop live in the TOOL (see SceneMigratorEndToEnd's premake
-        -- for why they moved out of the engine). This resolves <MigratorMain.hpp> and
-        -- <SceneMigration.hpp>, and their own includes of themselves.
+        -- The migrations live in the TOOL now (they used to be an engine TU that ran on every
+        -- scene load). This is what makes `#include <SceneMigration.hpp>` below resolve, and its
+        -- own `#include "SceneMigration.hpp"` of itself.
         "%{wks.location}/Tools/SceneMigrator/Source",
     }
     externalincludedirs {
@@ -62,15 +61,9 @@ project(test_name)
         defines { "DESERT_PLATFORM_LINUX" }
     filter {}
 
-    -- Common: UUID/AssetHandle/the logger + the atomic write primitive the tool's loop goes through.
+    -- Common: UUID/AssetHandle/the logger the migration's warnings go through.
     -- Optick: Common's JobSystem registers its worker threads with the profiler.
     links { "Common", "Optick" }
-
-    -- Common contains Objective-C (MacOSFileSystem file dialog) — referencing FileSystem pulls it in,
-    -- so the ObjC runtime + AppKit must link too.
-    filter "system:macosx"
-        links { "Cocoa.framework", "Foundation.framework" }
-    filter {}
 
     filter "system:not windows"
         links { "ReflectCpp" }

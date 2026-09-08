@@ -18,11 +18,12 @@ project "SceneMigrator"
 
     files {
         "Source/**.cpp",
-        -- THE ENGINE'S OWN REFLECTION TABLE, not a copy of it. The v13 -> v14 step canonicalises the
-        -- Settings block, and "canonical" means "the bytes the engine's saver would write" — so it has
-        -- to enumerate the same 51 fields in the same order through the same serializer. A hand-written
-        -- field list here would be a second statement of the format, which is the fork this tool's own
-        -- header forbids.
+        -- THE ENGINE'S OWN REFLECTION TABLE, not a copy of it. Source/SettingsCanonical.cpp writes the
+        -- Settings block the way the engine's saver writes it, which means enumerating the same 51 fields
+        -- in the same order through the same serializer. A hand-written field list here would be a second
+        -- statement of the format, which is the fork this tool's own header forbids. It is kept OUT of
+        -- SceneMigration.cpp on purpose: sixteen suites compile that file to test one schema step each,
+        -- and none of them should have to link an engine reflection table to do it.
         --
         -- It costs nothing but compile time: these three compile against Common alone, with no GPU, no
         -- window and no Desert link (Desert/Tests/Engine/ConfigOwnership and SceneForeignKeys build on
