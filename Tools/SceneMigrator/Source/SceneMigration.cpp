@@ -1038,6 +1038,50 @@ namespace Desert::Migration
             }
             return relative;
         }
+
+        // Components of a path, normalized, with the empty trailing part and "." dropped. A trailing
+        // separator makes the last component an empty string ("Resources/" -> {"Resources",""}) and
+        // matching on it would match everywhere.
+        std::vector<std::string> PathComponents( const std::filesystem::path& p )
+        {
+            std::vector<std::string> parts;
+            for ( const auto& part : p.lexically_normal() )
+            {
+                if ( !part.empty() && part != "." )
+                    parts.push_back( part.generic_string() );
+            }
+            return parts;
+        }
+
+        // How many leading components of `path` a TRAILING run of `root` accounts for, longest first, or
+        // 0 if none does.
+        //
+        // WHY A TRAILING RUN and not the whole root. The editor writes paths from its own working
+        // directory (`Editor/`) while this tool is run from the repository root, so the same root is
+        // spelled `Resources/Assets` in the file and `Editor/Resources/Assets` here: the full sequence is
+        // simply not in the string. Matching the root's trailing components is what makes the two
+        // spellings answer alike, and taking the LONGEST such run is the same "longest match wins" rule
+        // AssetHandle::StableKeyForPath applies to the absolutised roots at run time. That rule is
+        // load-bearing rather than tidy: in the sandbox layout `Resources/Assets/` is NESTED INSIDE
+        // `Resources/`, so a shorter match would tag every project asset as an engine resource.
+        //
+        // The match must start at component 0 of `path`. A root occurring further in would mean the file
+        // named something below a directory that merely shares the root's name, and the run-time
+        // derivation - which compares absolute prefixes - would not agree with it.
+        std::size_t LeadingRootMatch( const std::vector<std::string>& path,
+                                      const std::vector<std::string>& root )
+        {
+            for ( std::size_t take = root.size(); take >= 1; --take )
+            {
+                if ( take >= path.size() )
+                    continue; // the whole path would be the root: it names a directory, not a file
+                const bool same = std::equal( root.end() - static_cast<std::ptrdiff_t>( take ), root.end(),
+                                              path.begin() );
+                if ( same )
+                    return take;
+            }
+            return 0;
+        }
     } // namespace
 
     GravityUnitsMigrationReport MigrateGravityUnitsV8ToV9( std::optional<rfl::Generic>& settings )
@@ -1575,6 +1619,147 @@ namespace Desert::Migration
         return report;
     }
 
+
+    ServiceAssetRootMigrationReport
+    MigrateServiceAssetRootV16ToV17( std::vector<Assets::EntityData>& entities,
+                                     const std::filesystem::path&     assetsRoot )
+    {
+        // WHERE a reference to a service-registry asset can sit in a .desce. Four rows because the same
+        // kind of value reaches the file by two routes - one manual serializer and three reflected
+        // AssetHandle slots - and a step that knew only one of them would leave the other behind, which
+        // is this project's most repeated defect shape.
+        struct Site
+        {
+            const char* Component;
+            const char* OldKey; // the key a v16 file states
+            const char* NewKey; // what it is called from v17 on; equal to OldKey where nothing renames
+        };
+        static constexpr Site kSites[] = {
+             { "Text", "FontPath", "Font" }, // renamed WITH the value: it is not a path any more
+             { "UIText", "Font", "Font" },
+             { "UIIcon", "Icon", "Icon" },
+             { "UIPanel", "Video", "Video" },
+        };
+
+        ServiceAssetRootMigrationReport report;
+
+        const std::string assetsPrefix = std::string( Common::AssetHandle::AssetsTag() ) + ':';
+        const std::string enginePrefix = std::string( Common::AssetHandle::EngineTag() ) + ':';
+
+        const std::vector<std::string> assetsParts = PathComponents( assetsRoot );
+        // The engine tree is a compile-time constant and never remapped, so it is read straight from the
+        // census rather than passed in - there is no project state in it to disagree with.
+        const std::vector<std::string> engineParts = PathComponents( Common::Constants::Path::RESOURCE_PATH );
+
+        for ( auto& entity : entities )
+        {
+            const std::string tag        = entity.Tag.value_or( "Entity" );
+            bool              touchedAny = false;
+
+            for ( const Site& site : kSites )
+            {
+                const auto payload = entity.Components.get( site.Component );
+                if ( !payload.has_value() )
+                    continue;
+
+                const auto fields = payload.value().to_object();
+                if ( !fields.has_value() )
+                {
+                    LOG_WARN( "[SceneMigration] entity '{0}': the {1} payload is {2}, not an object - the "
+                              "{3} reference in it could not be root-tagged and stays as it is",
+                              tag, site.Component, Describe( payload.value() ), site.OldKey );
+                    continue;
+                }
+
+                if ( !fields.value().get( site.OldKey ).has_value() )
+                    continue; // this component names no such reference - tree untouched
+
+                // Rebuilt rather than edited in place, like every step above: rfl::Object is an ordered
+                // vector of pairs with no erase and no rename, so a rename IS a rebuild.
+                rfl::Generic::Object kept;
+                bool                 touchedHere = false;
+
+                for ( const auto& [key, value] : fields.value() )
+                {
+                    if ( key != site.OldKey )
+                    {
+                        kept[key] = value;
+                        continue;
+                    }
+
+                    touchedHere = true;
+
+                    const auto text = value.to_string();
+                    if ( !text.has_value() )
+                    {
+                        LOG_WARN( "[SceneMigration] entity '{0}': {1}.{2} is {3}, not a string - it is "
+                                  "carried over under {4} unchanged and still names nothing",
+                                  tag, site.Component, site.OldKey, Describe( value ), site.NewKey );
+                        report.UnrootedNames.push_back( std::string( tag ) + " > " + site.Component + "." +
+                                                        site.OldKey + " = " + Describe( value ) );
+                        kept[site.NewKey] = value;
+                        continue;
+                    }
+
+                    if ( text.value().empty() )
+                    {
+                        // An empty slot names nothing and must stay empty rather than become a bare tag:
+                        // the read side turns any non-empty string into a registration attempt, so
+                        // "assets:" would make every unfilled slot try to register the assets root.
+                        kept[site.NewKey] = value;
+                        report.Empty += 1;
+                        report.Refs += 1;
+                        continue;
+                    }
+
+                    const std::vector<std::string> parts = PathComponents( text.value() );
+                    const std::size_t              inAssets = LeadingRootMatch( parts, assetsParts );
+                    const std::size_t              inEngine = LeadingRootMatch( parts, engineParts );
+
+                    // Longest match wins, exactly as at run time; a tie cannot happen, because the two
+                    // roots would then be the same directory.
+                    const bool        assetsWins = inAssets >= inEngine;
+                    const std::size_t matched    = assetsWins ? inAssets : inEngine;
+                    if ( matched == 0 )
+                    {
+                        report.UnrootedNames.push_back( std::string( tag ) + " > " + site.Component + "." +
+                                                        site.OldKey + " = " + text.value() );
+                        LOG_WARN( "[SceneMigration] entity '{0}': '{1}' lies under neither the assets root "
+                                  "nor the engine resource tree, so there is no content root to tag it "
+                                  "with - it is carried over unchanged and will not resolve in a packaged "
+                                  "game",
+                                  tag, text.value() );
+                        kept[site.NewKey] = value;
+                        continue;
+                    }
+
+                    std::string relative;
+                    for ( std::size_t i = matched; i < parts.size(); ++i )
+                    {
+                        if ( !relative.empty() )
+                            relative += '/';
+                        relative += parts[i];
+                    }
+
+                    kept[site.NewKey] =
+                         rfl::Generic( ( assetsWins ? assetsPrefix : enginePrefix ) + relative );
+                    report.Refs += 1;
+                }
+
+                if ( !touchedHere )
+                    continue;
+
+                entity.Components[site.Component] = rfl::Generic( std::move( kept ) );
+                touchedAny = true;
+            }
+
+            if ( touchedAny )
+                report.Entities += 1;
+        }
+
+        return report;
+    }
+
     RetiredKeysMigrationReport MigrateRetiredKeys( std::optional<rfl::Generic>&     settings,
                                                    std::vector<Assets::EntityData>& entities )
     {
@@ -2076,6 +2261,16 @@ namespace Desert::Migration
         {
             report.ScriptRootRaised = true;
             report.ScriptRoot       = MigrateScriptRootV15ToV16( scene.Entities );
+        }
+
+        // Touches four component payloads that no step above reads or writes, so it is independent of
+        // all of them and sits here because it is newest. It takes the SCENE'S OWN assets root, like the
+        // v7 -> v8 material step, because the project's assets-root NAME is the only per-project fact the
+        // tagging needs and it cannot be read from a global in a pure function.
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionServiceAssetRoot )
+        {
+            report.ServiceAssetRootRaised = true;
+            report.ServiceAssetRoot       = MigrateServiceAssetRootV16ToV17( scene.Entities, assetsRoot );
         }
 
         // LAST, and it has to be: every step above may WRITE keys, and this one is the statement of which

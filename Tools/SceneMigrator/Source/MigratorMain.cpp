@@ -413,6 +413,24 @@ namespace Desert::Migration
                     out << "; NOT under a Scripts/ folder, carried over untagged: " << name;
                 out << ")";
             }
+            if ( report.ServiceAssetRootRaised )
+            {
+                out << " scene v" << Desert::Migration::kSceneVersionScriptRoot << "->v"
+                    << Desert::Migration::kSceneVersionServiceAssetRoot << " (";
+                if ( report.ServiceAssetRoot.Refs > 0 )
+                    out << report.ServiceAssetRoot.Refs << " font/icon/video reference(s) root-tagged on "
+                        << report.ServiceAssetRoot.Entities << " entity(ies), " << report.ServiceAssetRoot.Empty
+                        << " of them an empty slot";
+                else if ( report.ServiceAssetRoot.UnrootedNames.empty() )
+                    out << "stamp only - no entity named a font, an icon or a video";
+                else
+                    out << "no reference could be root-tagged";
+                // Named, not counted, like every step above that can refuse a value: a reference neither
+                // root can place still does not resolve in a packaged game.
+                for ( const auto& name : report.ServiceAssetRoot.UnrootedNames )
+                    out << "; under NEITHER content root, carried over untagged: " << name;
+                out << ")";
+            }
             if ( report.RetiredKeysRaised )
             {
                 // NOT a step's own pair of numbers, unlike every line above: the retirement pass is

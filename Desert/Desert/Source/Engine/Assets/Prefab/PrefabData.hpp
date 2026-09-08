@@ -130,7 +130,12 @@ namespace Desert::Assets
     struct TextComponentSer
     {
         std::string Text;
-        std::string FontPath;
+        // `Font` and not `FontPath`, because at scene v17 the value stopped being a path: it is the
+        // root-tagged key ServiceKeyForPath mints (ComponentRegistry.cpp). The name now matches the
+        // reflected `UIText.Font` slot, which carries the same form through the same two functions —
+        // one thing, one spelling. A field called `...Path` is an invitation to hand it to an ifstream,
+        // which is exactly how the old value came to be resolved against the wrong root.
+        std::string Font;
         glm::vec4   Color             = glm::vec4( 1.0f );
         float       Size              = 1.0f;
         float       EmissiveIntensity = 1.0f;

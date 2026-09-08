@@ -1818,16 +1818,16 @@ namespace Desert::ECS
         // MakeAssetResolver is an AssetHandle hashed from a root-tagged relative path and was already
         // immune; this was the only one that did not.
         //
-        // NOT the only rooted STRING in a scene, and the difference is worth knowing before someone
-        // reads this as "the class is now closed". `TextComponent.FontPath` and `UIImage.Icon` also
-        // store a path and re-hash it at load (FontService::RegisterFont / IconService::RegisterIcon,
-        // both through AssetHandle::FromCookedPath). Those are safe for every value the repository ships
-        // — measured: all 5 FontPath and all 8 Icon values name the ENGINE trees Resources/Fonts and
-        // Resources/Icons, which the packager stores under their own dev-time relative paths and which
-        // SetProjectRoot never remaps. A .ttf or .svg dropped in from the PROJECT'S OWN assets tree —
-        // which both scan roots allow (Runtime/Services/ServiceScanRoots.hpp) — would take exactly the
-        // route this field just left. Unmeasured end to end and out of I9's scope; named here so it is
-        // found rather than re-derived.
+        // IT WAS NOT THE ONLY ROOTED STRING IN A SCENE, and I10 finished the class one merge later.
+        // `TextComponent.Font`, `UIText.Font`, `UIIcon.Icon` and `UIPanel.Video` also stored a path and
+        // re-hashed it at load — the three service registries (FontService / IconService / VideoService)
+        // are path-keyed through AssetHandle::FromCookedPath, so a scene could not store a handle for
+        // them. They were safe for every value this repository ships (all 5 fonts and all 8 icons named
+        // the ENGINE trees Resources/Fonts and Resources/Icons, which SetProjectRoot never remaps) and
+        // broken for anything dropped in from the project's own assets tree, which both scan roots
+        // accept. They are root-tagged keys now too, at scene v17, through one pair of functions in
+        // Core/Serialize/ComponentRegistry.cpp. Every reference a `.desce` carries is now either an
+        // AssetHandle resolved through MakeAssetResolver or a root-tagged key.
         //
         // WHY A KEY AND NOT A HANDLE, which is the other way this could have been fixed. An AssetHandle
         // IS the FNV-1a of exactly this string, so the hash carries no location the key does not — what

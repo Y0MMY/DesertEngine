@@ -398,23 +398,19 @@ TEST( SceneScriptRootMigration, AFileAlreadyAtTheHeadIsNotRunAgain )
          << "a file at the head must not be re-spelled by this step";
 }
 
-// ── The head ──────────────────────────────────────────────────────────────────────────────────────
+// ── This step's own number ────────────────────────────────────────────────────────────────────────
 
-// THE HEAD ASSERTION, which travels with the newest step. It came here from SceneRetiredKeysMigration,
-// which came by it from SceneDebugViewMigration; it lives in whichever suite owns the last step, because
-// that is the only suite that can hold it without going red the day the next step lands — and going red
-// is the point: the failing message names the move, so the person who raises the version is told what to
-// do instead of finding an unexplained failure in a subsystem they did not touch.
-//
-// It is the run-time half of the static_assert in SceneMigration.hpp. If a step is ever added without
-// raising Core::kSceneVersion the tool stamps files at a version the loader refuses, every scene in the
-// repository stops opening at once, and each file looks correct in isolation.
-TEST( SceneScriptRootMigration, ThisIsTheHeadStepAndItSitsAboveItsPredecessor )
+// The HEAD assertion this suite held for one merge has moved on to
+// Desert/Tests/Tools/SceneServiceAssetRootMigration, which owns v17 — it travels with the newest step,
+// because that is the only suite that can hold it without going red the day the next one lands. What
+// stays is this step's own generation and its place above its predecessor: facts about the script
+// migration, and they do not move.
+TEST( SceneScriptRootMigration, ThisStepSitsAboveItsPredecessor )
 {
     EXPECT_EQ( 16, Migration::kSceneVersionScriptRoot );
     EXPECT_GT( Migration::kSceneVersionScriptRoot, Migration::kSceneVersionMachineQuality );
-    EXPECT_EQ( Migration::kSceneVersionScriptRoot, Core::kSceneVersion )
-         << "a newer step exists; move this assertion to that suite the way this one moved here";
+    EXPECT_LE( Migration::kSceneVersionScriptRoot, Core::kSceneVersion )
+         << "a step cannot sit above the head the loader requires";
 }
 
 // ── The corpus ────────────────────────────────────────────────────────────────────────────────────
