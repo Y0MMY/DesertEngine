@@ -2103,6 +2103,13 @@ namespace Desert::Migration
             // pass. One statement of the split, called from both entry points.
             report.AssetsMoved += MigrateCloudMaterialLayoutInputs( material ).Split;
 
+            // AND THE ALBEDO, because this function has just WRITTEN a scalar one: the scene field it moved
+            // was a float, so the value it produced is (x, 0, 0, 0) — exactly the shape a `.demat` authored
+            // before the colour landed carries. Raising it here rather than leaving it to the material pass
+            // is what makes a v11 scene come out of ONE run with a sky it can render, instead of needing the
+            // tool twice.
+            MigrateCloudMaterialAlbedoToColour( material );
+
             report.Materials.push_back( { relPath, rfl::json::write( material ) } );
 
             entity.Components["VolumetricCloud"] = rfl::Generic( std::move( kept ) );
@@ -2157,6 +2164,47 @@ namespace Desert::Migration
         return report;
     }
 
+    CloudMaterialAlbedoReport MigrateCloudMaterialAlbedoToColour( Assets::MaterialData& material )
+    {
+        CloudMaterialAlbedoReport report;
+
+        // THE NAME, ONCE. It did not change — only how many of its four stored components the shader reads.
+        constexpr const char* kAlbedo = "ScatteringAlbedo";
+
+        for ( auto& param : material.Params )
+        {
+            if ( param.Name != kAlbedo )
+                continue;
+
+            // THE TRIGGER IS THE SHAPE OF THE STORED VALUE and nothing else. A scalar was written as
+            // (x, 0, 0, 0); a colour is written with all three set. So a non-zero green or blue means this
+            // file has already been raised — or was authored as a colour — and is left exactly alone.
+            if ( param.Value.y != 0.0f || param.Value.z != 0.0f )
+                continue;
+
+            // BROADCAST, which reproduces the old sky EXACTLY: the scalar albedo multiplied a radiance that
+            // was already three-channel, so a neutral colour of the same magnitude is the same arithmetic.
+            const glm::vec4 raised( param.Value.x, param.Value.x, param.Value.x, param.Value.w );
+
+            // A VALUE ALREADY EQUAL TO ITS OWN RAISE IS NOT A CHANGE, and reporting it as one is not a
+            // cosmetic slip. The degenerate input (0, 0, 0, 0) is the case — black is black whether it is
+            // one number or three — and while this function counted it, `SceneMigrator --check` reported
+            // such a file as "would change" on every run, for ever, and the tool's own exit code said the
+            // corpus was never converted. That is the "the action happened and nobody knew" defect with
+            // its sign flipped: a report of work that was not done. A suite caught it, which is the whole
+            // reason the degenerate case has a test of its own.
+            if ( raised == param.Value )
+                continue;
+
+            param.Value = raised;
+            report.Broadcast += 1;
+        }
+
+        return report;
+    }
+
+    // И11 свёл цепочку шагов в один RunSteps, и функция выше — материальная, а не сценная: она
+    // живёт своим проходом по .demat и в эту цепочку не входит. Обе стороны нужны целиком.
     namespace
     {
         // THE STEP CHAIN, AND THERE IS EXACTLY ONE OF IT IN THIS REPOSITORY (И11).

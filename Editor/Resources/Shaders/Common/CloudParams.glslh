@@ -9,11 +9,24 @@
 // UNITS: KILOMETRES throughout, already converted on the C++ side by PackCloudParams. Nothing in this
 // block is in world units, and nothing downstream converts a second time.
 //
-// EVERY SLOT HAS A CONSUMER. The block is packed to exactly 63 floats with no padding and no
-// reserved field, because a slot nobody reads is a dead setting wearing a parameter's
-// clothes — and the first person to need a new one will quietly repurpose it. Phase Э5 is what that
-// rule looks like when it bites: the coverage, its contrast and its tile moved to the BAKE, so rather
-// than travel to a march that would not read them they left the block, and the region took their slot.
+// EVERY SLOT HAS A CONSUMER, OR A ROW IN Graphic::kCloudUnreadSlots SAYING WHY NOT. The block is packed
+// to exactly 71 floats with no padding and no reserved field, because a slot nobody reads is a dead
+// setting wearing a parameter's clothes — and the first person to need a new one will quietly repurpose
+// it. Phase Э5 is what that rule looks like when it bites: the coverage, its contrast and its tile moved
+// to the BAKE, so rather than travel to a march that would not read them they left the block, and the
+// region took their slot.
+//
+// TWO OF THE 71 ARE NOT READ, and both are the toll std430 charges for a three-component COLOUR: this is
+// a grid of vec4s, so it can only grow by four, and the scattering albedo turning from one float into
+// three asks for two. The exception is REGISTERED PER SLOT with a reason on the C++ side rather than
+// counted here, and Desert/Tests/Engine/CloudMediumConsumers works out from THIS FILE's text which
+// components any shader fetches — so a third unread slot goes red because it has no row, not because a
+// number changed.
+//
+// THE COUNT HERE READ "63 floats" UNTIL 2026-09-08 AND IT WAS ONCE TRUE: 63 is 252 bytes, this block
+// before u_CloudSpeciesNoise arrived (+16 bytes) and after the per-species placement basis left it
+// (-64). It was not a typo and nobody miscounted — it was ORPHANED from the layout by two changes that
+// did not come back for it. Whoever moves this layout owns every number written about it, in both files.
 //
 // FIELDS ARE APPENDED, NEVER INSERTED. Every offset here is a promise to the shader; a field placed in
 // the middle silently reinterprets every field after it.
@@ -52,7 +65,11 @@ layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuff
     vec4  u_CloudRegion;
     // w is HOW MANY SPECIES this layer carries, 0..4, and it is the bound of the march's per-species loop.
     // It is a count rather than a mask because the slots are filled from the front by PackCloudParams.
-    vec4  u_CloudDetail;    // x detail strength, y density scale, z scattering albedo, w species count
+    //
+    // z HELD THE SCALAR SCATTERING ALBEDO and holds nothing now: the albedo became a colour and moved to
+    // u_CloudAlbedo below. Written zero by the packer and read by nobody — see Graphic::kCloudUnreadSlots,
+    // which is where its row lives.
+    vec4  u_CloudDetail;    // x detail strength, y density scale, z UNREAD, w species count
     vec4  u_CloudWind;      // xyz accumulated wind offset (km), w phase g
     vec4  u_CloudSun;       // xyz TOWARD the sun (normalized), w light march distance (km)
     vec4  u_CloudSunColour; // rgb sun irradiance (linear), w light march sample count
@@ -87,6 +104,14 @@ layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuff
     // sky sends {0,0,0,0}, the four-way select in the march is uniform across the wave, and it costs
     // exactly what one sampler cost. Graphic::ResolveCloudNoiseVolumes decides it.
     vec4  u_CloudSpeciesNoise;
+    // THE MEDIUM'S SCATTERING ALBEDO, PER COLOUR — rgb; w is not read (Graphic::kCloudUnreadSlots).
+    //
+    // ITS OWN vec4 BECAUSE A COLOUR NEEDS THREE CONTIGUOUS COMPONENTS and no existing member had three
+    // free. BEFORE the trailing vec3 and not after it, which is not a preference: std430 aligns a vec4 to
+    // 16 while glm::vec3 aligns to 4, so a vec4 appended after u_CloudAerial would sit at 272 here and at
+    // 268 in Graphic::CloudGpuPayload — a silent divergence between the two halves of one layout, which is
+    // the failure this whole file exists to prevent. Same reason the species array is where it is.
+    vec4  u_CloudAlbedo;
     // x = aerial-perspective volume far extent (km), y = its read-side view-distance scale,
     // z = 1 when the volume exists and must be sampled.
     //
@@ -94,12 +119,12 @@ layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuff
     // used to be a vec4 whose fourth slot carried the cloud type's variance, and then the domain warp's
     // amount; the warp was measured and taken out (see the note in Common/CloudField.glslh), so rather
     // than leave a float nobody reads — which is where the next parameter would get stashed without a
-    // name, a range or a tooltip — the block ends in a vec3. std430 puts it at offset 240 and the block
-    // is 252 bytes; Graphic::CloudGpuPayload pins exactly that with a static_assert.
+    // name, a range or a tooltip — the block ends in a vec3. std430 puts it at offset 272 and the block
+    // is 284 bytes; Graphic::CloudGpuPayload pins exactly that with a static_assert.
     vec3  u_CloudAerial;
 };
 
-// The block is ELEVEN vec4s, a vec4[4], one more vec4 and a vec3, and it stops there. Seeds and octave counts are absent
+// The block is ELEVEN vec4s, a vec4[4], two more vec4s and a vec3, and it stops there. Seeds and octave counts are absent
 // on purpose: they decide what the baked volumes CONTAIN, not how the march reads them, so they belong to
 // the generators and would be four values copied into every dispatch here for nothing.
 

@@ -313,7 +313,10 @@ Shader "BakeProceduralSky"
             float phase        = CloudPhaseDualLobe(dot(dir, sunDir), u_CloudWind.w,
                                                     u_CloudPhase.x, u_CloudPhase.y);
             float extinction   = max(u_CloudMarch.w, 0.0f);
-            float albedo       = clamp(u_CloudDetail.z, 0.0f, 1.0f);
+            // PER COLOUR, and read from the same slot the screen march reads it from — a panorama lit by a
+            // different albedo than the one the eye sees is the "second model of the clouds" this file's
+            // own header refuses.
+            vec3  albedo       = clamp(u_CloudAlbedo.rgb, vec3(0.0f), vec3(1.0f));
             float lightMarchKm = max(u_CloudSun.w, 0.0f);
             int   lightSamples = int(clamp(u_CloudSunColour.w, 1.0f, 64.0f));
             float stopT        = clamp(u_CloudMarch.y, 0.0f, 1.0f);

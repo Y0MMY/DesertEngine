@@ -24,8 +24,15 @@
 //
 // AND IT RAISES `.demat` FILES TOO, since O-4. The cloud LOOK has lived in a material rather than in the
 // scene since v12, so a tool that migrated only scenes would leave every cloud material behind — carrying,
-// in that case, a layout slot the shader no longer declares. A `.demat` has no version field, so that step
-// is content-detected and idempotent rather than version-gated; see MigrateCloudMaterialLayoutInputs.
+// in that case, a layout slot the shader no longer declares. A `.demat` has no version field, so those
+// steps are content-detected and idempotent rather than version-gated; see
+// MigrateCloudMaterialLayoutInputs and MigrateCloudMaterialAlbedoToColour.
+//
+// TWO STEPS NOW, AND NEITHER GATES THE OTHER. The second raises a scalar `ScatteringAlbedo` to a neutral
+// colour, which is DATA LOSS if it is skipped rather than a missing feature: a scalar stored as
+// (x, 0, 0, 0) and read as a colour is a medium that scatters red and absorbs green and blue outright.
+// A material can need it without ever having had a layout binding, so both reports are consulted before
+// the file is called clean.
 //
 // AND `.deprefab` FILES, since И11, and this is why there is no second tool. A prefab carries the scene's
 // own EntityData and SHARES the scene's two version integers, so raising the head moves prefabs too — but
@@ -647,18 +654,35 @@ namespace Desert::Migration
 
             const Desert::Migration::CloudMaterialLayoutReport report =
                  Desert::Migration::MigrateCloudMaterialLayoutInputs( parsed.value() );
-            if ( !report.Changed() )
+            // BOTH STEPS ALWAYS RUN, and neither short-circuits the other: a `.demat` can need the albedo
+            // raise without ever having had a `CloudLayout` binding, and returning early on the first
+            // report is how a file gets certified "ok" while still carrying a scalar albedo — which
+            // renders as a RED sky, not as a missing feature.
+            const Desert::Migration::CloudMaterialAlbedoReport albedo =
+                 Desert::Migration::MigrateCloudMaterialAlbedoToColour( parsed.value() );
+
+            if ( !report.Changed() && !albedo.Changed() )
             {
-                out << "ok     " << path.string() << " — no pre-O-4 layout slot\n";
+                out << "ok     " << path.string() << " — no pre-O-4 layout slot, no scalar albedo\n";
                 continue;
             }
 
-            out << ( check ? "WOULD  " : "raised " ) << path.string() << " — " << report.Split
-                << " CloudLayout binding(s) split into LayoutPattern + LayoutMask, both naming the same "
-                   "painting\n";
+            // WHAT WAS RAISED, phrased ONCE and printed only where it is true. It used to be printed
+            // before the write, which meant a refused write reported "raised <file>" and then "FAIL
+            // <file>" — a claim of an action that had not happened, beside the correction. That is the
+            // Д31 class with its sign flipped, and it was found by making the write refuse on purpose.
+            std::ostringstream what;
+            if ( report.Changed() )
+                what << " " << report.Split
+                     << " CloudLayout binding(s) split into LayoutPattern + LayoutMask, both naming the "
+                        "same painting;";
+            if ( albedo.Changed() )
+                what << " " << albedo.Broadcast
+                     << " scalar ScatteringAlbedo value(s) broadcast to a neutral colour;";
 
             if ( check )
             {
+                out << "WOULD  " << path.string() << " —" << what.str() << "\n";
                 ++materialsChanged;
                 continue;
             }
@@ -666,10 +690,11 @@ namespace Desert::Migration
             if ( !Common::Utils::FileSystem::WriteContentToFileAtomic( path, rfl::json::write( parsed.value() ) ) )
             {
                 err << "FAIL   " << path.string() << " — the raise could not be written; the original file "
-                    << "is untouched\n";
+                    << "is untouched. It would have been:" << what.str() << "\n";
                 ++failed;
                 continue;
             }
+            out << "raised " << path.string() << " —" << what.str() << "\n";
             ++materialsChanged;
         }
 

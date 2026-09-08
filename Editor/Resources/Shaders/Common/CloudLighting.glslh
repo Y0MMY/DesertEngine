@@ -165,10 +165,22 @@ struct CloudScatterSeries
 // @p opticalDepth  material between this sample and the sun, measured ONCE at the base extinction
 // @p phase         the base phase function evaluated at this ray's scattering angle
 // @p sigmaT        this sample's own extinction, per kilometre
-// @p albedo        the scattering albedo
+// @p albedo        the scattering albedo, PER COLOUR
 // @p stepKm        the length of the step being integrated
+//
+// THE ALBEDO IS THE ONLY VECTOR QUANTITY OF THE MEDIUM, and the extinction beside it is deliberately not
+// (O1_DESIGN.md §7.1, §9 п.2). That asymmetry is the whole reason this stays cheap: the extinction decides
+// the OPTICAL DEPTH, which the shadow ray, the shadow map and the sky-occlusion volume all integrate as a
+// scalar, so making it spectral would triple three separate marches. The albedo only ever multiplies an
+// already-computed radiance, so a colour costs two more multiplies per octave and nothing else — Epic
+// carry the same split, with `bGrayScaleMaterial` as the switch that collapses it.
+//
+// AND IT DOES NOT MIX THE CHANNELS. Every term below is either scalar or applied component-wise, so a
+// coloured albedo is exactly three independent scalar runs — which is what Desert/Tests/Engine/CloudLighting
+// asserts rather than assumes, because a stray dot() or a length() introduced here would look like a
+// plausible tint and be a physical impossibility.
 vec3 CloudMultiScatterStep( CloudScatterSeries series, vec3 sunRadiance, vec3 ambient, float opticalDepth,
-                            float phase, float sigmaT, float albedo, float stepKm )
+                            float phase, float sigmaT, vec3 albedo, float stepKm )
 {
     int count = int( clamp( series.Octaves, 1.0f, float( CLOUD_MAX_SCATTER_OCTAVES ) ) );
 
@@ -207,7 +219,23 @@ vec3 CloudMultiScatterStep( CloudScatterSeries series, vec3 sunRadiance, vec3 am
             inScatter += ambient;
 
         float octaveExtinction = sigmaT * extinctFactor;
-        vec3  scattering       = inScatter * ( albedo * sigmaT * scatterFactor );
+        // COMPONENT-WISE, and this one line is the whole numerical cost of the albedo becoming a colour.
+        //
+        // MEASURED, because the obvious guess was wrong. A grey albedo through the new text moves 0 to 3
+        // pixels of 560 560 on the six protocol points, all by exactly 1/255, bias zero, coherence 0.499
+        // — against a noise floor measured at 0. The first hypothesis was this expression's grouping
+        // (floating-point multiplication is not associative): DISPROVED, `albedo * (sigmaT * scatterFactor)`
+        // and `albedo * sigmaT * scatterFactor` render byte-identical frames, so the compiler normalises
+        // them. Replacing `albedo` here with `albedo.x` — a scalar broadcast, which is what the code did
+        // while the albedo was one float — restores byte-identity with the pre-change frame EXACTLY, on
+        // every point. So the difference is the `vec3 * vec3` product itself, contracted differently by the
+        // shader compiler from the `vec3 * float` it replaced, and nothing else in the change contributes:
+        // not the new parameter slot, not the moved offsets, not the migrated material files.
+        //
+        // It is therefore unavoidable rather than untidy — a componentwise product IS the feature — and it
+        // is a third of the 15-to-36-pixel difference this file's own note above already records for the
+        // move that put this series here.
+        vec3 scattering = inScatter * ( albedo * sigmaT * scatterFactor );
 
         luminance += CloudScatterIntegral( scattering, octaveExtinction, stepKm );
     }

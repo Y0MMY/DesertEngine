@@ -117,7 +117,10 @@ namespace
          { "DetailStrength", 1, false },
          { "DensityScale", 1, false },
          { "ExtinctionScale", 1, false },
-         { "ScatteringAlbedo", 1, false },
+         // THREE, since the Volume domain's output contract landed: the scattering albedo is the medium's
+         // own colour. A `.demat` written while it was one is raised by
+         // Migration::MigrateCloudMaterialAlbedoToColour, not papered over by the reader.
+         { "ScatteringAlbedo", 3, false },
          { "PhaseG", 1, false },
          { "PhaseGBackward", 1, false },
          { "PhaseBlend", 1, false },
@@ -226,7 +229,9 @@ TEST( CloudMaterialSchema, TheSchemaDefaultsAreTheMirrorsToTheDigit )
     EXPECT_FLOAT_EQ( def( "DetailStrength" ).x, mirror.DetailStrength );
     EXPECT_FLOAT_EQ( def( "DensityScale" ).x, mirror.DensityScale );
     EXPECT_FLOAT_EQ( def( "ExtinctionScale" ).x, mirror.ExtinctionScale );
-    EXPECT_FLOAT_EQ( def( "ScatteringAlbedo" ).x, mirror.ScatteringAlbedo );
+    EXPECT_FLOAT_EQ( def( "ScatteringAlbedo" ).x, mirror.ScatteringAlbedo.x );
+    EXPECT_FLOAT_EQ( def( "ScatteringAlbedo" ).y, mirror.ScatteringAlbedo.y );
+    EXPECT_FLOAT_EQ( def( "ScatteringAlbedo" ).z, mirror.ScatteringAlbedo.z );
     EXPECT_FLOAT_EQ( def( "PhaseG" ).x, mirror.PhaseG );
     EXPECT_FLOAT_EQ( def( "PhaseGBackward" ).x, mirror.PhaseGBackward );
     EXPECT_FLOAT_EQ( def( "PhaseBlend" ).x, mirror.PhaseBlend );
@@ -316,6 +321,31 @@ TEST( CloudMaterialSchema, BuildAppliesSchemaThenOverridesAndSkipsWhatItDoesNotK
     EXPECT_FLOAT_EQ( noSchema.Coverage, 0.25f );
 }
 
+// THE ALBEDO IS READ AS THREE COMPONENTS AND NOT REPAIRED ON THE WAY IN — which is what makes the
+// migration necessary rather than optional, and it is asserted here so nobody makes the reader "helpful".
+//
+// The tempting leniency is "if y and z are zero, broadcast x": it would make every unmigrated `.demat`
+// render correctly. It is refused twice over. It makes (0.98, 0, 0) — a legal authored colour now that the
+// slot has three components — inexpressible; and it hides an unraised file for ever, so the corpus would
+// carry two shapes of the same value indefinitely and the next person to touch either end would meet both.
+// Migration::MigrateCloudMaterialAlbedoToColour raises the file ONCE instead, and the SceneCloudMaterial-
+// Migration suite is where that is tested.
+TEST( CloudMaterialSchema, TheAlbedoIsAColourAndAnOldScalarIsNotQuietlyRepaired )
+{
+    MaterialOverrides scalarAsWritten;
+    scalarAsWritten.Params.emplace_back( "ScatteringAlbedo", glm::vec4( 0.98f, 0.0f, 0.0f, 0.0f ) );
+
+    const CloudMaterialValues stale = BuildCloudMaterialValues( &Schema(), scalarAsWritten );
+    EXPECT_EQ( stale.ScatteringAlbedo, glm::vec3( 0.98f, 0.0f, 0.0f ) )
+         << "the reader broadcast a scalar albedo into a colour. That makes an authored (0.98, 0, 0) "
+            "impossible to express and lets an unmigrated .demat live for ever; the migrator raises the "
+            "file instead.";
+
+    MaterialOverrides authored;
+    authored.Params.emplace_back( "ScatteringAlbedo", glm::vec4( 0.9f, 0.72f, 0.55f, 0.0f ) );
+    EXPECT_EQ( BuildCloudMaterialValues( &Schema(), authored ).ScatteringAlbedo, glm::vec3( 0.9f, 0.72f, 0.55f ) );
+}
+
 // THE PROTOCOL SCENES' MATERIALS ARE FULLY EXPLICIT, which is the §PR instrument-property continued
 // across the seam: those scenes exist so no default change can move a measurement, and after O1 a schema
 // default could move one through a material that omitted a parameter. The migration writes every stated
@@ -380,93 +410,59 @@ TEST( CloudMaterialSchema, TheSharedDefaultMaterialStatesNoOverridesAndSoCannotD
 }
 
 // ---------------------------------------------------------------------------------------------------
-// WHICH PARAMETERS COST SECONDS, AND WHY THE PANEL CAN SAY SO WITH ONE LINE (O8-3)
+// WHICH PARAMETERS COST SECONDS — MOVED, AND WHY THE MOVE IS THE POINT (O8-3, O1)
 // ---------------------------------------------------------------------------------------------------
 //
 // THE COMPLAINT THIS ANSWERS, in the owner's words, twice: "I'd like the clouds in the preview to update
 // straight away". Half of them already do. A cloud material's parameters fall into two classes with
-// completely different costs, and nothing on screen distinguishes them:
+// completely different costs — read by the CPU BAKE, or read by the MARCH — and until O1's timing pass
+// nothing on screen distinguished them.
 //
-//   * READ BY THE BAKE. Graphic::System::VolumetricCloudRenderer::BuildProceduralParams turns them into
-//     Assets::CloudProceduralFieldParams, and moving one rebuilds a volume of a few thousand bodies on a
-//     worker — measured at 961 ms for a 256 grid and 229 ms for a 128 one, Debug, on this machine, since
-//     Г10 spread the bake's z-slices over the pool instead of one worker (it was 5 915 and 1 461).
-//     The sky goes on showing the PREVIOUS volume until it lands.
-//   * READ BY THE MARCH. They travel to the GPU inside Graphic::PackCloudParams' block and the very next
-//     frame is drawn with them.
+// THAT CLAIM USED TO BE PINNED HERE, BY READING THE RENDERER AS TEXT: the body of
+// VolumetricCloudRenderer::BuildProceduralParams was brace-matched out of the .cpp and searched for
+// `m_Material.<Name>`. It was the weakest form of guard in this subsystem, and it had the failure mode a
+// text guard always has — the bake's material half moved into a header
+// (Graphic::ApplyCloudMaterialToBakeParams, so that a suite could CALL it), every `m_Material.` read left
+// this file's field of view at once, and the test would have gone red naming twenty parameters with
+// nothing wrong with any of them.
 //
-// WHAT THIS TEST PINS, AND IT IS A RELATION AND NOT A LIST. The two classes are ALREADY exactly the
-// schema's own category boundary — the first four categories are the bake's, the last two are the
-// march's — so the panel needs no re-ordering at all, only a heading. That property is not an accident
-// anybody wrote down, which is precisely why it needs asserting: the day somebody adds a knob to
-// "Weather" that the bake does not read, or one to "Detail" that it does, the heading becomes a lie and
-// this goes red naming the parameter.
+// It is now Desert/Tests/Engine/CloudMaterialTiming, where each parameter is PERTURBED and the renderer's
+// own rebake decision (Assets::CloudProceduralParamsEqual) is asked whether the volume has to be built
+// again — the relation executed instead of grepped, and checked against the `Timing` attribute the shader
+// now declares and the Material Editor now prints.
 //
-// It is read out of the two files that ALREADY own the answer — the schema, and the renderer's own
-// source — rather than out of a third list. A third list is the mirror-with-one-reader the dev skill
-// names, and it would be the thing that drifts.
-TEST( CloudMaterialSchema, TheCategoriesAlreadySeparateTheParametersThatCostSecondsFromTheOnesThatDoNot )
+// WHAT STAYS HERE is the half that belongs to the SCHEMA rather than to the bake: every parameter carries
+// the attribute at all. Without it the panel's heading has nothing to say, and a schema census is exactly
+// where "a value nobody classified" has to be caught — this suite is the one that walks the Properties
+// block.
+TEST( CloudMaterialSchema, EveryParameterDeclaresWhenItsEditBecomesVisible )
 {
-    const std::string renderer = ReadAll(
-         RepoRoot() + "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Clouds/VolumetricCloudRenderer.cpp" );
-    ASSERT_FALSE( renderer.empty() ) << "the renderer's source is unreadable, so this proves nothing";
+    using Timing = ::Desert::Core::Formats::ShaderParamTiming;
 
-    // The BODY of BuildProceduralParams, by brace matching from its definition. Searching the whole file
-    // would count SetCloudSettings' and the packer's reads as the bake's, which is the opposite of what
-    // is being asked.
-    const std::size_t at = renderer.find( "VolumetricCloudRenderer::BuildProceduralParams(" );
-    ASSERT_NE( at, std::string::npos ) << "BuildProceduralParams was renamed; this test names the wrong "
-                                          "function and would certify anything";
-    const std::size_t open = renderer.find( '{', at );
-    ASSERT_NE( open, std::string::npos );
-
-    std::size_t close = open;
-    for ( int depth = 0; close < renderer.size(); ++close )
-    {
-        if ( renderer[close] == '{' )
-            ++depth;
-        else if ( renderer[close] == '}' && --depth == 0 )
-            break;
-    }
-    ASSERT_LT( close, renderer.size() ) << "the braces of BuildProceduralParams do not balance";
-    const std::string body = renderer.substr( open, close - open );
-
-    // The four categories whose parameters place the clouds. Named rather than counted, because the claim
-    // is about WHICH categories and a count would pass on the wrong four.
-    const std::set<std::string> bakeCategories = { "Cloud Types", "Weather", "Placement", "Layout" };
-
-    uint32_t bakes   = 0;
-    uint32_t marches = 0;
+    uint32_t rebake    = 0;
+    uint32_t immediate = 0;
 
     for ( const ShaderParam& p : Schema().Params )
     {
-        // THE FOUR TYPE SLOTS REACH THE BAKE THROUGH AN ARGUMENT, not through a member access: the
-        // renderer resolves them in ResolveSpecies and hands BuildProceduralParams the SHAPES. So they
-        // are read by the bake and there is no `m_Material.CloudTypeN` to find, and saying so here is the
-        // difference between a test that knows why and a test with an unexplained hole in it.
-        const bool byArgument     = p.Name.rfind( "CloudType", 0 ) == 0;
-        const bool readByBake     = byArgument || body.find( "m_Material." + p.Name ) != std::string::npos;
-        const bool inBakeCategory = bakeCategories.count( p.Category ) != 0;
+        EXPECT_NE( p.Timing, Timing::Unspecified )
+             << p.Name
+             << " declares no Timing, so the Material Editor cannot tell an artist whether moving "
+                "it costs a frame or fourteen seconds. Add Timing(Immediate) or Timing(Rebake) to "
+                "its Properties line; CloudMaterialTiming then checks the one you chose against "
+                "the bake itself.";
 
-        EXPECT_EQ( readByBake, inBakeCategory )
-             << p.Name << " sits in the '" << p.Category << "' category but is "
-             << ( readByBake ? "READ BY THE BAKE" : "not read by the bake" )
-             << ". The Material Editor labels a whole category as costing seconds or not, so a parameter "
-                "on the wrong side of that line is either a knob that looks free and stalls the editor, "
-                "or one that looks expensive and is instant.";
-
-        readByBake ? ++bakes : ++marches;
+        if ( p.Timing == Timing::Rebake )
+            ++rebake;
+        else if ( p.Timing == Timing::Immediate )
+            ++immediate;
     }
 
-    // QUOTED, so a schema that silently shrank is visible. TWENTY place the clouds and FOURTEEN shade
-    // them, and that is the sentence the panel's two headings say. The counts are pinned as well as the
-    // per-parameter check because the loop above is vacuously green over an empty schema — a parse that
-    // returned nothing would pass every EXPECT_EQ in it and prove exactly nothing.
-    std::printf( "[CloudMaterialSchema] %u of %u parameters rebuild the cloud volume; %u reach the march "
-                 "in the same frame\n",
-                 bakes, bakes + marches, marches );
-    EXPECT_EQ( bakes, 20u );
-    EXPECT_EQ( marches, 14u );
+    // QUOTED, so a schema that silently shrank is visible: the loop above is vacuously green over an empty
+    // parameter list, which is how a census stops counting anything without going red.
+    std::printf( "[CloudMaterialSchema] %u of %u parameters declare Rebake; %u declare Immediate\n", rebake,
+                 static_cast<uint32_t>( Schema().Params.size() ), immediate );
+    EXPECT_EQ( rebake, 20u );
+    EXPECT_EQ( immediate, 14u );
 }
 
 int main( int argc, char** argv )

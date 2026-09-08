@@ -10,6 +10,7 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -27,18 +28,28 @@ namespace Desert::Graphic
      * Units: KILOMETRES throughout. This packer is where the component's world-unit distances are
      * converted, exactly once.
      *
-     * EVERY SLOT IS READ. The block is 67 floats with no reserved field, and that is a deliberate
-     * constraint rather than an accident of packing: a spare slot is where a future parameter gets quietly
-     * stashed without a name, a range or a tooltip. It is 67 rather than 68 because the last member is a
-     * vec3 — when the domain warp came out, the slot it had occupied came out with it rather than staying
-     * behind as somewhere to put things.
+     * EVERY SLOT IS READ, OR IT HAS A ROW IN kUnreadSlots SAYING WHY NOT. The block is 71 floats with no
+     * reserved field and no padding, and that is a deliberate constraint rather than an accident of
+     * packing: a spare slot is where a future parameter gets quietly stashed without a name, a range or a
+     * tooltip. Two of the 71 are not read, both of them the toll std430 charges for storing a
+     * three-component COLOUR in a grid of vec4s — see kUnreadSlots below, which is the register a test
+     * checks the shader text against. It is a register with a reason per row and not a count: a count is
+     * the number the next author adjusts instead of explaining.
      *
-     * THIRTY-TWO OF THE SEVENTY-NINE ARE THE FOUR SPECIES', and the three slots T3 freed by moving a
-     * type's factors out of the layer's own vec4s were spent rather than kept: `Weather.w` held the one
-     * species' DetailCharacter, `Detail.y` and `Detail.z` held the products of the layer's strength and
-     * density with that species' factors, and `March.w` held the product with its extinction. With four
-     * kinds of cloud in one shell none of those products can be formed once, so each became a per-species
-     * number and the vec4s they left closed up around the layer's own settings.
+     * TWENTY OF THE SEVENTY-ONE ARE THE FOUR SPECIES' — SpeciesEdge's sixteen and SpeciesNoise's four. The
+     * three slots T3 freed by moving a type's factors out of the layer's own vec4s were spent rather than
+     * kept: `Weather.w` held the one species' DetailCharacter, `Detail.y` and `Detail.z` held the products
+     * of the layer's strength and density with that species' factors, and `March.w` held the product with
+     * its extinction. With four kinds of cloud in one shell none of those products can be formed once, so
+     * each became a per-species number and the vec4s they left closed up around the layer's own settings.
+     *
+     * THE PREVIOUS SENTENCE READ "THIRTY-TWO OF THE SEVENTY-NINE" UNTIL 2026-09-08, AND BOTH NUMBERS WERE
+     * ONCE TRUE. 79 floats is 316 bytes: this block BEFORE the per-species placement basis left it (four
+     * vec4s, -64 bytes) and before SpeciesNoise arrived (+16). Thirty-two was that basis's sixteen floats
+     * plus SpeciesEdge's sixteen. So the sentence was not a typo and nobody miscounted — it was ORPHANED
+     * from the layout by two changes that did not come back for it, which is a different defect from a
+     * wrong comment and needs a different habit: whoever moves a layout owns every number written about
+     * it. O1_DESIGN.md §8.2 recorded this as a numeric typo; it was not, and §10.5 records what it was.
      */
     struct CloudGpuPayload
     {
@@ -58,7 +69,9 @@ namespace Desert::Graphic
         // Assets::CloudProceduralRegionOriginKm; z the RECIPROCAL of its horizontal side, because the march
         // only ever divides by it; w the erosion's period, unchanged.
         glm::vec4 Region;
-        glm::vec4 Detail;       // x detail strength, y density scale, z scattering albedo, w species count
+        // z HELD THE SCALAR SCATTERING ALBEDO and holds nothing now — the albedo became a colour and moved
+        // to its own vec4 below. It is not reused and not renamed to a pad: kUnreadSlots carries its row.
+        glm::vec4 Detail;       // x detail strength, y density scale, z UNREAD, w species count
         glm::vec4 Wind;         // xyz accumulated wind offset (km), w phase g
         glm::vec4 Sun;          // xyz TOWARD the sun (normalized), w light march distance (km)
         glm::vec4 SunColour;    // rgb sun irradiance (linear), w light march sample count
@@ -88,6 +101,24 @@ namespace Desert::Graphic
         // it did before this field existed. Graphic::ResolveCloudNoiseVolumes computes it, once, and the
         // renderer binds the images in the same order it numbers them.
         glm::vec4 SpeciesNoise;
+
+        // THE MEDIUM'S SCATTERING ALBEDO, PER COLOUR. rgb; w is not read (kUnreadSlots).
+        //
+        // WHY IT IS ITS OWN vec4 AND NOT THREE SLOTS SOMEWHERE. Three components of one colour have to be
+        // contiguous to be fetched as `.rgb`, and no existing member had three free slots. A vec4 is
+        // therefore the smallest shape a colour fits in, and the fourth float is unreachable arithmetic
+        // rather than a choice: this block is a grid of vec4s, so it can only grow by four, and turning a
+        // one-float value into a three-float one asks for two. No shuffling of the other members removes
+        // that — every candidate move (the species count, the AO strength into the albedo's alpha the way
+        // Unreal packs it, the albedo inside Detail) closes one hole and opens another, because the
+        // remainder modulo four does not care where the values sit.
+        //
+        // AND IT SITS BEFORE THE TRAILING vec3, WHICH IS NOT A PREFERENCE. `glm::vec3` aligns to 4 and a
+        // std430 vec4 aligns to 16, so a vec4 appended AFTER Aerial would land at 268 in C++ and at 272 in
+        // GLSL — a silent divergence of the two halves of one layout, which is the worst outcome this file
+        // exists to prevent. The species array is where it is for the same reason; see the note at its own
+        // static_assert.
+        glm::vec4 Albedo;
 
         // A vec3 AND LAST, which is the only shape in which three values can be three values. It was a
         // vec4 whose fourth slot carried the cloud type's variance, and then briefly the domain warp's
@@ -119,10 +150,11 @@ namespace Desert::Graphic
     // species array itself sits there: std430 aligns a vec4 to 16, and after a vec3 that ends at 252 it
     // would start at 256 and leave four bytes nobody wrote.
     static_assert( offsetof( CloudGpuPayload, SpeciesNoise ) == 240 );
-    static_assert( offsetof( CloudGpuPayload, Aerial ) == 256 );
-    // 268, NOT 272, and the difference is the point. std430 rounds a block's STRIDE up to a multiple of
+    static_assert( offsetof( CloudGpuPayload, Albedo ) == 256 );
+    static_assert( offsetof( CloudGpuPayload, Aerial ) == 272 );
+    // 284, NOT 288, and the difference is the point. std430 rounds a block's STRIDE up to a multiple of
     // 16, but a stride only exists for an ARRAY of blocks and this is a single one — the shader never
-    // reads past the last member, so the block ends at 268 and so does this. glm::vec3 aligns to 4 rather
+    // reads past the last member, so the block ends at 284 and so does this. glm::vec3 aligns to 4 rather
     // than to 16, so the C++ struct ends there too and there is no trailing padding to explain. Same
     // arrangement, and the same reasoning, as CloudResolveParams below.
     //
@@ -130,14 +162,59 @@ namespace Desert::Graphic
     // was appended to replace them: the region took the weather settings' slot, and the settings that
     // moved to the bake left the block rather than travelling to a march that would not read them.
     //
-    // AND IT GREW BY SIXTEEN, ONCE, for SpeciesNoise. That is the price of a type's noise volume reaching
-    // the march at all: until it was paid, three of a layer's four slots could name a volume the frame
-    // never read.
-    static_assert( sizeof( CloudGpuPayload ) == 268,
-                   "Eleven vec4s, a vec4[4], a vec4 and a vec3 — the shader reads exactly this and nothing "
-                   "more." );
+    // AND IT GREW BY SIXTEEN TWICE. Once for SpeciesNoise — the price of a type's noise volume reaching
+    // the march at all; until it was paid, three of a layer's four slots could name a volume the frame
+    // never read. Once for Albedo, which is the price of the scattering albedo being a COLOUR: a vec4 is
+    // the smallest shape three contiguous components fit in.
+    static_assert( sizeof( CloudGpuPayload ) == 284,
+                   "Eleven vec4s, a vec4[4], two more vec4s and a vec3 — the shader reads exactly this and "
+                   "nothing more." );
 
     inline constexpr uint32_t kCloudPayloadBytes = sizeof( CloudGpuPayload );
+
+    /// How many floats travel in the block. DERIVED from the struct, so it cannot be a number somebody
+    /// updates separately from the layout — which is exactly what happened to the two prose counts above.
+    inline constexpr uint32_t kCloudPayloadFloats = kCloudPayloadBytes / 4u;
+
+    /// ONE SLOT OF THE BLOCK THAT NO SHADER READS, AND WHY.
+    ///
+    /// The block's discipline is that a slot nobody reads is a dead setting wearing a parameter's clothes.
+    /// std430 makes that unachievable the moment a value becomes a three-component COLOUR: the block is a
+    /// grid of vec4s, so it can only grow by four, and turning one float into three asks for two.
+    ///
+    /// SO THE EXCEPTION IS REGISTERED PER SLOT, WITH A REASON, AND NOT COUNTED. A count is the number the
+    /// next author adjusts instead of explaining; a register makes a third unread slot red BECAUSE IT HAS
+    /// NO ROW. Desert/Tests/Engine/CloudMediumConsumers reads the shader tree, works out which components
+    /// of which member are actually fetched, and requires every unfetched one to appear here.
+    struct CloudUnreadSlot
+    {
+        /// The member's GLSL name, exactly as the block declares it (`u_CloudDetail`).
+        const char* Member;
+        /// Which component, as the single swizzle letter a shader would fetch it by: 'x', 'y', 'z' or 'w'.
+        char Component;
+        /// Why nothing reads it. A row with an empty reason is not a row.
+        const char* Reason;
+    };
+
+    /// std::array AND NOT A C ARRAY, because this register is allowed to reach zero rows — the day the
+    /// block's arithmetic works out even again, every exception goes away, and a zero-length C array is
+    /// not a thing in C++: clang takes it as a GNU extension and MSVC rejects it outright (C2466). That
+    /// has reached `dev` twice in one day from two censuses that achieved their own goal. A type has to be
+    /// able to express its structure's success.
+    inline constexpr std::array<CloudUnreadSlot, 2> kCloudUnreadSlots = {
+         { { "u_CloudDetail", 'z',
+             "held the scalar scattering albedo until the albedo became a colour and moved to "
+             "u_CloudAlbedo; not reused, because a slot repurposed without a schema parameter behind it is "
+             "how a value reaches the GPU with no name, no range and no tooltip" },
+           { "u_CloudAlbedo", 'w',
+             "the toll std430 charges for a three-component colour: a grid of vec4s can only grow by four, "
+             "and a colour needs three contiguous components, so the fourth is unreachable arithmetic "
+             "rather than a reserved field" } } };
+
+    /// How many of the block's floats a shader is expected to fetch. DERIVED, so the two halves of the
+    /// claim — the layout and the exceptions — cannot be adjusted independently.
+    inline constexpr uint32_t kCloudPayloadReadFloats =
+         kCloudPayloadFloats - static_cast<uint32_t>( kCloudUnreadSlots.size() );
 
     // The bindings of the cloud compute pass. SetOutput / SetStorageBuffer / SetInput take these as
     // explicit arguments and never consult the shader's own reflection, so each number here must equal
@@ -707,9 +784,20 @@ namespace Desert::Graphic
 
         p.Region = glm::vec4( region.OriginKm.x, region.OriginKm.y, 1.0f / regionSideKm,
                               std::max( material.DetailTileSize, 1.0f ) / kCloudWorldUnitsPerKm );
-        p.Detail =
-             glm::vec4( std::clamp( material.DetailStrength, 0.0f, 1.0f ), std::max( material.DensityScale, 0.0f ),
-                        std::clamp( material.ScatteringAlbedo, 0.0f, 1.0f ), static_cast<float>( species ) );
+        // .z IS ZERO AND UNREAD — it held the scalar albedo. Written zero rather than left indeterminate:
+        // the payload is memcpy'd to the GPU, and an uninitialised byte in a buffer that is otherwise
+        // deterministic would make two identical frames differ, which is the noise floor this subsystem's
+        // whole verification method rests on. kCloudUnreadSlots carries its row.
+        p.Detail = glm::vec4( std::clamp( material.DetailStrength, 0.0f, 1.0f ),
+                              std::max( material.DensityScale, 0.0f ), 0.0f, static_cast<float>( species ) );
+
+        // THE MEDIUM'S ALBEDO, PER COLOUR, clamped per channel. Clamped rather than trusted for the reason
+        // every other clamp here gives — a scene file is a text file — and per CHANNEL because an albedo
+        // above one is a medium that emits, which is what Emissive would be for if it existed: a channel
+        // over 1 here would make the multiple-scattering series diverge instead of converging, and the
+        // frame would bloom on the third octave with nothing in the log.
+        p.Albedo =
+             glm::vec4( glm::clamp( material.ScatteringAlbedo, glm::vec3( 0.0f ), glm::vec3( 1.0f ) ), 0.0f );
 
         // THE TYPES' FACTORS ARE NO LONGER FOLDED INTO THE LAYER'S, and the reason is arithmetic rather
         // than taste. A cumulonimbus is made of more water than a stratus, a cirrus is a quarter as opaque

@@ -208,6 +208,16 @@ namespace Desert::Tests::PointerCensus
         { "Desert/Desert/Source/Engine/Graphic/Clouds/CloudEnvironmentBake.hpp",
           "CloudBakeBinding", "DistantSkyLight", Guard::CallScoped,
           kWhyArgumentPack },
+        // THE REGISTER OF PARAMETER-BLOCK SLOTS NO SHADER READS (O1). Both members are string literals in
+        // an `inline constexpr std::array`, so the pointees live in the binary's read-only data and Q2 is
+        // closed by the language — the same argument, and the same guard, as SkyPresetEntry::Name below.
+        // Q1: nobody destroys them, because nobody allocated them.
+        { "Desert/Desert/Source/Engine/Graphic/Clouds/CloudPayload.hpp",
+          "CloudUnreadSlot", "Member", Guard::StaticStorage,
+          "a string literal in a constexpr table of the block's unread slots" },
+        { "Desert/Desert/Source/Engine/Graphic/Clouds/CloudPayload.hpp",
+          "CloudUnreadSlot", "Reason", Guard::StaticStorage,
+          "a string literal in a constexpr table of the block's unread slots" },
         { "Desert/Desert/Source/Engine/Graphic/Clouds/CloudShadowPayload.hpp",
           "CloudShadowInput", "Map", Guard::FrameScoped,
           "SceneRenderer gathers ONE of these per frame and hands the same one to the deferred, the PBR "

@@ -340,6 +340,20 @@ namespace Desert::Editor::Control
             // one field down.
             item["group"] = Str( property.Group );
 
+            // WHEN A WRITE TO THIS ROW BECOMES VISIBLE — "Immediate", "Rebake", or absent when the schema
+            // makes no claim. OMITTED rather than sent empty, which is the opposite choice from `group`
+            // above and made for the same reason: an empty group is a FACT about the shader (it declares
+            // none), whereas an empty timing is the absence of a claim, and a client must not be able to
+            // read "" as "immediate".
+            //
+            // It is on the wire because the channel's contract is that a reply is released only after a
+            // frame that shows the command's effect — and for a `Rebake` property that frame is SECONDS
+            // away, behind a CPU precomputation (the cloud volume: 3.3 to 14.1 s). A client that does not
+            // know which kind it just wrote reads the unchanged frame as a failed write, which is exactly
+            // the conclusion the owner reached by hand, twice.
+            if ( !property.Timing.empty() )
+                item["timing"] = Str( property.Timing );
+
             item["settable"] = rfl::Generic( property.Settable );
             if ( !property.Settable )
                 item["why"] = Str( property.NotSettableReason );

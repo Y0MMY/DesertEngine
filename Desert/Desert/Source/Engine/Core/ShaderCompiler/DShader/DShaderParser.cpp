@@ -325,7 +325,7 @@ namespace Desert::Core::Preprocess
 
         bool ParsePropertyAttributes( Cursor& c, ShaderParam& param, ParseError& err )
         {
-            // ( "Display Name" [, Range(a,b)] [, Category("...")] )
+            // ( "Display Name" [, Range(a,b)] [, Category("...")] [, Tooltip("...")] [, Timing(Immediate)] )
             if ( !Expect( c, '(', err, "after property name" ) )
                 return false;
 
@@ -365,10 +365,32 @@ namespace Desert::Core::Preprocess
                          !Expect( c, ')', err, "closing Tooltip" ) )
                         return false;
                 }
+                // WHEN AN EDIT HERE REACHES THE PICTURE — `Timing(Immediate)` or `Timing(Rebake)`. See
+                // ShaderParamTiming. An UNQUOTED enumerator and not a string, because there are exactly two
+                // of them and a misspelling must be a parse error the shader author sees at load rather
+                // than a free-text field that silently means nothing.
+                else if ( attr == "timing" )
+                {
+                    if ( !Expect( c, '(', err, "after Timing" ) )
+                        return false;
+                    SkipTrivia( c );
+                    const std::string timing = Lower( ReadIdent( c ) );
+                    if ( timing == "immediate" )
+                        param.Timing = ShaderParamTiming::Immediate;
+                    else if ( timing == "rebake" )
+                        param.Timing = ShaderParamTiming::Rebake;
+                    else
+                    {
+                        err = { c.Line, "unknown Timing '" + timing + "' (expected Immediate or Rebake)" };
+                        return false;
+                    }
+                    if ( !Expect( c, ')', err, "closing Timing" ) )
+                        return false;
+                }
                 else
                 {
-                    err = { c.Line,
-                            "unknown property attribute '" + attr + "' (expected Range, Category or Tooltip)" };
+                    err = { c.Line, "unknown property attribute '" + attr +
+                                         "' (expected Range, Category, Tooltip or Timing)" };
                     return false;
                 }
                 SkipTrivia( c );
