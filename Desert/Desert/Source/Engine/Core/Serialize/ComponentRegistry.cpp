@@ -325,10 +325,18 @@ namespace Desert::Core::Serialize
                 // by ToPath above (or by the v7 -> v8 migration) carries a path relative to the assets
                 // root, because a material ships with the project; a material an artist points at
                 // outside the project carries an absolute one. Joining the relative form to the root
-                // HERE means it happens exactly once, and it is also what makes the FindByPath below
-                // hit: that lookup compares filepaths VERBATIM (unlike CreateAsset, which dedups on
-                // the spelling-independent StableKeyForPath), so a scene naming a preloaded material
-                // by any other spelling missed it and went the create-and-register way round.
+                // HERE means it happens exactly once.
+                //
+                // THE JOIN IS THE EXPANSION OF A REFERENCE AND NOT A LOOKUP FIX — it used to be both,
+                // and that half is now retired. `FindByPath` compared filepaths VERBATIM while
+                // `CreateAsset` deduplicated on the spelling-independent stable key, so a scene naming a
+                // preloaded material by any other spelling missed and went the create-and-register way
+                // round; this join was one of three hand-written detours around that. The registry
+                // answers both questions the same way now (Desert/Tests/Engine/AssetPathIdentity). What
+                // the join still does, and must: an identity is derived RELATIVE TO THE CONTENT ROOTS, so
+                // a bare `Materials/M.demat` would otherwise be resolved against the process's working
+                // directory, land under no root, and be a different asset from the same file under the
+                // assets root. Deleting it would break the reference this branch exists to read.
                 const std::filesystem::path named( path );
                 const std::filesystem::path full =
                      named.is_absolute() ? named
@@ -369,8 +377,10 @@ namespace Desert::Core::Serialize
             if ( type == "TextureAsset" )
             {
                 // The reference itself is resolved in TextureSlot.cpp — every spelling accepted,
-                // create-on-miss (which is also the spelling-independent lookup FindByPath is not), and
-                // a logged reason instead of the silent 0 this branch used to return.
+                // create-on-miss, and a logged reason instead of the silent 0 this branch used to
+                // return. (The parenthesis that stood here said the create-on-miss was ALSO the
+                // spelling-independent lookup FindByPath was not. It no longer is: both entry points
+                // answer on the same identity — see Desert/Tests/Engine/AssetPathIdentity.)
                 const uint64_t resolved = TextureSlotFromPath( m, path );
                 if ( resolved == 0 )
                     return 0;
@@ -454,6 +464,13 @@ namespace Desert::Core::Serialize
                         // file — `Register` then built a mesh out of nothing and cached it, and the
                         // `created->Load()` that used to stand here filled the ASSET while the cached MESH
                         // stayed empty for the life of the process. Register parses first now.
+                        //
+                        // This branch is REACHED LESS OFTEN than it was, and `Register` parsing first is
+                        // still what makes it correct. The `FindByPath` above no longer misses on a
+                        // spelling, so the preloaded shell is now returned by the lookup instead of
+                        // arriving here dressed as something freshly created — but a mesh that the
+                        // preloader genuinely never saw still comes through here as a shell, and eager
+                        // registration of an unparsed shell is a defect independently of how it got here.
                         if ( const auto registered =
                                   Runtime::ResourceRegistry::GetMeshService()->Register( created );
                              !registered )

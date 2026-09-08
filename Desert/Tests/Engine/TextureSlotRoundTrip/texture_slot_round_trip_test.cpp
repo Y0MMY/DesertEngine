@@ -13,10 +13,15 @@
 //      be copied here: a material lives under ASSETS_PATH and a cooked texture under COOKED_PATH, a
 //      SIBLING of it, where `relative(path, ASSETS_PATH)` gives `../Cooked/...` and falls back to the
 //      absolute spelling anyway. That is why the stored form is the root-TAGGED key.
-//   2. The read side was `FindByPath` and nothing else. That lookup compares filepaths VERBATIM (unlike
-//      CreateAsset, which deduplicates on the spelling-independent stable key), so a miss was ordinary
+//   2. The read side was `FindByPath` and nothing else. That lookup compared filepaths VERBATIM (unlike
+//      CreateAsset, which deduplicated on the spelling-independent stable key), so a miss was ordinary
 //      and the branch answered it with a bare `0` — no asset created, nothing logged. Three separate
 //      spellings of a real cooked texture were reported as failing to resolve, and not one said why.
+//      HALF OF (2) HAS SINCE BEEN FIXED AT ITS SOURCE and this paragraph is history: the registry no
+//      longer holds two answers to "is this file registered" — `FindByPath` asks `CreateAsset`'s
+//      question, on `CreateAsset`'s key (Desert/Tests/Engine/AssetPathIdentity). What this suite still
+//      owns is the other half, which is not the registry's: the STORED FORM has to be expanded into a
+//      path before any identity can be derived from it, because a root-tagged key is not a path.
 //
 // Why this file exists at all. Both branches lived inside ComponentRegistry.cpp, which reaches the
 // ResourceRegistry and through it the whole renderer, so NO suite in the repository could execute them.
@@ -285,10 +290,15 @@ TEST( TextureSlotRoundTrip, TwoTexturesDoNotCollapseOntoOneReference )
 
 TEST( TextureSlotRoundTrip, EverySpellingOfOneFileResolvesToOneTexture )
 {
-    // The read side used to be `FindByPath` alone, and that lookup compares filepaths VERBATIM. So a
+    // The read side used to be `FindByPath` alone, and that lookup compared filepaths VERBATIM. So a
     // scene that named a preloaded texture by any other spelling of the same file missed it and got 0 —
-    // while AssetManager::CreateAsset, one line away, deduplicates on the spelling-independent key and
-    // would have found it. Two lookups that must agree about what "the same file" means, and did not.
+    // while AssetManager::CreateAsset, one line away, deduplicated on the spelling-independent key and
+    // would have found it. Two lookups that had to agree about what "the same file" means, and did not.
+    //
+    // The registry's half of that is closed at the source now (Desert/Tests/Engine/AssetPathIdentity
+    // asserts the two entry points agree). This test is kept and is not a duplicate of it: it measures
+    // the WHOLE read path — expand the stored form, then ask — over the spellings a real `.desce`
+    // carries, which is the level at which a scene's texture reference either survives or does not.
     ProjectRootGuard guard;
     std::filesystem::remove_all( ScratchRoot() );
 
