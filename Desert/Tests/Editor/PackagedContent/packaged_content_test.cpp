@@ -435,6 +435,81 @@ TEST( PackagedContent, AServiceAssetReferenceResolvesToTheSameFileLooseAndPackag
     }
 }
 
+// ── A PACKAGE THAT DID NOT COOK EVERYTHING SAYS SO (I12) ─────────────────────────────────────────────
+//
+// THE RELATION: what the cook could not put into the package and what the packaging result reports must
+// be the same fact. They were free to disagree, and did — `CookStats::Failures` was counted, logged and
+// then dropped, so a project with an unbakeable font packaged with `Success == true` and a message
+// indistinguishable from a clean build. The Build Settings panel painted it the same green.
+//
+// This is Ф4's shape at the WORST possible place: the last step before a build reaches a player. Whatever
+// did not make it is then discovered by whoever runs the game, not by whoever built it.
+//
+// BOTH DIRECTIONS, because either alone is satisfied by something useless: a result that is never
+// complete would pass the first half, and one that is always complete would pass the second.
+TEST( PackagedContent, ACleanProjectPackagesComplete )
+{
+    EnvironmentGuard guard;
+
+    const fs::path base = fs::temp_directory_path() / "desert_pkg_complete_clean";
+    fs::remove_all( base );
+    const fs::path proj = base / "proj";
+
+    // Nothing the cook can fail on: one scene, no font, no icon, no shader tree.
+    WriteFile( proj / "GameAssets" / "Scenes" / "level.desce", "scene-body" );
+    WriteFile( proj / "T.deproj", "{\"Name\":\"T\",\"AssetsRoot\":\"GameAssets\",\"DefaultScene\":\"\"}" );
+
+    SetEnv( "HOME", base.string() );
+    fs::current_path( proj );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( proj / "T.deproj" ).string() ) );
+
+    const auto result = Desert::Editor::BuildContentPak();
+
+    ASSERT_TRUE( result.Success ) << result.Message;
+    EXPECT_EQ( result.CookFailures, 0u ) << result.Message;
+    EXPECT_EQ( result.CookUnwritten, 0u ) << result.Message;
+    EXPECT_TRUE( result.Complete() )
+         << "a project with nothing broken in it must package complete, or the incomplete verdict below "
+            "is measuring the fixture rather than the cook: "
+         << result.Message;
+}
+
+TEST( PackagedContent, AnAssetTheCookCannotBakeMakesThePackageIncompleteAndSaysHowMany )
+{
+    EnvironmentGuard guard;
+
+    const fs::path base = fs::temp_directory_path() / "desert_pkg_complete_broken";
+    fs::remove_all( base );
+    const fs::path proj = base / "proj";
+
+    // The same project as above plus ONE corrupt asset: a `.ttf` the font baker cannot read. That is the
+    // whole difference between this case and the clean one, so the verdict below is attributable.
+    WriteFile( proj / "GameAssets" / "Scenes" / "level.desce", "scene-body" );
+    WriteFile( proj / "GameAssets" / "Fonts" / "Corrupt.ttf", "this is not a font" );
+    WriteFile( proj / "T.deproj", "{\"Name\":\"T\",\"AssetsRoot\":\"GameAssets\",\"DefaultScene\":\"\"}" );
+
+    SetEnv( "HOME", base.string() );
+    fs::current_path( proj );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( proj / "T.deproj" ).string() ) );
+
+    const auto result = Desert::Editor::BuildContentPak();
+
+    // A PACKAGE STILL EXISTS, and that is deliberate rather than a compromise: a project may ship content
+    // that is already broken — this repository does, on purpose, so the engine's own refusal path stays
+    // reachable — and the packager's job is to say what it shipped, not to declare the project invalid.
+    EXPECT_TRUE( result.Success ) << result.Message;
+
+    // ...but it is NOT complete, and it says how many, in a number rather than in prose.
+    EXPECT_GE( result.CookFailures, 1u ) << result.Message;
+    EXPECT_FALSE( result.Complete() )
+         << "the cook could not bake an asset and the result still reads as a clean package: " << result.Message;
+
+    // The prose has to agree with the number. Not because a caller should parse it — that is what the
+    // counts are for — but because the message is what a human is shown, and a build result whose words
+    // and numbers disagree is worse than either alone.
+    EXPECT_NE( result.Message.find( "could not be cooked" ), std::string::npos ) << result.Message;
+}
+
 // ---- The COOKED-CACHE relation ------------------------------------------------------------------------
 //
 // П2's defect, stated as the relation these tests pin: what the packager cooks into the archive must be

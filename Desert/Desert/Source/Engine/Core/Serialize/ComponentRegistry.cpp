@@ -347,8 +347,31 @@ namespace Desert::Core::Serialize
                 return ServiceKeyForPath( Runtime::ResourceRegistry::GetIconService()->PathForHandle( handle ) );
             }
             // Meshes (static/skinned both resolve handle->path via the MeshAsset base).
-            auto a = mgr.FindByHandle<Assets::MeshAsset>( Common::UUID( handle ) );
-            return a ? a->GetMetadata().Filepath.string() : "";
+            //
+            // NAMED, not the fall-through it used to be (I13). Every branch above tests its type and
+            // this one ended the function unconditionally, so an asset type with NO branch — a
+            // `PROPERTY(Asset<AudioAsset>)` somebody adds tomorrow — was looked up as a MESH, found
+            // nothing, and returned an empty string. The field then had a working Details picker over a
+            // slot that saved as "" and loaded as 0, with nothing anywhere saying so: a dead setting
+            // (DC 1.3) delivered by a silent fallback (DC 1.4), in the one place that decides whether a
+            // scene reference survives a save.
+            if ( type == "StaticMeshAsset" || type == "SkinnedMeshAsset" || type == "MeshAsset" )
+            {
+                auto a = mgr.FindByHandle<Assets::MeshAsset>( Common::UUID( handle ) );
+                return a ? a->GetMetadata().Filepath.string() : "";
+            }
+
+            // AND ANYTHING ELSE REFUSES, LOUDLY. The refusal cannot save the field — there is no
+            // branch to write it with — but it turns a slot that quietly loses its value into one line
+            // naming the type that needs one. Desert/Tests/Engine/AssetResolverCensus catches the same
+            // omission earlier, at the moment the field is declared; this catches everything the census
+            // cannot see, including a type that reaches the resolver from somewhere else.
+            LOG_ERROR( "[Scene] asset type '{0}' has no branch in Core::MakeAssetResolver, so a "
+                       "reference of that type cannot be written to a scene: the slot will save as "
+                       "empty and load as unset. Add a branch for it beside the others in "
+                       "ComponentRegistry.cpp.",
+                       type );
+            return "";
         };
 
         r.FromPath = [&mgr]( const std::string& path, const std::string& type ) -> uint64_t
@@ -501,6 +524,15 @@ namespace Desert::Core::Serialize
                      { Runtime::EnsureMeshRegistered( mesh, m ); } );
                 return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
             }
+
+            // The read half of the same refusal, for the reason the write half states at length: a bare
+            // `return 0` here is indistinguishable from "the scene named nothing", so a type with no
+            // branch loaded as unset on every open and the file's value was silently discarded.
+            LOG_ERROR( "[Scene] asset type '{0}' has no branch in Core::MakeAssetResolver, so the "
+                       "reference '{1}' this scene states cannot be resolved: the slot loads as unset "
+                       "and the value in the file is discarded. Add a branch for it beside the others "
+                       "in ComponentRegistry.cpp.",
+                       type, path );
             return 0;
         };
 
