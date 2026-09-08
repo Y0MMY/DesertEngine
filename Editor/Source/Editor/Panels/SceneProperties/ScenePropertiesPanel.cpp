@@ -19,7 +19,10 @@
 #include <filesystem>
 #include <system_error>
 #include <Engine/Core/Scene.hpp>
+#include <Engine/Core/EngineContext.hpp>
+#include <Engine/Graphic/SceneRenderer.hpp>
 #include <Common/Core/Constants.hpp>
+#include <Common/Core/Logger.hpp>
 
 namespace Desert::Editor
 {
@@ -107,8 +110,37 @@ namespace Desert::Editor
 
     void ScenePropertiesPanel::EnsurePreview()
     {
-        if ( !m_Preview )
-            m_Preview = std::make_unique<PreviewViewport>();
+        if ( m_Preview )
+            return;
+
+        // NOT WHEN THERE IS NO SLOT LEFT TO GIVE IT.
+        //
+        // A live preview owns a full SceneRenderer, and a SceneRenderer that finds every one of the six
+        // slots taken does NOT fail — it records into slot 0 and shares the main viewport's per-frame state
+        // (Engine/Core/RendererSlotPool.hpp). That reads as "the preview moves when I move the scene
+        // camera", it has no error message, and it is worth days to find. This panel is the easiest way in
+        // the editor to reach that state: opening a sixth surface costs a deliberate click, but the
+        // Details preview appears the moment anything with a mesh is CLICKED.
+        //
+        // So the panel declines, and the 3D Model row falls back to the rendered thumbnail it asks the
+        // ThumbnailService for. Declining is checked every frame, not once: a scene view or a material
+        // window closing hands its slot back, and the next frame builds the preview after all.
+        if ( Graphic::SceneRenderer::GetLiveRendererCount() >= EngineContext::kMaxRendererSlots )
+        {
+            // Once per stretch of scarcity, not once per frame: this is a state the user can leave by
+            // closing a window, and a line every frame would bury the log it belongs in.
+            if ( !m_PreviewSlotRefused )
+            {
+                m_PreviewSlotRefused = true;
+                LOG_WARN( "[Details] all {} renderer slots are in use — the 3D Model row is showing its "
+                          "cached thumbnail instead of a live preview. Close a scene view or a material "
+                          "window to get the live one back.",
+                          EngineContext::kMaxRendererSlots );
+            }
+            return;
+        }
+        m_PreviewSlotRefused = false;
+        m_Preview            = std::make_unique<PreviewViewport>();
     }
 
     void ScenePropertiesPanel::ReleasePreview()

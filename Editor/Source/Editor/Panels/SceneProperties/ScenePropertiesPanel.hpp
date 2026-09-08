@@ -82,5 +82,9 @@ namespace Desert::Editor
         std::unique_ptr<UI::UIHelper> m_ThumbnailUI;           // texture ids for the preview image + cached PNGs
         uint64_t                      m_PreviewKey    = 0;     // what it shows; a change re-points and re-frames
         bool                          m_PreviewActive = false; // a component drew it during the last UI frame
+        // Already said out loud that there was no slot to build the preview in. Latched so the warning is
+        // one line per stretch of scarcity rather than one per frame, and cleared the moment a slot frees
+        // up — a state the user leaves by closing a window has to be able to be reported again.
+        bool m_PreviewSlotRefused = false;
     };
 } // namespace Desert::Editor
