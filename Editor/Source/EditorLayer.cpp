@@ -3685,6 +3685,36 @@ namespace Desert::Editor
                                   return PaletteCommandDone();
                               } } );
 
+        // THE WINDOW'S OWN COMMANDS, offered only when this editor owns its frame — with a system frame
+        // they would be a second set of buttons for three things the OS already does, and the palette would
+        // be offering to press a button that is right there.
+        //
+        // They are here for the reason Г14 put the palette itself on the channel: a capability reachable
+        // only by a mouse does not exist for an unattended run. The title bar's buttons and its
+        // double-click call exactly these two window methods, so a client that cannot click can still put
+        // the window through maximize and restore and photograph what came out — which is the ONLY way the
+        // maximize path in this build has been executed at all, the gesture itself being unsynthesisable
+        // on this machine.
+        if ( m_WindowChrome )
+        {
+            const auto& window = m_Application->GetWindow();
+            commands.push_back( { "Window", "Maximize", [window]
+                                  {
+                                      window->Maximize();
+                                      return PaletteCommandDone();
+                                  } } );
+            commands.push_back( { "Window", "Restore", [window]
+                                  {
+                                      window->Restore();
+                                      return PaletteCommandDone();
+                                  } } );
+            commands.push_back( { "Window", "Minimize", [window]
+                                  {
+                                      window->Minimize();
+                                      return PaletteCommandDone();
+                                  } } );
+        }
+
         return commands;
     }
 

@@ -1,6 +1,7 @@
 #include "WindowChrome.hpp"
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Widgets/WindowResizeMath.hpp>
 
 #include <Engine/Core/Window.hpp>
 
@@ -242,41 +243,14 @@ namespace Desert::Editor::UI
         constexpr int kMinW = 320;
         constexpr int kMinH = 240;
 
-        const ImVec2 delta = ImVec2( ImGui::GetIO().MousePos.x - m_ResizeMouseStart.x,
-                                     ImGui::GetIO().MousePos.y - m_ResizeMouseStart.y );
+        const WindowRect start = { m_ResizeStartPosX, m_ResizeStartPosY, m_ResizeStartW, m_ResizeStartH };
+        const WindowRect moved =
+             ResizeFromGrip( start, m_ResizeX, m_ResizeY, (int)( ImGui::GetIO().MousePos.x - m_ResizeMouseStart.x ),
+                             (int)( ImGui::GetIO().MousePos.y - m_ResizeMouseStart.y ), kMinW, kMinH );
 
-        int x = m_ResizeStartPosX;
-        int y = m_ResizeStartPosY;
-        int w = m_ResizeStartW;
-        int h = m_ResizeStartH;
-
-        if ( m_ResizeX < 0 )
-        {
-            // Dragging a LEFT edge moves the window and shrinks it by the same amount. Clamping the width
-            // without clamping the position is how a window at its minimum size keeps sliding left.
-            const int dx = std::min( (int)delta.x, m_ResizeStartW - kMinW );
-            x            = m_ResizeStartPosX + dx;
-            w            = m_ResizeStartW - dx;
-        }
-        else if ( m_ResizeX > 0 )
-        {
-            w = std::max( kMinW, m_ResizeStartW + (int)delta.x );
-        }
-
-        if ( m_ResizeY < 0 )
-        {
-            const int dy = std::min( (int)delta.y, m_ResizeStartH - kMinH );
-            y            = m_ResizeStartPosY + dy;
-            h            = m_ResizeStartH - dy;
-        }
-        else if ( m_ResizeY > 0 )
-        {
-            h = std::max( kMinH, m_ResizeStartH + (int)delta.y );
-        }
-
-        if ( x != m_ResizeStartPosX || y != m_ResizeStartPosY )
-            m_Window.SetWindowPos( x, y );
-        if ( w != (int)m_Window.GetWidth() || h != (int)m_Window.GetHeight() )
-            m_Window.SetWindowSize( (uint32_t)w, (uint32_t)h );
+        if ( moved.X != start.X || moved.Y != start.Y )
+            m_Window.SetWindowPos( moved.X, moved.Y );
+        if ( moved.W != (int)m_Window.GetWidth() || moved.H != (int)m_Window.GetHeight() )
+            m_Window.SetWindowSize( (uint32_t)moved.W, (uint32_t)moved.H );
     }
 } // namespace Desert::Editor::UI
