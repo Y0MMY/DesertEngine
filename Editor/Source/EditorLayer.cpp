@@ -5357,9 +5357,13 @@ namespace Desert::Editor
 
         // TextUnformatted, not Text: ImGui::Text takes a printf FORMAT, so this passed runtime-built
         // engine stats as the format string. Today GetFormattedStats() can only produce
-        // "FPS: 60 | Frame: 16.6ms" and contains no '%', so nothing has gone wrong — but the day any
+        // "FPS: 60 | Frame: 16.67ms" and contains no '%', so nothing has gone wrong — but the day any
         // percentage is added to that line (a GPU utilisation, a budget fraction — the obvious next
         // additions) ImGui's vsnprintf reads a vararg that was never passed.
+        //
+        // The example above said "16.6ms" while the function was printing SIX decimals — the argument
+        // was right and the sample output was a different program's. It is two decimals now because
+        // GetFormattedStats was fixed, not because the comment was made to agree with it.
         ImGui::TextUnformatted( text.c_str() );
     }
 
