@@ -58,9 +58,11 @@ namespace Desert::Graphic
                     mipGenerator->GenerateMips( image );
                 }
 
-                // Six faces, and the same mip tail as the 2D case.
+                // Six SQUARE faces of FaceSize, and the same mip tail as the 2D case. FaceSize and not a
+                // width/height pair on purpose — see ImageCubeSpecification, where three defects came from
+                // consumers dividing a 4x3 cross back to a face and one side of the division going missing.
                 image->RecordDeviceBytes( static_cast<std::size_t>(
-                     Core::Formats::CalculateImageSize( spec.Width, spec.Height, spec.Format ) * 6U *
+                     Core::Formats::CalculateImageSize( spec.FaceSize, spec.FaceSize, spec.Format ) * 6U *
                      ( spec.Mips > 1 ? 4U : 3U ) / 3U ) );
 
                 return image;
