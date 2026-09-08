@@ -35,18 +35,18 @@ namespace Desert::Editor::MaterialAssetUtils
     // not applied", and the caller, the log and the test suite are all entitled to know that.
     enum class MaterialAssetOrigin
     {
-        Failed = 0,      // nothing usable came back; Handle is null
-        Created,         // this call wrote the .demat from the requested params
+        Failed = 0,       // nothing usable came back; Handle is null
+        Created,          // this call wrote the .demat from the requested params
         ReusedFromMemory, // an asset under this path was already loaded
-        ReusedFromDisk,  // a .demat existed on disk and was loaded rather than written
+        ReusedFromDisk,   // a .demat existed on disk and was loaded rather than written
     };
 
     // The answer, whole. Handle alone is what the old signature returned, and returning it alone is what
     // made "created what you asked for" and "found something else entirely" indistinguishable.
     struct MaterialAssetOutcome
     {
-        Assets::AssetHandle                          Handle = Common::UUID::Null();
-        MaterialAssetOrigin                          Origin = MaterialAssetOrigin::Failed;
+        Assets::AssetHandle Handle = Common::UUID::Null();
+        MaterialAssetOrigin Origin = MaterialAssetOrigin::Failed;
         // Non-empty only when the material was reused AND disagrees with the request. Already reported
         // through LOG_WARN by the time the caller sees it — this is here so a caller can act, and so a
         // test can assert the reporting without scraping a log.
@@ -168,9 +168,10 @@ namespace Desert::Editor::MaterialAssetUtils
         return FindOrCreatePBRMaterialAsset( am, name, requested );
     }
 
-    [[nodiscard]] inline MaterialAssetOutcome
-    FindOrCreatePBRMaterialAsset( const Assets::AssetManager* am, const std::string& name,
-                                  const glm::vec4& albedo, float roughness )
+    [[nodiscard]] inline MaterialAssetOutcome FindOrCreatePBRMaterialAsset( const Assets::AssetManager* am,
+                                                                            const std::string&          name,
+                                                                            const glm::vec4&            albedo,
+                                                                            float                       roughness )
     {
         return FindOrCreatePBRMaterialAsset(
              am, name,

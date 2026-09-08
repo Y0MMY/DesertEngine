@@ -25,8 +25,8 @@
 using Desert::ECS::LocomotionComponent;
 using Desert::ECS::Rules::AtmosphereSunDirection;
 using Desert::ECS::Rules::DecomposeTransform;
-using Desert::ECS::Rules::FallbackAtmosphereSunDirection;
 using Desert::ECS::Rules::DirectionalLightTravel;
+using Desert::ECS::Rules::FallbackAtmosphereSunDirection;
 using Desert::ECS::Rules::IsSunDirectionValid;
 using Desert::ECS::Rules::LocomotionClipFor;
 using Desert::ECS::Rules::MeshShadowCaster;
@@ -447,8 +447,8 @@ TEST( AtmosphereSunRules, NoFileOpenCodesTheSunDirectionThreshold )
                     if ( std::regex_search( lines[j], reachesTheGate ) )
                         reached = true;
                 if ( !reached )
-                    offenders.push_back( entry.path().generic_string() + ":" + std::to_string( i + 1 ) +
-                                         "  " + lines[i] );
+                    offenders.push_back( entry.path().generic_string() + ":" + std::to_string( i + 1 ) + "  " +
+                                         lines[i] );
             }
         }
     }

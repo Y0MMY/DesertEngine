@@ -135,10 +135,10 @@ namespace
 
 TEST( MaterialRequestAgreement, AMaterialThatSaysWhatWasAskedForProducesNoDivergence )
 {
-    const std::vector<MaterialParamRequest> want = { { "AlbedoColor", { 0.85f, 0.1f, 0.1f, 1.0f } },
-                                                     { "RoughnessFactor", { 0.9f, 0.0f, 0.0f, 0.0f } } };
-    const MaterialData found = MaterialWith( { { "AlbedoColor", { 0.85f, 0.1f, 0.1f, 1.0f } },
-                                               { "RoughnessFactor", { 0.9f, 0.0f, 0.0f, 0.0f } } } );
+    const std::vector<MaterialParamRequest> want  = { { "AlbedoColor", { 0.85f, 0.1f, 0.1f, 1.0f } },
+                                                      { "RoughnessFactor", { 0.9f, 0.0f, 0.0f, 0.0f } } };
+    const MaterialData                      found = MaterialWith(
+         { { "AlbedoColor", { 0.85f, 0.1f, 0.1f, 1.0f } }, { "RoughnessFactor", { 0.9f, 0.0f, 0.0f, 0.0f } } } );
 
     EXPECT_TRUE( DiffRequestedParams( want, found ).empty() );
 }
@@ -150,9 +150,9 @@ TEST( MaterialRequestAgreement, TheChromeMirrorIsReportedWithBothValues )
 {
     const std::vector<MaterialParamRequest> want = { { "AlbedoColor", { 0.85f, 0.1f, 0.1f, 1.0f } },
                                                      { "RoughnessFactor", { 0.9f, 0.0f, 0.0f, 0.0f } } };
-    const MaterialData shipped = MaterialWith( { { "AlbedoColor", { 0.85f, 0.1f, 0.1f, 1.0f } },
-                                                 { "RoughnessFactor", { 0.0f, 0.0f, 0.0f, 0.0f } },
-                                                 { "MetallicFactor", { 1.0f, 0.0f, 0.0f, 0.0f } } } );
+    const MaterialData shipped                   = MaterialWith( { { "AlbedoColor", { 0.85f, 0.1f, 0.1f, 1.0f } },
+                                                                   { "RoughnessFactor", { 0.0f, 0.0f, 0.0f, 0.0f } },
+                                                                   { "MetallicFactor", { 1.0f, 0.0f, 0.0f, 0.0f } } } );
 
     const auto divergences = DiffRequestedParams( want, shipped );
     ASSERT_EQ( divergences.size(), 1u ) << "only RoughnessFactor was asked about AND disagrees";
@@ -185,9 +185,9 @@ TEST( MaterialRequestAgreement, ASilentParameterIsReportedAsAbsentRatherThanAsZe
 // the warning would fire on every hand-edited demo material and be trained away within a day.
 TEST( MaterialRequestAgreement, ParametersTheCallerNeverAskedAboutAreNotDivergences )
 {
-    const std::vector<MaterialParamRequest> want = { { "AlbedoColor", { 1, 1, 1, 1 } } };
-    const MaterialData found = MaterialWith( { { "AlbedoColor", { 1, 1, 1, 1 } },
-                                               { "EmissiveIntensity", { 3.0f, 0.0f, 0.0f, 0.0f } } } );
+    const std::vector<MaterialParamRequest> want  = { { "AlbedoColor", { 1, 1, 1, 1 } } };
+    const MaterialData                      found = MaterialWith(
+         { { "AlbedoColor", { 1, 1, 1, 1 } }, { "EmissiveIntensity", { 3.0f, 0.0f, 0.0f, 0.0f } } } );
 
     EXPECT_TRUE( DiffRequestedParams( want, found ).empty() );
 }
@@ -203,8 +203,7 @@ TEST( MaterialRequestAgreement, EveryShippedDemoMaterialStillSaysWhatItsAuthorAs
 
     for ( const auto& demo : CornellDemoMaterials() )
     {
-        const std::string path =
-             root + "Editor/Resources/Assets/Materials/" + std::string( demo.Name ) + ".demat";
+        const std::string path = root + "Editor/Resources/Assets/Materials/" + std::string( demo.Name ) + ".demat";
         ASSERT_TRUE( std::filesystem::exists( path ) )
              << path << " is in the demo material table but not in the repository";
 

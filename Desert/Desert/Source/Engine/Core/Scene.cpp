@@ -414,8 +414,8 @@ namespace Desert::Core
                          return;
                      }
                      if ( m_Registry.has<ECS::TagComponent>( entity ) )
-                         degenerate += ( degenerate.empty() ? "" : ", " ) +
-                                       m_Registry.get<ECS::TagComponent>( entity ).Tag;
+                         degenerate +=
+                              ( degenerate.empty() ? "" : ", " ) + m_Registry.get<ECS::TagComponent>( entity ).Tag;
                  } );
 
             // Latched on the MESSAGE, not on a flag: this runs every frame, so an unlatched LOG_ERROR

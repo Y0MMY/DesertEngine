@@ -75,8 +75,7 @@ namespace Desert::Assets
     // The divergences as one human-readable clause, with BOTH values for every field — the form §1.4
     // asks for ("log it with the reason and the actual numbers"). A message that said only which fields
     // disagreed would still leave the reader launching a debugger to learn by how much.
-    [[nodiscard]] inline std::string
-    DescribeDivergences( const std::vector<MaterialParamDivergence>& divergences )
+    [[nodiscard]] inline std::string DescribeDivergences( const std::vector<MaterialParamDivergence>& divergences )
     {
         std::string text;
         for ( const auto& d : divergences )
@@ -86,16 +85,16 @@ namespace Desert::Assets
             text += d.Name;
             if ( d.Absent )
             {
-                text += " asked for (" + std::to_string( d.Requested.x ) + ", " +
-                        std::to_string( d.Requested.y ) + ", " + std::to_string( d.Requested.z ) + ", " +
-                        std::to_string( d.Requested.w ) + ") but the material does not state it";
+                text += " asked for (" + std::to_string( d.Requested.x ) + ", " + std::to_string( d.Requested.y ) +
+                        ", " + std::to_string( d.Requested.z ) + ", " + std::to_string( d.Requested.w ) +
+                        ") but the material does not state it";
                 continue;
             }
-            text += " asked for (" + std::to_string( d.Requested.x ) + ", " +
-                    std::to_string( d.Requested.y ) + ", " + std::to_string( d.Requested.z ) + ", " +
-                    std::to_string( d.Requested.w ) + ") but the material says (" +
-                    std::to_string( d.Found.x ) + ", " + std::to_string( d.Found.y ) + ", " +
-                    std::to_string( d.Found.z ) + ", " + std::to_string( d.Found.w ) + ")";
+            text += " asked for (" + std::to_string( d.Requested.x ) + ", " + std::to_string( d.Requested.y ) +
+                    ", " + std::to_string( d.Requested.z ) + ", " + std::to_string( d.Requested.w ) +
+                    ") but the material says (" + std::to_string( d.Found.x ) + ", " +
+                    std::to_string( d.Found.y ) + ", " + std::to_string( d.Found.z ) + ", " +
+                    std::to_string( d.Found.w ) + ")";
         }
         return text;
     }

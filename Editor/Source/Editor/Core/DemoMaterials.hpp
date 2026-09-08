@@ -26,7 +26,7 @@ namespace Desert::Editor::MaterialAssetUtils
     // first launch, and the test asserts the generated copies still say what this says.
     struct DemoMaterial
     {
-        std::string_view                    Name;
+        std::string_view                          Name;
         std::vector<Assets::MaterialParamRequest> Params;
     };
 
@@ -60,8 +60,7 @@ namespace Desert::Editor::MaterialAssetUtils
     // empty parameter list is a legal request ("author a material with nothing set"), so a typo'd name
     // must not be able to look like one — that is the same empty-successful-answer shape the contract
     // forbids, one level down.
-    [[nodiscard]] inline const std::vector<Assets::MaterialParamRequest>*
-    FindDemoMaterial( std::string_view name )
+    [[nodiscard]] inline const std::vector<Assets::MaterialParamRequest>* FindDemoMaterial( std::string_view name )
     {
         for ( const auto& material : CornellDemoMaterials() )
             if ( material.Name == name )

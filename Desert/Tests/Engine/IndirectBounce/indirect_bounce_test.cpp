@@ -249,6 +249,73 @@ TEST( IndirectBounce, NeitherSurfaceBouncesThroughItsOwnBack )
          << "an emitter bounced light out of its own back face";
 }
 
+// Г18 — A MEASURED REFUSAL, PINNED SO IT CANNOT ROT INTO A COMMENT.
+//
+// `EditorLayer::BuildCornellShowcase` advertised its scene as "Red/green walls bleed onto the white
+// objects (SSGI)". They do not, and the reason is structural rather than a tuning miss: the gather in
+// Programs/Deferred/DeferredLighting.shader shades every bouncing neighbour with THE SUN and nothing
+// else, so a surface the sun does not reach emits exactly vec3(0) through the `cosLi <= 0` early-out of
+// the shared BRDF. CornellDemo's sun travels normalize(0.6, -1, 0.2); the red wall's inner face has
+// N = +X and therefore N·L = -0.507 against it. The red half of that sentence could never have
+// happened, in any scene where the only thing lighting a wall is a point light.
+//
+// The measurements, on CornellDemo at --camera 0,300,1400 --look 0,-0.1,-1, 715x764, noise floor 0:
+//
+//   whole GI feature on vs off      mean 0.11/255, max 16/255, 13.4 % of pixels
+//   isolated indirect buffer        floor near the left wall and floor centre: 0.000 in every statistic
+//   floor beside the GREEN wall     0.001 — the one place a sunlit emitter is close enough to matter
+//   aiming the sun AT the red wall  no change at all (max still 16/255, same pixel)
+//
+// That last row is the one that matters, and it is why "the gather only bounces the sun" is a necessary
+// but NOT sufficient account: making the red wall sunlit does not produce red bleed either. Two more
+// divisors finish the term off at Cornell-box distances — the softened inverse square is 1 + d²/(1 m)²,
+// which is 9.4 at the 290 cm from the floor's centre to a wall, and the estimate is divided by the FULL
+// sample count whether or not a sample found an emitter at all. Widening the gather therefore makes the
+// bleed WEAKER, not stronger: measured at RADIUS 0.45 instead of 0.12, the one non-zero floor reading
+// (0.001 beside the green wall) fell to 0.000.
+//
+// WHAT WOULD CHANGE THE ANSWER: bouncing the point/spot lights as well as the sun. That is a renderer
+// design decision with a real price — twelve gather samples times every light in the scene, per pixel,
+// inside the pass that produces the lit colour — and it is not a constant anybody may quietly raise. It
+// is the owner's call, not a tuning knob, and until it is taken the honest thing is that the scene's
+// description no longer promises what the pass cannot deliver.
+//
+// The assertion below is the half of this that is checkable without a GPU: an emitter turned away from
+// the sun bounces exactly nothing, on the shipped text.
+TEST( IndirectBounce, AnEmitterTheSunDoesNotReachBouncesExactlyNothing )
+{
+    // CornellDemo's own numbers: the sun's travel direction, and the left wall's inner face.
+    const glm::vec3 sunTravel  = glm::normalize( glm::vec3( 0.6f, -1.0f, 0.2f ) );
+    const glm::vec3 sunL       = -sunTravel;
+    const glm::vec3 redWallN   = glm::vec3( 1.0f, 0.0f, 0.0f );
+    const glm::vec3 greenWallN = glm::vec3( -1.0f, 0.0f, 0.0f );
+
+    ASSERT_LT( glm::dot( redWallN, sunL ), 0.0f ) << "the fixture's red wall is meant to be unlit by the sun";
+    ASSERT_GT( glm::dot( greenWallN, sunL ), 0.0f );
+
+    const glm::vec3 receiver( 0.0f, 0.0f, 0.0f ); // the floor's centre
+    const glm::vec3 floorN( 0.0f, 1.0f, 0.0f );
+    const glm::vec3 albedo( 0.85f, 0.10f, 0.10f );
+    const glm::vec3 F0( 0.04f );
+    const glm::vec3 sunRadiance( 1.0f );
+
+    const glm::vec3 fromRed = EvaluateBounceSample( receiver, floorN, glm::vec3( -290.0f, 300.0f, 0.0f ), redWallN,
+                                                    albedo, F0, 0.0f, 0.9f, sunL, sunRadiance );
+    EXPECT_EQ( fromRed, glm::vec3( 0.0f ) )
+         << "a wall the sun never reaches cannot bleed; the scene's description must not claim it does";
+
+    // The mirror-image wall, sunlit, does bounce — so the zero above is about the SUN's geometry and not
+    // about the gather being broken.
+    const glm::vec3 fromGreen =
+         EvaluateBounceSample( receiver, floorN, glm::vec3( 290.0f, 300.0f, 0.0f ), greenWallN,
+                               glm::vec3( 0.10f, 0.70f, 0.15f ), F0, 0.0f, 0.9f, sunL, sunRadiance );
+    EXPECT_GT( fromGreen.g, 0.0f );
+
+    // And it is small at this separation, which is the other half of the refusal: 1 + d²/(1 m)² is 9.4
+    // at 290 cm, before the gather divides by its full sample count.
+    EXPECT_LT( fromGreen.g, 0.05f ) << "if this grew, the refusal above was measured on a different term";
+}
+
 TEST( IndirectBounce, TheBounceFallsMonotonicallyWithSeparation )
 {
     // Monotonicity along one ray: only the softened inverse square moves, so a term that grew, plateaued

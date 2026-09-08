@@ -5396,8 +5396,7 @@ namespace Desert::Editor
             // .Handle drops the rest of the answer on purpose: this builder has nothing to do about a
             // demo material the user has since edited, and the disagreement is already reported by name
             // and value from inside the call. See Editor/Core/MaterialAssetUtils.hpp.
-            return Editor::MaterialAssetUtils::FindOrCreatePBRMaterialAsset( m_AssetManager.get(), name,
-                                                                            params )
+            return Editor::MaterialAssetUtils::FindOrCreatePBRMaterialAsset( m_AssetManager.get(), name, params )
                  .Handle;
         };
 
@@ -5487,9 +5486,19 @@ namespace Desert::Editor
 
     void EditorLayer::BuildCornellShowcase()
     {
-        // Cornell-Box GI + glass showcase. Red/green walls bleed onto the white objects (SSGI); a
-        // clear glass sphere sits in front of an orange cube (visible THROUGH it); a point light
-        // backlights the set. Colours live in REAL material assets in the mesh slots.
+        // Cornell-Box glass + direct-lighting showcase. A clear glass sphere sits in front of an orange
+        // cube (visible THROUGH it); a point light backlights the set. Colours live in REAL material
+        // assets in the mesh slots.
+        //
+        // IT DOES NOT DEMONSTRATE COLOUR BLEED, and this comment used to say it did ("Red/green walls
+        // bleed onto the white objects (SSGI)"). Measured on the shipped scene: the whole screen-space
+        // GI feature moves the frame by a mean of 0.11/255, the isolated indirect buffer reads 0.000 in
+        // every statistic on the floor, and aiming the sun at the red wall changes nothing. The gather
+        // shades each bouncing neighbour with the SUN alone, so a wall lit only by this scene's point
+        // light emits exactly zero; and at the 290 cm from the floor to a wall the softened inverse
+        // square already divides by 9.4 before the estimate is divided by its full sample count.
+        // Bouncing point lights too is the owner's call, not a constant to raise — see
+        // Desert/Tests/Engine/IndirectBounce, which pins the zero on the shipped shader text.
         // The colours are NOT literals here any more. They are Editor/Core/DemoMaterials.hpp, because a
         // value that only exists as an argument to a find-or-create is a value nothing can check the
         // shipped .demat against — which is exactly how CB_Red.demat came to be a chrome mirror while
@@ -5502,15 +5511,14 @@ namespace Desert::Editor
             const auto* params = Editor::MaterialAssetUtils::FindDemoMaterial( matName );
             if ( !params )
             {
-                LOG_ERROR( "[Cornell] '{}' is not in the demo material table; '{}' gets no material.",
-                           matName, name );
+                LOG_ERROR( "[Cornell] '{}' is not in the demo material table; '{}' gets no material.", matName,
+                           name );
             }
             else
             {
-                smc.MaterialSlots.push_back(
-                     Editor::MaterialAssetUtils::FindOrCreatePBRMaterialAsset( m_AssetManager.get(),
-                                                                              matName, *params )
-                          .Handle );
+                smc.MaterialSlots.push_back( Editor::MaterialAssetUtils::FindOrCreatePBRMaterialAsset(
+                                                  m_AssetManager.get(), matName, *params )
+                                                  .Handle );
             }
             auto& tf       = e.GetComponent<ECS::TransformComponent>();
             tf.Translation = pos * Common::Units::UnitsPerMetre; // authored in metres (see BuildStarterScene)
@@ -5529,10 +5537,9 @@ namespace Desert::Editor
         gsmc.Primitive = Geometry::PrimitiveType::Sphere;
         if ( const auto* glassParams = Editor::MaterialAssetUtils::FindDemoMaterial( "CB_Glass" ) )
         {
-            gsmc.MaterialSlots.push_back(
-                 Editor::MaterialAssetUtils::FindOrCreatePBRMaterialAsset( m_AssetManager.get(),
-                                                                          "CB_Glass", *glassParams )
-                      .Handle );
+            gsmc.MaterialSlots.push_back( Editor::MaterialAssetUtils::FindOrCreatePBRMaterialAsset(
+                                               m_AssetManager.get(), "CB_Glass", *glassParams )
+                                               .Handle );
         }
         auto& gtf       = glass.GetComponent<ECS::TransformComponent>();
         gtf.Translation = Common::Units::Metres( 1.0f ) * glm::vec3( 0.0f, 1.5f, 0.7f );
