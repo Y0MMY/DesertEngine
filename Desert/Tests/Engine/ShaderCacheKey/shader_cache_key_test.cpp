@@ -41,6 +41,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <set>
 #include <sstream>
 #include <string>
@@ -1409,6 +1410,99 @@ TEST( ShaderCacheKeyProfile, TheConfigNameMappingMatchesTheBuildThatCarriesIt )
     // And the mapping is a real function of its argument, not a constant.
     EXPECT_TRUE( Desert::Core::SpirvDebugInfoForConfigName( "Debug" ) );
     EXPECT_FALSE( Desert::Core::SpirvDebugInfoForConfigName( "Release" ) );
+}
+
+// ─── Prose in a comment cannot move a location ────────────────────────────────────────────────────
+//
+// The DSL's paren-less sugar (`In T x;`, `Out T x;`, `Uniform Name {}`, `Buffer Name {}`) allocates
+// the lowest free slot in declaration order, and until Г5 it searched the WHOLE file text — comments
+// included. Five of the keywords are ordinary English words, so a sentence beginning "In LOCAL mode"
+// consumed a location, and six shipped shaders were doing exactly that.
+//
+// This is the same relation asserted where it is finally paid: not "the translated text looks right"
+// but "the MODULE the GPU is handed declares its inputs at the same locations", read back out of the
+// SPIR-V. Text and SPIR-V are two statements of one fact and it is the second one that a vertex
+// buffer binds against.
+namespace
+{
+    // The interface variables of a compiled stage, as location -> name. `spirv_cross::Compiler` is
+    // already this suite's reflection dependency (VulkanShaderReflection is built on it); the engine's
+    // own ReflectStage deliberately does not carry locations, so this reads them directly.
+    std::map<uint32_t, std::string> StageLocations( const std::vector<uint32_t>& spirv, bool inputs )
+    {
+        spirv_cross::Compiler compiler( spirv );
+        const auto            resources = compiler.get_shader_resources();
+
+        std::map<uint32_t, std::string> byLocation;
+        for ( const auto& res : ( inputs ? resources.stage_inputs : resources.stage_outputs ) )
+            byLocation[compiler.get_decoration( res.id, spv::DecorationLocation )] = res.name;
+        return byLocation;
+    }
+
+    // One shader, twice: written the way an engineer would write it, and with every comment deleted.
+    // The comments are the ones that were live in the tree — "In LOCAL mode" is verbatim from
+    // Programs/Particles/ParticleSimulate.shader.
+    const char* kCommented = R"(
+Shader "ProseVsCode"
+{
+    Vertex
+    {
+        // Integrate alive particles. In LOCAL mode (u_Counts.w) the integrated state is the offset.
+        /* Out of the pool comes exactly one entry, and the Buffer is a Uniform elsewhere. */
+        In vec3 a_Position;
+        In vec2 a_TexCoord;
+        Out vec2 v_UV;
+        void main() { gl_Position = vec4( a_Position, 1.0 ); v_UV = a_TexCoord; }
+    }
+}
+)";
+
+    const char* kStripped = R"(
+Shader "ProseVsCode"
+{
+    Vertex
+    {
+        In vec3 a_Position;
+        In vec2 a_TexCoord;
+        Out vec2 v_UV;
+        void main() { gl_Position = vec4( a_Position, 1.0 ); v_UV = a_TexCoord; }
+    }
+}
+)";
+
+    std::vector<uint32_t> VertexSpirvOf( const char* dsl )
+    {
+        auto parsed = Desert::Core::Preprocess::DShaderParser::Parse( dsl );
+        EXPECT_TRUE( parsed.IsSuccess() ) << ( parsed.IsSuccess() ? "" : parsed.GetError() );
+        if ( !parsed.IsSuccess() )
+            return {};
+        return CompileStage( parsed.GetValue().Stages.at( ShaderStage::Vertex ), "ProseVsCode.shader",
+                             shaderc_vertex_shader );
+    }
+} // namespace
+
+TEST( DShaderCommentsVsSpirv, CommentsDoNotMoveALocationInTheCompiledModule )
+{
+    const auto withProse = VertexSpirvOf( kCommented );
+    const auto withNone  = VertexSpirvOf( kStripped );
+    ASSERT_FALSE( withProse.empty() );
+    ASSERT_FALSE( withNone.empty() );
+
+    // The relation. Before the fix the prose took locations 0 and 0, so a_Position compiled to
+    // location 1, a_TexCoord to 2 and v_UV to 1 — every attribute one past where the vertex layout
+    // binds it.
+    EXPECT_EQ( StageLocations( withProse, true ), StageLocations( withNone, true ) );
+    EXPECT_EQ( StageLocations( withProse, false ), StageLocations( withNone, false ) );
+
+    // And the numbers themselves, so the test still says something if BOTH sides drift together.
+    const auto inputs = StageLocations( withNone, true );
+    ASSERT_EQ( inputs.size(), 2u );
+    EXPECT_EQ( inputs.at( 0 ), "a_Position" );
+    EXPECT_EQ( inputs.at( 1 ), "a_TexCoord" );
+
+    // Two modules that differ only in comments are the SAME module: comments do not survive
+    // preprocessing, so anything at all in the binary would mean the sugar had written code.
+    EXPECT_EQ( withProse, withNone );
 }
 
 int main( int argc, char** argv )
