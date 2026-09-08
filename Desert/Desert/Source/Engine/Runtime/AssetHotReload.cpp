@@ -365,6 +365,19 @@ namespace Desert::Runtime
                 }
             }
 
+            // A VOLUME MEDIUM HAS NO Shader OBJECT TO RELOAD — it is a program FRAGMENT, compiled into
+            // the four programs that sample the cloud field. What it has is TEXT, and the service holds
+            // a copy of it; refreshing that copy is the whole of hot-reloading a medium. The cloud
+            // renderer notices on the next frame, because it compares the variant's content hash rather
+            // than the material's handle, and rebuilds the three pipelines it owns.
+            if ( shaderService->RefreshMediumSource( handle, asset->GetShaderContent() ) )
+            {
+                LOG_INFO( "[HotReload] Volume medium '{}' re-read; the cloud programs recompile against "
+                          "it on the next frame that resolves the material.",
+                          key );
+                continue;
+            }
+
             auto shader = shaderService->Get( handle );
             if ( !shader )
                 continue;
@@ -377,6 +390,15 @@ namespace Desert::Runtime
                            res.GetError() );
                 continue;
             }
+
+            // AND EVERY LIVE VARIANT OF THE SAME FILE. A cloud march compiled against an authored
+            // medium is a different Shader object built from these same bytes; reloading only the
+            // registered program would leave it on the code it was built with, and the symptom would be
+            // "editing the shader stopped working once I authored a medium" — a staleness that names
+            // the wrong cause.
+            if ( const int variants = shaderService->ReloadVariantsOf( handle ); variants > 0 )
+                LOG_INFO( "[HotReload] Shader '{}': {} variant(s) recompiled with it.", shader->GetName(),
+                          variants );
 
             // Renderer-owned pipelines (the batched PBR/shadow set, every compute pipeline, the
             // fog apply) are built once at init and keep the code they were built with until

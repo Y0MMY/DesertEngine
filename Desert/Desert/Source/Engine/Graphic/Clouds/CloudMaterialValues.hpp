@@ -19,6 +19,16 @@ namespace Desert::Graphic
     /// panel's — because a name that three files spell for themselves is a name that can fork.
     inline constexpr const char* kCloudMaterialShaderName = "CloudRaymarch";
 
+    /// The include the four cloud-field consumers resolve, and the one name a material's authored medium
+    /// substitutes at compile time (Engine/Core/ShaderCompiler/ShaderVariant.hpp).
+    ///
+    /// ONE SPELLING FOR FIVE READERS — the cloud renderer's variant, the sky bake's variant, the shader
+    /// graph's Volume emitter, the census suite and Common/CloudField.glslh's own include line. It is a
+    /// string looked up by NAME at compile time, so two spellings do not fail to link or fail to compile:
+    /// the substitution simply never happens, the default file is read instead, and the authored medium
+    /// silently does nothing.
+    inline constexpr const char* kCloudMediumInclude = "Generated/CloudMedium.glslh";
+
     /**
      * @brief The cloud LOOK, resolved from the layer's material — the thirty-three values O1 moved out of
      *        ECS::VolumetricCloudData.
@@ -95,6 +105,16 @@ namespace Desert::Graphic
         float     MultiScatterOcclusion    = 0.25f;
         float     MultiScatterEccentricity = 0.18f;
         glm::vec3 AmbientScale             = { 1.0f, 1.0f, 1.0f };
+
+        // ---- The authored medium ---------------------------------------------------------------------
+        //
+        // A Volume-domain shader carrying a `Medium { ... }` block — what a cloud IS at a point in space,
+        // authored in the node graph. NULL IS THE NORMAL STATE and means the shipped chain in
+        // Generated/CloudMedium.glslh, which is byte-for-byte what every scene drew before the slot
+        // existed. It is not a number in the parameter block and never becomes one: it is a body of CODE,
+        // substituted into the four programs that sample the field at COMPILE time
+        // (Engine/Core/ShaderCompiler/ShaderVariant.hpp), which is why it costs nothing per sample.
+        Assets::AssetHandle Medium;
 
         /// The species slots in their one canonical order (ECS::kCloudTypeSlots of them).
         void TypeSlots( Assets::AssetHandle ( &out )[ECS::kCloudTypeSlots] ) const
@@ -193,6 +213,8 @@ namespace Desert::Graphic
                 v.LayoutPattern = Assets::AssetHandle( handle );
             else if ( name == "LayoutMask" )
                 v.LayoutMask = Assets::AssetHandle( handle );
+            else if ( name == "Medium" )
+                v.Medium = Assets::AssetHandle( handle );
         }
     } // namespace Detail
 

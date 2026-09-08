@@ -134,7 +134,8 @@ Shader "CloudShadowMap"
                 return 0.0f;
 
             float density = CloudSampleDensity(g_ShadowField, field, fieldPos);
-            return density * max(u_CloudMarch.w, 0.0f) * field.ExtinctionFactor;
+            return density * max(u_CloudMarch.w, 0.0f) *
+                   CloudSampleExtinctionFactor(g_ShadowField, field, fieldPos);
         }
 
         #define CLOUD_SHADOW_SAMPLE_EXTINCTION(p) CloudShadowExtinctionAt(p)

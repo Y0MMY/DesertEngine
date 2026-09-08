@@ -23,9 +23,9 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
-    VulkanShader::VulkanShader( const Assets::Asset<Assets::ShaderAsset>& asset, const ShaderDefines& defines,
+    VulkanShader::VulkanShader( const Assets::Asset<Assets::ShaderAsset>& asset, const ShaderVariant& variant,
                                 const std::string& passName )
-         : m_ShaderAsset( asset ), m_PassName( passName ), m_Defines( defines )
+         : m_ShaderAsset( asset ), m_PassName( passName ), m_Variant( variant )
     {
         m_ShaderPath = asset->GetMetadata().Filepath;
         m_ShaderName = m_ShaderPath.stem().string();
@@ -84,7 +84,8 @@ namespace Desert::Graphic::API::Vulkan
 
         for ( const auto& [stage, source] : stages )
         {
-            auto spirvResult = Core::ShaderCompiler::CompileGLSLToSPIRV( stage, source, m_ShaderPath.string() );
+            auto spirvResult =
+                 Core::ShaderCompiler::CompileGLSLToSPIRV( stage, source, m_ShaderPath.string(), m_Variant );
             if ( !spirvResult.IsSuccess() )
             {
                 discard();

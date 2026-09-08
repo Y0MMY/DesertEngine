@@ -15,6 +15,7 @@
 // Both questions are "which files does this stage's SPIR-V depend on", so both are answered here.
 
 #include <Engine/Core/Formats/Shader.hpp>
+#include <Engine/Core/ShaderCompiler/ShaderVariant.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -33,23 +34,40 @@ namespace Desert::Core
      * rather than guessed at — a missing include is a compile error the compiler will report with a
      * better message than this walk could.
      *
+     * A VIRTUAL include is followed through the variant's bytes rather than through the file's, so a
+     * header pulled in only by a substituted body is still found — and it is still listed under its own
+     * path, because that is what the hot-reload watcher has to watch and what the key has to hash.
+     *
      * @param requestingFile the file @p source came from; the anchor for quoted includes.
+     * @param variant        the compile-time substitution this stage is being compiled under.
      */
     std::vector<std::filesystem::path> CollectShaderIncludes( const std::string&           source,
-                                                              const std::filesystem::path& requestingFile );
+                                                              const std::filesystem::path& requestingFile,
+                                                              const ShaderVariant&         variant = {} );
 
     /**
      * The SPIR-V disk-cache key: stage + compile-options fingerprint + the assembled source + the
-     * content of every file CollectShaderIncludes finds.
+     * content of every file CollectShaderIncludes finds + THE VARIANT.
      *
      * Content-addressed on purpose — no mtimes, so a checkout that restores an older file is a
      * different key rather than a same-key-newer-timestamp, and two machines with the same tree agree.
+     *
+     * THE VARIANT IS PART OF THE KEY AND HAS TO BE. Two materials authoring two different cloud media
+     * compile the SAME stage of the SAME file against the same headers on disk; only the substituted
+     * bytes differ. Leaving them out would make the cache answer a question it was not asked — the
+     * first variant to compile would be served to every other one, for ever, across restarts, and the
+     * symptom is "my graph does nothing" rather than anything that names a cache. Desert/Tests/Engine/
+     * ShaderCacheKey drives exactly that: same name, different bytes, the key must move.
+     *
+     * The DEFAULT variant mixes nothing at all, which is what keeps every artifact already on disk
+     * valid instead of invalidating the whole cache on the day this axis was added.
      *
      * The options fingerprint includes whether SPIR-V debug info is generated, and THIS overload asks
      * with the current build's own policy — what the engine does at runtime.
      */
     uint64_t ComputeShaderCacheKey( Formats::ShaderStage stage, const std::string& source,
-                                    const std::filesystem::path& requestingFile );
+                                    const std::filesystem::path& requestingFile,
+                                    const ShaderVariant&         variant = {} );
 
     /**
      * The same key for an EXPLICIT debug-info profile — what the game packager asks with, because it
@@ -58,7 +76,8 @@ namespace Desert::Core
      * arrival.
      */
     uint64_t ComputeShaderCacheKeyForProfile( Formats::ShaderStage stage, const std::string& source,
-                                              const std::filesystem::path& requestingFile, bool spirvDebugInfo );
+                                              const std::filesystem::path& requestingFile, bool spirvDebugInfo,
+                                              const ShaderVariant& variant = {} );
 
     /** The debug-info policy of THIS build — the profile the 3-argument overloads resolve to. */
     bool SpirvDebugInfoThisBuild();

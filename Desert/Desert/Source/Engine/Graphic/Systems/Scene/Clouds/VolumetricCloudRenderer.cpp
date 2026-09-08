@@ -541,24 +541,136 @@ namespace Desert::Graphic::System
         return m_ModellingValid;
     }
 
+    bool VolumetricCloudRenderer::BuildMediumPipelines()
+    {
+        const auto shaderService = Runtime::ResourceRegistry::GetShaderService();
+        if ( !shaderService )
+            return false;
+
+        // THE VARIANT DECIDES WHICH OBJECT, NOT WHICH FILE. All three names are the shipped programs'
+        // own; what changes with an authored medium is the bytes one of their includes was compiled
+        // from, so a variant program is the same `.shader` under a different substitution. Asking for
+        // the registered program when the variant is default is deliberate: a default variant must be
+        // ONE object shared with everything else that draws it, not a private copy per renderer.
+        const auto acquire = [&]( const char* name, std::shared_ptr<Shader>& hold ) -> std::shared_ptr<Shader>
+        {
+            if ( m_MediumVariant.IsDefault() )
+            {
+                hold.reset(); // releases the previous variant's modules, if there was one
+                const auto shipped = shaderService->GetByName( name );
+                if ( !shipped )
+                {
+                    LOG_ERROR( "[Clouds] Compute shader '{}' is not registered. Expected "
+                               "Editor/Resources/Shaders/Programs/Clouds/{}.shader.",
+                               name, name );
+                }
+                return shipped;
+            }
+
+            hold = shaderService->AcquireVariant( name, m_MediumVariant );
+            if ( !hold )
+            {
+                // Named, and then the SHIPPED program is used: an authored medium that will not compile
+                // must not take the sky away with it. The material editor's own error is the place the
+                // artist reads why; here the frame keeps drawing.
+                LOG_ERROR( "[Clouds] the authored medium could not be compiled into '{}' — that program "
+                           "falls back to the shipped medium, so this frame's sky is judged by two "
+                           "different fields.",
+                           name );
+                return shaderService->GetByName( name );
+            }
+            return hold;
+        };
+
+        const auto marchShader = acquire( kMarchShaderName, m_MarchMediumShader );
+        if ( !marchShader )
+            return false;
+        m_MarchPipeline = ComputePipeline::Create( { .Shader = marchShader, .DebugName = kMarchShaderName } );
+        if ( !m_MarchPipeline )
+            return false;
+        m_MarchPipeline->Invalidate();
+
+        const auto shadowShader = acquire( kShadowMapShaderName, m_ShadowMapMediumShader );
+        if ( !shadowShader )
+            return false;
+        m_ShadowMapPipeline =
+             ComputePipeline::Create( { .Shader = shadowShader, .DebugName = kShadowMapShaderName } );
+        if ( !m_ShadowMapPipeline )
+            return false;
+        m_ShadowMapPipeline->Invalidate();
+
+        // THE SKY-LIGHT OCCLUSION VOLUME'S PRODUCER. Created unconditionally, like the two above, even
+        // though the default layer never dispatches it: a pipeline is created once per renderer and a
+        // pipeline created lazily inside the dispatch path is a failure with nowhere to go but a silent
+        // skip — which is precisely the class of defect this subsystem's zero-cost ladder is written to
+        // avoid. What is conditional is the IMAGE and the DISPATCH, and both are below the layer's flag.
+        const auto skyOcclusionShader = acquire( kSkyOcclusionShaderName, m_SkyOcclusionMediumShader );
+        if ( !skyOcclusionShader )
+            return false;
+        m_SkyOcclusionPipeline =
+             ComputePipeline::Create( { .Shader = skyOcclusionShader, .DebugName = kSkyOcclusionShaderName } );
+        if ( !m_SkyOcclusionPipeline )
+            return false;
+        m_SkyOcclusionPipeline->Invalidate();
+
+        return true;
+    }
+
+    void VolumetricCloudRenderer::ResolveMedium()
+    {
+        Core::ShaderVariant next;
+        if ( !m_Material.Medium.IsNull() )
+        {
+            if ( const auto shaderService = Runtime::ResourceRegistry::GetShaderService() )
+            {
+                // Read from the asset's current content every frame: hot reload re-reads it in place, and
+                // a cached copy here would be the one thing standing between an edited graph and a
+                // changed sky. A refusal (missing asset, or a shader with no Medium block) comes back
+                // empty and is logged there, which leaves `next` default — the shipped medium.
+                if ( std::string source = shaderService->MediumSourceOf( m_Material.Medium ); !source.empty() )
+                    next.VirtualSources.push_back( { std::string( kCloudMediumInclude ), std::move( source ) } );
+            }
+        }
+
+        const uint64_t hash = next.Hash();
+        if ( hash == m_MediumVariantHash )
+            return;
+
+        // COMPARED BY CONTENT AND NOT BY HANDLE. Editing the graph produces new bytes under the same
+        // handle — which a handle comparison would miss entirely — and swapping two materials whose media
+        // are the same text must NOT throw three pipelines away and pay three compiles for a picture that
+        // cannot change.
+        LOG_INFO( "[Clouds] authored medium {:016x} -> {:016x} ({} bytes); rebuilding the march, the "
+                  "shadow map and the sky-occlusion volume against it.",
+                  m_MediumVariantHash, hash,
+                  next.IsDefault() ? std::size_t{ 0 } : next.VirtualSources.front().Source.size() );
+
+        // THE DEVICE FIRST. The three pipelines below are replaced, and the previous objects may still be
+        // referenced by command buffers in flight; this is the same wait the shader hot-reload path takes
+        // before invalidating a pipeline cache, and for the same reason.
+        Renderer::GetInstance().WaitDeviceIdle();
+
+        m_MediumVariant     = std::move( next );
+        m_MediumVariantHash = hash;
+
+        if ( !BuildMediumPipelines() )
+        {
+            LOG_ERROR( "[Clouds] the medium changed but its pipelines could not be rebuilt — the layer "
+                       "will not march until this is fixed." );
+        }
+    }
+
     bool VolumetricCloudRenderer::CreatePipelines()
     {
         const auto shaderService = Runtime::ResourceRegistry::GetShaderService();
         if ( !shaderService )
             return false;
 
-        const auto marchShader = shaderService->GetByName( kMarchShaderName );
-        if ( !marchShader )
-        {
-            LOG_ERROR( "[Clouds] Compute shader '{}' is not registered. Expected "
-                       "Editor/Resources/Shaders/Programs/Clouds/{}.shader.",
-                       kMarchShaderName, kMarchShaderName );
+        // The three programs that CARRY THE MEDIUM are built by their own function, because ResolveMedium
+        // has to build exactly the same three again the moment an authored medium arrives — and two
+        // constructions of one pipeline set is how they come to disagree about which medium they hold.
+        if ( !BuildMediumPipelines() )
             return false;
-        }
-        m_MarchPipeline = ComputePipeline::Create( { .Shader = marchShader, .DebugName = kMarchShaderName } );
-        if ( !m_MarchPipeline )
-            return false;
-        m_MarchPipeline->Invalidate();
 
         const auto resolveShader = shaderService->GetByName( kResolveShaderName );
         if ( !resolveShader )
@@ -573,39 +685,6 @@ namespace Desert::Graphic::System
         if ( !m_ResolvePipeline )
             return false;
         m_ResolvePipeline->Invalidate();
-
-        const auto shadowShader = shaderService->GetByName( kShadowMapShaderName );
-        if ( !shadowShader )
-        {
-            LOG_ERROR( "[Clouds] Compute shader '{}' is not registered. Expected "
-                       "Editor/Resources/Shaders/Programs/Clouds/{}.shader.",
-                       kShadowMapShaderName, kShadowMapShaderName );
-            return false;
-        }
-        m_ShadowMapPipeline =
-             ComputePipeline::Create( { .Shader = shadowShader, .DebugName = kShadowMapShaderName } );
-        if ( !m_ShadowMapPipeline )
-            return false;
-        m_ShadowMapPipeline->Invalidate();
-
-        // THE SKY-LIGHT OCCLUSION VOLUME'S PRODUCER. Created unconditionally, like the three above, even
-        // though the default layer never dispatches it: a pipeline is created once per renderer and a
-        // pipeline created lazily inside the dispatch path is a failure with nowhere to go but a silent
-        // skip — which is precisely the class of defect this subsystem's zero-cost ladder is written to
-        // avoid. What is conditional is the IMAGE and the DISPATCH, and both are below the layer's flag.
-        const auto skyOcclusionShader = shaderService->GetByName( kSkyOcclusionShaderName );
-        if ( !skyOcclusionShader )
-        {
-            LOG_ERROR( "[Clouds] Compute shader '{}' is not registered. Expected "
-                       "Editor/Resources/Shaders/Programs/Clouds/{}.shader.",
-                       kSkyOcclusionShaderName, kSkyOcclusionShaderName );
-            return false;
-        }
-        m_SkyOcclusionPipeline =
-             ComputePipeline::Create( { .Shader = skyOcclusionShader, .DebugName = kSkyOcclusionShaderName } );
-        if ( !m_SkyOcclusionPipeline )
-            return false;
-        m_SkyOcclusionPipeline->Invalidate();
 
         const auto target = m_TargetFramebuffer.lock();
         if ( !target )
@@ -826,9 +905,14 @@ namespace Desert::Graphic::System
         bake.PerSampleSunTransmittance =
              CloudUsesPerSampleSunTransmittance( m_Data, m_SceneRenderer->GetAtmosphere() );
 
-        bake.Marched = true;
-        bake.Fingerprint =
-             CloudEnvironmentFingerprint( bake.Params, true, bake.SkyOcclusionValid, m_ModellingShapeGeneration );
+        // THE AUTHORED MEDIUM CROSSES HERE, into the one consumer that is not this renderer's. Copied
+        // rather than pointed at: the bake outlives this call by a submit-and-wait, and the variant is a
+        // few kilobytes of text against three quarters of a second of device time.
+        bake.Medium = m_MediumVariant;
+
+        bake.Marched     = true;
+        bake.Fingerprint = CloudEnvironmentFingerprint( bake.Params, true, bake.SkyOcclusionValid,
+                                                        m_ModellingShapeGeneration, m_MediumVariantHash );
         return bake;
     }
 
@@ -1045,6 +1129,11 @@ namespace Desert::Graphic::System
         }
 
         m_Material = BuildCloudMaterialValues( schema, overrides );
+
+        // AND THE ONE VALUE OF THE MATERIAL THAT IS NOT A NUMBER: the authored medium, which is a body of
+        // code and therefore reaches the frame through the shader compiler rather than through the packed
+        // parameter block. Costs one integer comparison per frame in the shipped case.
+        ResolveMedium();
     }
 
     void VolumetricCloudRenderer::BuildAuthoredPayload( const CloudGpuPayload& payload )

@@ -2,6 +2,30 @@
 
 #include <Common/Core/Logger.hpp>
 
+#include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
+
+#include <format>
+
+namespace
+{
+    /// The `Medium { ... }` body of @p source, or empty when it has none.
+    ///
+    /// THE RESULT-RETURNING PARSER AND NOT ShaderPreprocess::ParseProgramMeta, and the difference is a
+    /// crash. ParseProgramMeta ends in a DESERT_VERIFY on anything that is not DSL text — right for a
+    /// shader the engine is about to compile, fatal for a QUESTION asked about arbitrary content. The
+    /// first version of this asked it once per frame about an asset the eviction sweep had unloaded,
+    /// and an emptied asset is not DSL text: the editor died three seconds after the medium applied.
+    std::string MediumBodyOf( const std::string& source )
+    {
+        if ( source.empty() || !Desert::Core::Preprocess::DShaderParser::IsDShader( source ) )
+            return {};
+        const auto parsed = Desert::Core::Preprocess::DShaderParser::Parse( source );
+        if ( !parsed.IsSuccess() )
+            return {};
+        return parsed.GetValue().Meta.MediumSource;
+    }
+} // namespace
+
 namespace Desert::Runtime
 {
 
@@ -12,9 +36,35 @@ namespace Desert::Runtime
             return Common::MakeError( "Shader asset is invalid" );
         }
 
+        // A MEDIUM PROGRAM IS SOURCE, NOT A PROGRAM. It declares no stages because it is compiled INTO
+        // four other programs as the substitution for one of their includes; building a Shader object for
+        // it would produce one with no modules, and the honest complaint below ("registered but has no
+        // compiled stages — every material using it will not draw") would be a lie about a file that is
+        // working exactly as intended.
+        //
+        // THE TEXT IS COPIED HERE AND THE ASSET IS NOT KEPT, which is the fix for a measured crash. The
+        // first version read the body back out of the asset on every frame, and the asset eviction sweep
+        // unloads a shader asset nothing holds — so three seconds after a medium was applied the source
+        // was empty, and an empty asset is not DSL text. Holding the ASSET instead would have fought the
+        // sweep for the sake of a few kilobytes of text; holding the text is bounded, immune to the
+        // sweep, and re-read by RefreshMediumSource when the file on disk changes.
+        if ( std::string body = MediumBodyOf( shaderAsset->GetShaderContent() ); !body.empty() )
+        {
+            const auto name         = shaderAsset->GetMetadata().Filepath.stem().string();
+            m_NameToHandleMap[name] = shaderAsset->GetMetadata().Handle;
+            LOG_INFO( "[ShaderService] '{}' is a Volume medium ({} bytes of authored source); it compiles "
+                      "into the programs that sample the cloud field rather than into one of its own.",
+                      name, body.size() );
+            m_MediumSources[shaderAsset->GetMetadata().Handle] = std::move( body );
+            return BOOLSUCCESS;
+        }
+
         const auto shader                            = Graphic::Shader::Create( shaderAsset );
         m_Shaders[shaderAsset->GetMetadata().Handle] = shader;
         m_NameToHandleMap[shader->GetName()]         = shaderAsset->GetMetadata().Handle;
+        // Kept so AcquireVariant can compile the SAME source under a substitution later. Weak: the
+        // asset manager owns the asset, and this service must not extend its life.
+        m_ShaderAssets[shaderAsset->GetMetadata().Handle] = shaderAsset;
         // Whose the shader is, in the ledger — see Engine/Graphic/ResourceLedger.hpp.
         shader->ClaimOwnership( Graphic::ResourceOwner::AssetService, shaderAsset->GetMetadata().Handle );
 
@@ -61,12 +111,157 @@ namespace Desert::Runtime
         return ( it != m_Shaders.end() ) ? it->second : nullptr;
     }
 
+    std::shared_ptr<Graphic::Shader> ShaderService::AcquireVariant( const std::string&            name,
+                                                                    const Graphic::ShaderVariant& variant )
+    {
+        // The default variant is GetByName's question, and answering it here would build an unregistered
+        // second copy of a program that already exists — two objects, two sets of modules, and a
+        // material picking whichever it was handed.
+        if ( variant.IsDefault() )
+        {
+            LOG_ERROR( "[ShaderService] AcquireVariant('{}') was asked for the DEFAULT variant. That is "
+                       "GetByName's question; serving it here would build a second copy of a registered "
+                       "program.",
+                       name );
+            return nullptr;
+        }
+
+        const auto handleIt = m_NameToHandleMap.find( name );
+        if ( handleIt == m_NameToHandleMap.end() )
+        {
+            LOG_ERROR( "[ShaderService] AcquireVariant: no program named '{}' is registered.", name );
+            return nullptr;
+        }
+
+        const std::string key =
+             std::format( "{}#{:016x}", name, static_cast<unsigned long long>( variant.Hash() ) );
+
+        if ( const auto it = m_Variants.find( key ); it != m_Variants.end() )
+        {
+            if ( auto live = it->second.Program.lock() )
+                return live;
+            m_Variants.erase( it ); // the last holder let it go; build a fresh one below
+        }
+
+        const auto assetIt = m_ShaderAssets.find( handleIt->second );
+        auto       asset   = assetIt != m_ShaderAssets.end() ? assetIt->second.lock() : nullptr;
+        if ( !asset )
+        {
+            LOG_ERROR( "[ShaderService] AcquireVariant('{}'): the shader asset behind that name is gone.", name );
+            return nullptr;
+        }
+
+        // RE-READ IF THE SWEEP HAS BEEN THROUGH. A registered shader compiles ONCE at startup and never
+        // looks at its asset again, so the asset eviction sweep is free to release the text — and it
+        // does, marking two hundred assets cold as soon as a scene finishes loading. A variant is
+        // compiled LATER, from that same text, and the parser's answer to an empty file is a fatal
+        // engine error. This cost a thumbnail sweep and the whole editor with it, three seconds after a
+        // cloud medium applied, and it is the ordinary idiom besides: the hot-reload poll loads before
+        // it reloads, for the same reason.
+        if ( asset->GetShaderContent().empty() )
+        {
+            if ( const auto loaded = asset->Load(); !loaded )
+            {
+                LOG_ERROR( "[ShaderService] AcquireVariant('{}'): the shader's source had been released "
+                           "and could not be re-read: {}",
+                           name, loaded.GetError() );
+                return nullptr;
+            }
+        }
+
+        auto program = Graphic::Shader::Create( asset, variant );
+        program->ClaimOwnership( Graphic::ResourceOwner::AssetService, handleIt->second );
+        if ( !program->IsCompiled() )
+        {
+            // Named out loud and still handed back: the caller decides whether to draw with the default
+            // instead, and a nullptr here would be indistinguishable from "the name is unknown".
+            LOG_ERROR( "[ShaderService] Variant {} of '{}' has no compiled stages — the substituted "
+                       "source did not compile.",
+                       key, name );
+        }
+
+        m_Variants[key] = VariantEntry{ handleIt->second, program };
+        return program;
+    }
+
+    std::string ShaderService::MediumSourceOf( const Assets::AssetHandle& handle )
+    {
+        if ( handle.IsNull() )
+            return {};
+
+        if ( const auto it = m_MediumSources.find( handle ); it != m_MediumSources.end() )
+            return it->second;
+
+        // A HANDLE THAT IS NOT A MEDIUM, and the two ways to get there are an unregistered shader and a
+        // Medium slot pointed at an ordinary one. Both draw the shipped medium, which is a picture that
+        // looks exactly like "I forgot to set it" — so it is said, once per handle, with the handle in
+        // it. Once, because this is asked every frame.
+        if ( m_WarnedNotAMedium.insert( static_cast<uint64_t>( handle ) ).second )
+        {
+            LOG_ERROR( "[ShaderService] a cloud material's Medium slot names shader {}, which is not a "
+                       "registered Volume medium (no `Medium {{ ... }}` block, or not loaded). The layer "
+                       "draws the DEFAULT medium.",
+                       static_cast<uint64_t>( handle ) );
+        }
+        return {};
+    }
+
+    bool ShaderService::RefreshMediumSource( const Assets::AssetHandle& handle, const std::string& content )
+    {
+        std::string body = MediumBodyOf( content );
+        if ( body.empty() )
+            return false;
+
+        // A file that STOPS being a medium keeps its old body rather than silently reverting the sky to
+        // the engine's: an artist mid-edit has a half-saved file for a moment, and a sky that flickered
+        // back to the default every time they saved would be worse than one frame of stale text. The
+        // empty case above is therefore "not a medium", not "an empty medium" — the parser refuses an
+        // empty Medium block outright, for the same reason.
+        m_MediumSources[handle] = std::move( body );
+        m_WarnedNotAMedium.erase( static_cast<uint64_t>( handle ) );
+        return true;
+    }
+
+    int ShaderService::ReloadVariantsOf( const Assets::AssetHandle& handle )
+    {
+        int reloaded = 0;
+        for ( auto it = m_Variants.begin(); it != m_Variants.end(); )
+        {
+            auto program = it->second.Handle == handle ? it->second.Program.lock() : nullptr;
+            if ( it->second.Program.expired() )
+            {
+                it = m_Variants.erase( it );
+                continue;
+            }
+            if ( program )
+            {
+                const auto res = program->Reload();
+                if ( !res )
+                {
+                    LOG_ERROR( "[ShaderService] Variant {} failed to recompile: {}", it->first, res.GetError() );
+                }
+                else
+                {
+                    ++reloaded;
+                }
+            }
+            ++it;
+        }
+        return reloaded;
+    }
+
     void ShaderService::Clear()
     {
         // Was an empty body. Shaders own VkShaderModules and the pipeline layouts built from them.
         m_Shaders.clear();
         m_PassShaders.clear();
         m_NameToHandleMap.clear();
+        m_ShaderAssets.clear();
+        m_MediumSources.clear();
+        m_WarnedNotAMedium.clear();
+        // Only the weak bookkeeping — a variant's modules belong to whoever still holds it, and freeing
+        // them from here would leave that holder with a program made of destroyed modules.
+        m_Variants.clear();
     }
 
     std::vector<std::string> ShaderService::GetAllNames() const

@@ -706,14 +706,16 @@ namespace
     uint64_t CloudTestFingerprint( const Desert::ECS::VolumetricCloudData& data, const glm::vec3& wind,
                                    const glm::vec2& regionOrigin, bool skyOcclusionValid = false,
                                    uint32_t                                    shapeGeneration = 0u,
-                                   const Desert::Graphic::CloudMaterialValues& material        = {} )
+                                   const Desert::Graphic::CloudMaterialValues& material        = {},
+                                   uint64_t                                    mediumVariant   = 0ull )
     {
         const CloudTypeShape shape      = CloudTestShape();
         const auto           atmosphere = CloudTestAtmosphere();
 
         const CloudGpuPayload payload = PackCloudParams( data, material, &shape, 1u, atmosphere, wind,
                                                          CloudRegionBinding{ regionOrigin, 30.0f } );
-        return CloudEnvironmentFingerprint( payload, /*marched=*/true, skyOcclusionValid, shapeGeneration );
+        return CloudEnvironmentFingerprint( payload, /*marched=*/true, skyOcclusionValid, shapeGeneration,
+                                            mediumVariant );
     }
 } // namespace
 
@@ -722,11 +724,39 @@ TEST( CloudEnvironmentCadence, NoCloudsIsZeroAndCloudsNeverAre )
     // The two states have to be tellable apart, or deleting the layer would leave its overcast baked into
     // the scene's ambient with nothing to trigger a rebake.
     const CloudGpuPayload empty{};
-    EXPECT_EQ( CloudEnvironmentFingerprint( empty, /*marched=*/false, false, 0u ), 0ull );
-    EXPECT_EQ( CloudEnvironmentFingerprint( empty, /*marched=*/false, true, 7u ), 0ull );
+    EXPECT_EQ( CloudEnvironmentFingerprint( empty, /*marched=*/false, false, 0u, 0ull ), 0ull );
+    EXPECT_EQ( CloudEnvironmentFingerprint( empty, /*marched=*/false, true, 7u, 0xABCDull ), 0ull );
 
     Desert::ECS::VolumetricCloudData data;
     EXPECT_NE( CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ) ), 0ull );
+}
+
+TEST( CloudEnvironmentCadence, TheAuthoredMediumIsVisibleAndItIsInNOTHINGELSEHERE )
+{
+    // THE ONE INPUT THAT IS CODE. Everything else the panorama shows arrives in the packed block, so
+    // hashing the block covers it; a cloud material's authored MEDIUM is a body of GPU code compiled
+    // into the march, and it changes what the panorama shows while leaving every byte of that block
+    // identical. Left out of the fingerprint, authoring a medium would move the sky on screen and leave
+    // the light in the world coming from the previous one — indefinitely, because a bake is only
+    // triggered by this number. That is the "middle link drops a property" shape in the one link that
+    // costs three quarters of a second to re-run.
+    Desert::ECS::VolumetricCloudData     data;
+    Desert::Graphic::CloudMaterialValues material;
+
+    const uint64_t shipped = CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ), false, 0u, material,
+                                                   /*mediumVariant=*/0ull );
+    const uint64_t authored = CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ), false, 0u,
+                                                    material, /*mediumVariant=*/0x51A7ull );
+    const uint64_t other = CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ), false, 0u, material,
+                                                 /*mediumVariant=*/0x51A8ull );
+
+    EXPECT_NE( shipped, authored ) << "authoring a cloud medium left the environment fingerprint where it "
+                                      "was, so the panorama the scene is LIT by would keep showing the "
+                                      "medium before it.";
+    EXPECT_NE( authored, other ) << "two different authored media share one fingerprint";
+    EXPECT_EQ( shipped,
+               CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ), false, 0u, material, 0ull ) )
+         << "the fingerprint is a function of the medium's content, not of how many have been seen";
 }
 
 TEST( CloudEnvironmentCadence, WindAndTheRegionOriginAreDeliberatelyInvisible )

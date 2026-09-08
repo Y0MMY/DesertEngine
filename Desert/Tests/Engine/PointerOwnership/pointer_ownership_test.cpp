@@ -173,11 +173,35 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   Слияние двух переписей — это НЕ выбор одной стороны: каждая измеряла своё дерево, и верно
     //   только третье число, которого не видел никто. Оно ПОЛУЧЕНО ЗАПУСКОМ переписи на сведённом
     //   дереве, а не выведено арифметикой из двух отчётов — арифметика здесь и была бы подгонкой.
-    EXPECT_EQ( CountOf( Form::Raw ), 328 );
-    EXPECT_EQ( CountOf( Form::Shared ), 317 );
+    //
+    //   791 -> 805 with O1-E, the authored cloud medium, and every one of the fourteen is accounted for
+    //   by what that mechanism IS. O1-E branched from the 789 tree and reported 803; the extra two are
+    //   the merge's own +2 above, not anything of O1-E's — which is why neither branch's number is the
+    //   merged tree's. 805 was PREDICTED from that reasoning and then CONFIRMED BY RUNNING the census on
+    //   the merged tree before this merge was committed. The prediction is not the evidence; the run is.
+    //   Had they disagreed, the run would have won and the reasoning above would have been the thing to
+    //   fix.
+    //
+    //   NINE RAW, and all nine are string literals in static tables: the Volume domain's two registers
+    //   (which material properties a medium graph may read, and which it deliberately may not, with the
+    //   reason) and the emitter's table of the five functions a medium compiles to. Same easy answer as
+    //   every other table entry above them.
+    //
+    //   THREE SHARED, and they are the point of the design rather than a detail. A cloud material's
+    //   authored medium produces a NEW compiled program on every edit of its graph, and each one owns
+    //   VkShaderModules and descriptor set layouts. ShaderService therefore holds variants only WEAKLY,
+    //   and VolumetricCloudRenderer's three shared_ptrs are the strong references — dropping them is what
+    //   frees the modules. A service-owned cache would have grown by one program per edit for the life of
+    //   the session and released none.
+    //
+    //   TWO WEAK, which are the other half of that arrangement: ShaderService::m_ShaderAssets (the asset
+    //   manager owns the assets; this service must not extend their life to compile a variant later) and
+    //   VariantEntry::Program (the cache above).
+    EXPECT_EQ( CountOf( Form::Raw ), 337 );
+    EXPECT_EQ( CountOf( Form::Shared ), 320 );
     EXPECT_EQ( CountOf( Form::Unique ), 110 );
-    EXPECT_EQ( CountOf( Form::Weak ), 36 );
-    EXPECT_EQ( (int)Members().size(), 791 )
+    EXPECT_EQ( CountOf( Form::Weak ), 38 );
+    EXPECT_EQ( (int)Members().size(), 805 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }
@@ -388,7 +412,7 @@ TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
     // `shared_ptr` here is a false impression of shared ownership, and the register's job is to make
     // the true owner findable instead of mass-replacing them for uniformity -- churn that would hide
     // the seven real findings in a diff of two hundred files.
-    EXPECT_EQ( CountOf( Form::Shared ), 317 );
+    EXPECT_EQ( CountOf( Form::Shared ), 320 );
     EXPECT_GT( CountOf( Form::Shared ), CountOf( Form::Unique ) + CountOf( Form::Weak ) );
 }
 

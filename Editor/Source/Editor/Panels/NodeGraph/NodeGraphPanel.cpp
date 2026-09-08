@@ -33,6 +33,10 @@ namespace Desert::Editor
     {
         namespace SG = ShaderGraph;
 
+        // One colour per pin type, kept as a TABLE — the four rows are meant to be read side by side, and
+        // clang-format 18 splits each of them into two lines the moment one is touched. Fenced for the
+        // same reason the node catalogue in ShaderGraph.cpp is.
+        // clang-format off
         ImU32 PinColor( int type )
         {
             switch ( static_cast<SG::ValueType>( type ) )
@@ -40,9 +44,13 @@ namespace Desert::Editor
                 case SG::ValueType::Float: return IM_COL32( 145, 210, 130, 255 );
                 case SG::ValueType::Vec2:  return IM_COL32( 240, 200, 90, 255 );
                 case SG::ValueType::Color: return IM_COL32( 235, 120, 120, 255 );
+                // Distinct from Color on purpose: a vec3 and a vec4 do not link to each other, so two pins
+                // an artist cannot join must not be the same colour on the canvas.
+                case SG::ValueType::Vec3:  return IM_COL32( 150, 170, 240, 255 );
             }
             return IM_COL32_WHITE;
         }
+        // clang-format on
 
         std::filesystem::path GraphsDirectory()
         {
@@ -66,6 +74,27 @@ namespace Desert::Editor
         // passthrough). Shared by the "New" button and the File Explorer's create action.
         void PopulateStarter( SG::Document& doc, SG::Domain domain )
         {
+            if ( domain == SG::Domain::Volume )
+            {
+                // A CLOUD SAMPLE AND AN OUTPUT WITH NOTHING WIRED — which compiles to the SHIPPED medium
+                // exactly, because every unconnected pin emits the engine's own default. So a brand new
+                // Volume graph, assigned to a layer, changes not one pixel of the sky; the artist then
+                // wires what they want to change. A starter that emitted a plausible-looking formula
+                // would put a different sky on screen the moment the material was assigned and leave
+                // them guessing which half of it was theirs.
+                auto sample = SG::MakeNode( doc, "CloudSample" );
+                sample.X    = 0.0f;
+                sample.Y    = 60.0f;
+
+                auto output = SG::MakeNode( doc, "VolumeOutput" );
+                output.X    = 360.0f;
+                output.Y    = 60.0f;
+
+                doc.Nodes.push_back( std::move( sample ) );
+                doc.Nodes.push_back( std::move( output ) );
+                return;
+            }
+
             if ( domain == SG::Domain::PostProcess )
             {
                 auto scene = SG::MakeNode( doc, "SceneColor" );
@@ -460,7 +489,9 @@ namespace Desert::Editor
             m_StatusIsError = true;
             return;
         }
-        m_Status        = m_Doc.Name + " compiled + registered — pick it in Material \\ Shader";
+        m_Status        = m_Doc.DomainEnum() == SG::Domain::Volume
+                               ? m_Doc.Name + " compiled + registered — drop it on a cloud material's Medium slot"
+                               : m_Doc.Name + " compiled + registered — pick it in Material \\ Shader";
         m_StatusIsError = false;
         PublishToPreview();
     }
@@ -528,6 +559,16 @@ namespace Desert::Editor
         // drawing the previous compile while the viewport drew the new one.
         MaterialShaderRebuild::Publish( m_Doc.Name );
 
+        // NO SCRATCH MATERIAL FOR A CLOUD MEDIUM, and this is a refusal rather than an omission. The
+        // preview material below is a SurfaceMaterialAsset whose ShaderName is this graph — which is
+        // exactly what a medium is not: it declares no stages, nothing draws it, and a `.demat` naming it
+        // would be a material the mesh path refuses by name (ShaderProgramMeta::DrawnByMeshPath). A
+        // medium is seen by assigning it to the Medium slot of a cloud material and looking at the sky,
+        // which is the whole viewport rather than a preview sphere; O1_DESIGN §9 п.3 kept the volume
+        // preview as its own stage for exactly that reason.
+        if ( m_Doc.DomainEnum() == SG::Domain::Volume )
+            return;
+
         // Open-or-focus the document for this graph's scratch material. One window per material now, so a
         // recompile brings the SAME window forward rather than re-pointing a shared one.
         if ( const auto material = EnsurePreviewMaterial(); static_cast<uint64_t>( material ) != 0 )
@@ -590,9 +631,11 @@ namespace Desert::Editor
         // Domain picks the output node, the vertex contract and the palette (Material Domain / Mode).
         ImGui::SameLine();
         ImGui::SetNextItemWidth( 130.0f );
-        const char* kDomains[] = { "Surface", "Post Process" };
+        // SIZED FROM THE ARRAY, and it used to be a literal 2 sitting beside a live enum — so adding the
+        // Volume domain would have compiled, offered two of three, and told nobody.
+        const char* kDomains[] = { "Surface", "Post Process", "Cloud Medium" };
         int         domainIdx  = m_Doc.Domain;
-        if ( ImGui::Combo( "##domain", &domainIdx, kDomains, 2 ) )
+        if ( ImGui::Combo( "##domain", &domainIdx, kDomains, static_cast<int>( std::size( kDomains ) ) ) )
             ChangeDomain( static_cast<SG::Domain>( domainIdx ) );
 
         // The scene's shading model — Surface only. The tooltip used to carry a third paragraph naming

@@ -27,6 +27,15 @@ namespace Desert::Editor::ShaderGraph
     static constexpr unsigned CORE    = AllDomains;
     static constexpr unsigned SURFACE = DomainBit( Domain::Surface );
     static constexpr unsigned POST    = DomainBit( Domain::PostProcess );
+    static constexpr unsigned VOLUME  = DomainBit( Domain::Volume );
+
+    // Nodes that are valid everywhere EXCEPT the cloud medium. The Volume domain has no UVs, no scene
+    // colour, no exposed properties and no textures of its own — a medium is compiled INTO four programs
+    // whose descriptor sets are hand-built, so a graph that declared its own bindings would have to pick
+    // numbers that are free in all four, and a collision between two GLSL declarations at one binding is
+    // silent (see the note at the Properties emitter below). Constants, maths and the cloud sample are
+    // what a medium is written from; Docs/Clouds/O1_DESIGN.md §10.3 names the rest as its own task.
+    static constexpr unsigned NOT_VOLUME = CORE & ~VOLUME;
 
     // The catalogue is a TABLE and is kept as one: one node per visual row, pins grouped on their own
     // line. Left to itself clang-format explodes every entry into eleven lines of one field each,
@@ -56,50 +65,119 @@ namespace Desert::Editor::ShaderGraph
               { { "Color", ValueType::Color } }, {}, false, false, false, POST },
             { "SceneColor", "Scene Color", RGBA( 70, 110, 160, 255 ), {},
               { { "Color", ValueType::Color } }, false, false, false, POST },
+            // THE CLOUD MEDIUM'S FIVE OUTPUTS — the Volume domain's contract (O1_DESIGN §3.3, accepted
+            // §9 п.2). An UNCONNECTED pin is not zero: it is the SHIPPED default for that output, which
+            // is what makes a half-authored graph a modification of the sky rather than a deletion of it.
+            { "VolumeOutput", "Volume Output", RGBA( 150, 90, 60, 255 ),
+              { { "Density", ValueType::Float },
+                { "Extinction", ValueType::Float },
+                { "Albedo", ValueType::Vec3 },
+                { "Emissive", ValueType::Vec3 },
+                { "AmbientOcclusion", ValueType::Float } },
+              {}, false, false, false, VOLUME },
+            // WHAT THE MARCH KNOWS AT THIS POINT IN THE SKY. Everything the four consumers hand the
+            // medium, and nothing else: there is no UV, no normal and no mesh in a volume.
+            { "CloudSample", "Cloud Sample", RGBA( 70, 110, 160, 255 ), {},
+              { { "PositionKm", ValueType::Vec3 },
+                { "WindPositionKm", ValueType::Vec3 },
+                { "Profile", ValueType::Float },
+                { "DetailType", ValueType::Float },
+                { "DetailFactor", ValueType::Float },
+                { "DensityScale", ValueType::Float },
+                { "ExtinctionFactor", ValueType::Float } },
+              false, false, false, VOLUME },
+            // The layer's own two lighting values, each legal ONLY in the output it belongs to — see the
+            // reachability rule in the compiler. They exist so a graph can MODIFY what the layer decided
+            // (tint the material's albedo, multiply the occlusion volume's answer) instead of being
+            // forced to replace a pass it cannot see.
+            // THE SHIPPED MEDIUM, callable. An authored cloud is almost always a MODIFICATION of the
+            // engine's — "the same clouds, thinner over there" — and a graph that had to rebuild the
+            // erosion chain by hand to say that would be a graph nobody could use. Their bodies live in
+            // Common/CloudMediumDefault.glslh, which a material never substitutes, so they stay reachable
+            // from an authored medium.
+            { "DefaultDensity", "Default Density", RGBA( 70, 110, 160, 255 ), {},
+              { { "Density", ValueType::Float } }, false, false, false, VOLUME },
+            { "DefaultExtinctionFactor", "Default Extinction Factor", RGBA( 70, 110, 160, 255 ), {},
+              { { "Factor", ValueType::Float } }, false, false, false, VOLUME },
+            { "LayerAlbedo", "Layer Albedo", RGBA( 160, 80, 90, 255 ), {},
+              { { "Albedo", ValueType::Vec3 } }, false, false, false, VOLUME },
+            { "LayerOcclusion", "Layer Occlusion", RGBA( 90, 140, 90, 255 ), {},
+              { { "Occlusion", ValueType::Float } }, false, false, false, VOLUME },
+            // A read of one of the CLOUD MATERIAL's own properties. Which ones are readable is the
+            // register in VolumeParams(); a bake input is not among them and cannot be made one here.
+            { "CloudParam", "Cloud Material Param", RGBA( 160, 80, 90, 255 ), {},
+              { { "Value", ValueType::Float } }, /*param*/ true, false, false, VOLUME },
+            { "Vec3Const", "Vector 3", RGBA( 120, 70, 80, 255 ), {},
+              { { "Vector", ValueType::Vec3 } }, false, /*color*/ true, false, VOLUME },
+            { "MultiplyVec3", "Multiply (Vector 3)", RGBA( 90, 90, 120, 255 ),
+              { { "A", ValueType::Vec3 }, { "B", ValueType::Vec3 } },
+              { { "Out", ValueType::Vec3 } }, false, false, false, VOLUME },
+            { "ScaleVec3", "Scale (Vector 3 x Float)", RGBA( 90, 90, 120, 255 ),
+              { { "Vector", ValueType::Vec3 }, { "Factor", ValueType::Float } },
+              { { "Out", ValueType::Vec3 } }, false, false, false, VOLUME },
+            { "SplitVec3", "Split (Vector 3)", RGBA( 110, 110, 110, 255 ),
+              { { "In", ValueType::Vec3 } },
+              { { "X", ValueType::Float }, { "Y", ValueType::Float }, { "Z", ValueType::Float } },
+              false, false, false, VOLUME },
             // ---- core: valid everywhere ----
             { "TextureSample", "Texture Sample", RGBA( 70, 110, 160, 255 ),
               { { "UV", ValueType::Vec2 } },
               { { "RGBA", ValueType::Color }, { "R", ValueType::Float } },
-              /*param*/ true, false, false, CORE },
+              /*param*/ true, false, false, NOT_VOLUME },
             { "ColorParam", "Color Param", RGBA( 160, 80, 90, 255 ), {},
-              { { "Color", ValueType::Color } }, /*param*/ true, /*color*/ true, false, CORE },
+              { { "Color", ValueType::Color } }, /*param*/ true, /*color*/ true, false, NOT_VOLUME },
             { "FloatParam", "Float Param", RGBA( 90, 140, 90, 255 ), {},
-              { { "Value", ValueType::Float } }, /*param*/ true, false, /*float*/ true, CORE },
+              { { "Value", ValueType::Float } }, /*param*/ true, false, /*float*/ true, NOT_VOLUME },
             { "ColorConst", "Color", RGBA( 120, 70, 80, 255 ), {},
-              { { "Color", ValueType::Color } }, false, /*color*/ true, false, CORE },
+              { { "Color", ValueType::Color } }, false, /*color*/ true, false, NOT_VOLUME },
             { "FloatConst", "Float", RGBA( 70, 110, 70, 255 ), {},
               { { "Value", ValueType::Float } }, false, false, /*float*/ true, CORE },
             { "UV", "UV", RGBA( 150, 130, 60, 255 ), {}, { { "UV", ValueType::Vec2 } },
-              false, false, false, CORE },
+              false, false, false, NOT_VOLUME },
             { "TileUV", "Tile UV", RGBA( 150, 130, 60, 255 ),
               { { "UV", ValueType::Vec2 }, { "Scale", ValueType::Float } },
               { { "UV", ValueType::Vec2 } }, false, false, false, /*mesh tiling*/ SURFACE },
             { "Multiply", "Multiply", RGBA( 90, 90, 120, 255 ),
               { { "A", ValueType::Color }, { "B", ValueType::Color } },
-              { { "Out", ValueType::Color } }, false, false, false, CORE },
+              { { "Out", ValueType::Color } }, false, false, false, NOT_VOLUME },
             { "Scale", "Scale (Color x Float)", RGBA( 90, 90, 120, 255 ),
               { { "Color", ValueType::Color }, { "Factor", ValueType::Float } },
-              { { "Out", ValueType::Color } }, false, false, false, CORE },
+              { { "Out", ValueType::Color } }, false, false, false, NOT_VOLUME },
             { "Add", "Add", RGBA( 90, 90, 120, 255 ),
               { { "A", ValueType::Color }, { "B", ValueType::Color } },
-              { { "Out", ValueType::Color } }, false, false, false, CORE },
+              { { "Out", ValueType::Color } }, false, false, false, NOT_VOLUME },
             { "Lerp", "Lerp", RGBA( 120, 90, 130, 255 ),
               { { "A", ValueType::Color }, { "B", ValueType::Color }, { "T", ValueType::Float } },
-              { { "Out", ValueType::Color } }, false, false, false, CORE },
+              { { "Out", ValueType::Color } }, false, false, false, NOT_VOLUME },
             { "OneMinus", "One Minus", RGBA( 110, 110, 110, 255 ),
-              { { "In", ValueType::Color } }, { { "Out", ValueType::Color } }, false, false, false, CORE },
+              { { "In", ValueType::Color } }, { { "Out", ValueType::Color } }, false, false, false, NOT_VOLUME },
             { "MultiplyFloat", "Multiply (Float)", RGBA( 80, 120, 80, 255 ),
               { { "A", ValueType::Float }, { "B", ValueType::Float } },
               { { "Out", ValueType::Float } }, false, false, false, CORE },
+            { "AddFloat", "Add (Float)", RGBA( 80, 120, 80, 255 ),
+              { { "A", ValueType::Float }, { "B", ValueType::Float } },
+              { { "Out", ValueType::Float } }, false, false, false, CORE },
+            { "SaturateFloat", "Saturate (Float)", RGBA( 110, 110, 110, 255 ),
+              { { "In", ValueType::Float } }, { { "Out", ValueType::Float } }, false, false, false, CORE },
+            { "PowerFloat", "Power (Float)", RGBA( 90, 90, 120, 255 ),
+              { { "In", ValueType::Float }, { "Exp", ValueType::Float } },
+              { { "Out", ValueType::Float } }, false, false, false, CORE },
+            { "LerpFloat", "Lerp (Float)", RGBA( 120, 90, 130, 255 ),
+              { { "A", ValueType::Float }, { "B", ValueType::Float }, { "T", ValueType::Float } },
+              { { "Out", ValueType::Float } }, false, false, false, CORE },
             { "Saturate", "Saturate", RGBA( 110, 110, 110, 255 ),
-              { { "In", ValueType::Color } }, { { "Out", ValueType::Color } }, false, false, false, CORE },
+              { { "In", ValueType::Color } }, { { "Out", ValueType::Color } }, false, false, false, NOT_VOLUME },
             { "Power", "Power", RGBA( 90, 90, 120, 255 ),
               { { "In", ValueType::Color }, { "Exp", ValueType::Float } },
-              { { "Out", ValueType::Color } }, false, false, false, CORE },
+              { { "Out", ValueType::Color } }, false, false, false, NOT_VOLUME },
             { "Sine", "Sine (Float)", RGBA( 80, 120, 80, 255 ),
               { { "In", ValueType::Float } }, { { "Out", ValueType::Float } }, false, false, false, CORE },
+            // NOT IN THE VOLUME DOMAIN. `timeUB` is a uniform block the cloud programs do not declare —
+            // and a medium that scrolled with wall-clock time would fight the layer's own wind offset,
+            // which is the frame the modelling volume was BAKED in. Wind belongs to the sample position
+            // the Cloud Sample node already hands out.
             { "Time", "Time", RGBA( 60, 140, 150, 255 ), {},
-              { { "Seconds", ValueType::Float } }, false, false, false, CORE },
+              { { "Seconds", ValueType::Float } }, false, false, false, NOT_VOLUME },
         };
         return s_Specs;
     }
@@ -113,9 +191,61 @@ namespace Desert::Editor::ShaderGraph
         return nullptr;
     }
 
+    // clang-format off
+    const std::vector<VolumeParam>& VolumeParams()
+    {
+        // THREE, AND THE NUMBER IS A FACT ABOUT SCOPE RATHER THAN A CHOICE. A Medium block is compiled
+        // into Common/CloudField.glslh, which every consumer includes BEFORE Common/CloudParams.glslh —
+        // so the packed `u_Cloud*` block is not declared yet at that point, and the only material values
+        // in scope are the ones the producer seam already carries in `CloudFieldParams`. That is a
+        // property of the include order of four shipped programs, not of this table: moving the include
+        // would widen it, and O1_DESIGN §10.3 does not ask for that.
+        static const std::vector<VolumeParam> s_Params = {
+            { "DetailTileSize", "params.DetailTileKm",
+              "KILOMETRES. The Material Editor shows this property in centimetres, because that is the "
+              "world unit; the medium's own maths is kilometre-scaled and this is the converted value." },
+            { "DetailStrength", "params.DetailStrength", "0..1, the LAYER's erosion depth" },
+            { "DensityScale",   "params.DensityScale",   "the LAYER's density multiplier" },
+        };
+        return s_Params;
+    }
+
+    const std::vector<VolumeParamOutOfScope>& VolumeParamsOutOfScope()
+    {
+        // EVERY Immediate PROPERTY THAT IS NOT READABLE, WITH ITS REASON. The suite derives the schema's
+        // Immediate set and demands that each member be in one register or the other, so a property added
+        // to CloudRaymarch.shader cannot slip past without somebody answering this question. Eleven rows,
+        // and ten of them share one reason — stated per row anyway, because a shared reason written once
+        // above the block is a reason that stops being checked when a row is added under it.
+        static const std::vector<VolumeParamOutOfScope> s_OutOfScope = {
+            { "ExtinctionScale",          "in the packed block, which is not declared where a Medium block is compiled; it reaches the medium as the Extinction OUTPUT's own multiplicand instead" },
+            { "ScatteringAlbedo",         "reaches the graph as the Layer Albedo node, which is the same value at the one output where it is in scope" },
+            { "PhaseG",                   "in the packed block, and a per-sample phase is not an output of this domain's contract" },
+            { "PhaseGBackward",           "in the packed block, and a per-sample phase is not an output of this domain's contract" },
+            { "PhaseBlend",               "in the packed block, and a per-sample phase is not an output of this domain's contract" },
+            { "AmbientOcclusionStrength", "already applied to the value the Layer Occlusion node hands out, so exposing it as well would let a graph apply it twice" },
+            { "MultiScatterOctaves",      "in the packed block, and the scattering series is read once per dispatch rather than per sample" },
+            { "MultiScatterContribution", "in the packed block, and the scattering series is read once per dispatch rather than per sample" },
+            { "MultiScatterOcclusion",    "in the packed block, and the scattering series is read once per dispatch rather than per sample" },
+            { "MultiScatterEccentricity", "in the packed block, and the scattering series is read once per dispatch rather than per sample" },
+            { "AmbientScale",             "in the packed block; it tints the sky term the march adds AFTER the medium has answered" },
+        };
+        return s_OutOfScope;
+    }
+    // clang-format on
+
     const char* OutputKind( Domain domain )
     {
-        return domain == Domain::PostProcess ? "PostProcessOutput" : "SurfaceOutput";
+        switch ( domain )
+        {
+            case Domain::PostProcess:
+                return "PostProcessOutput";
+            case Domain::Volume:
+                return "VolumeOutput";
+            case Domain::Surface:
+                break;
+        }
+        return "SurfaceOutput";
     }
 
     bool SpecInDomain( const NodeSpec& spec, Domain domain )
@@ -136,7 +266,15 @@ namespace Desert::Editor::ShaderGraph
             for ( const auto& pin : spec->Outputs )
                 node.Outputs.push_back( { doc.NextId++, pin.Name, static_cast<int>( pin.Type ) } );
             if ( spec->HasParamName )
-                node.ParamName = spec->HasColorValue ? "Tint" : ( spec->HasFloatValue ? "Amount" : "u_Texture" );
+            {
+                // A Cloud Material Param names a property of an EXISTING schema, so its default has to be
+                // one that exists — "Amount" would make every freshly dropped node an error the artist
+                // has to fix before the graph will compile at all.
+                node.ParamName =
+                     kind == "CloudParam"
+                          ? VolumeParams().front().SchemaName
+                          : ( spec->HasColorValue ? "Tint" : ( spec->HasFloatValue ? "Amount" : "u_Texture" ) );
+            }
             if ( spec->HasFloatValue )
                 node.Value = { 1, 0, 0, 0 };
         }
@@ -146,6 +284,11 @@ namespace Desert::Editor::ShaderGraph
     // ---------------------------------------------------------------- compiler ----------------
     namespace
     {
+        // Defined below with the validator, declared here because the compiler's own refusals name nodes
+        // the same way the validator's do — one phrasing for both, so an artist reads the same sentence
+        // whichever half rejected the graph.
+        std::string NodeLabel( const Node& node );
+
         struct Compiler
         {
             const Document&                                doc;
@@ -156,6 +299,16 @@ namespace Desert::Editor::ShaderGraph
             std::ostringstream                             body;
             std::string                                    error;
             int                                            nextVar = 0;
+
+            // WHICH OF THE MEDIUM'S FIVE OUTPUTS IS BEING EMITTED, or empty outside the Volume domain.
+            //
+            // It exists because two of the Volume nodes are only IN SCOPE in one output each: the medium
+            // is compiled as five separate functions, and `materialAlbedo` is an argument of exactly one
+            // of them. A node placed in the wrong one would emit GLSL that names an undeclared variable —
+            // a compile error from generated code, naming a line the artist never wrote, which is the
+            // failure ValidateGraph was written to stop. Here it is a refusal that names the node and the
+            // pin instead.
+            std::string currentOutput;
 
             explicit Compiler( const Document& d ) : doc( d )
             {
@@ -203,6 +356,20 @@ namespace Desert::Editor::ShaderGraph
                 if ( src->Kind == "TextureSample" && src->Outputs.size() == 2 &&
                      it->second == src->Outputs[1].Id )
                     return var + ".r";
+
+                // The Cloud Sample node hands out one struct member per output pin, and Split (Vector 3)
+                // one component per pin. Both are "one variable, several fields", so the pin's INDEX
+                // picks the suffix rather than the node emitting seven statements nobody reads.
+                if ( src->Kind == "CloudSample" || src->Kind == "SplitVec3" )
+                {
+                    for ( size_t i = 0; i < src->Outputs.size(); ++i )
+                    {
+                        if ( src->Outputs[i].Id != it->second )
+                            continue;
+                        return src->Kind == "SplitVec3" ? var + "." + std::string( 1, "xyz"[i] )
+                                                        : var + "." + src->Outputs[i].Name;
+                    }
+                }
                 return var;
             }
 
@@ -231,6 +398,74 @@ namespace Desert::Editor::ShaderGraph
                     const char* type = node.Kind == "ColorParam" ? "vec4" : "float";
                     decl = std::format( "{} {} = u_Material.{};", type, var, node.ParamName );
                 }
+                else if ( node.Kind == "CloudSample" )
+                    decl = std::format( "CloudGraphSample {} = CloudGraphSampleAt( params, field, "
+                                        "positionKm );",
+                                        var );
+                else if ( node.Kind == "DefaultDensity" )
+                    decl = std::format( "float {} = CloudDefaultDensity( params, field, positionKm );", var );
+                else if ( node.Kind == "DefaultExtinctionFactor" )
+                    decl = std::format( "float {} = CloudDefaultExtinctionFactor( params, field, positionKm );",
+                                        var );
+                else if ( node.Kind == "LayerAlbedo" || node.Kind == "LayerOcclusion" )
+                {
+                    // IN SCOPE IN EXACTLY ONE OUTPUT. See Compiler::currentOutput: the medium is five
+                    // functions, and these two are arguments of one of them each.
+                    const char* home = node.Kind == "LayerAlbedo" ? "Albedo" : "AmbientOcclusion";
+                    if ( currentOutput != home )
+                    {
+                        error =
+                             std::format( "node {} may only feed the '{}' output of the Volume Output node; it is "
+                                          "reachable from '{}', where the layer's own value does not exist",
+                                          NodeLabel( node ), home,
+                                          currentOutput.empty() ? std::string( "<none>" ) : currentOutput );
+                        decl = std::format( "float {} = 0.0;", var );
+                    }
+                    else if ( node.Kind == "LayerAlbedo" )
+                        decl = std::format( "vec3 {} = materialAlbedo;", var );
+                    else
+                        decl = std::format( "float {} = ambientOcclusion;", var );
+                }
+                else if ( node.Kind == "CloudParam" )
+                {
+                    const VolumeParam* row = nullptr;
+                    for ( const auto& candidate : VolumeParams() )
+                        if ( node.ParamName == candidate.SchemaName )
+                            row = &candidate;
+                    if ( !row )
+                    {
+                        // ValidateGraph names this first and better; reaching here means the two lists
+                        // disagreed, which is worth saying out loud rather than emitting a black.
+                        error = std::format( "node {} reads cloud material property '{}', which the Volume "
+                                             "domain does not expose",
+                                             NodeLabel( node ), node.ParamName );
+                        decl  = std::format( "float {} = 0.0;", var );
+                    }
+                    else
+                        decl = std::format( "float {} = {};", var, row->Expression );
+                }
+                else if ( node.Kind == "Vec3Const" )
+                    decl = std::format( "vec3 {} = vec3( {}, {}, {} );", var, Lit( node.Value[0] ),
+                                        Lit( node.Value[1] ), Lit( node.Value[2] ) );
+                else if ( node.Kind == "MultiplyVec3" )
+                    decl = std::format( "vec3 {} = {} * {};", var, InputExpr( node, 0, "vec3( 1.0 )" ),
+                                        InputExpr( node, 1, "vec3( 1.0 )" ) );
+                else if ( node.Kind == "ScaleVec3" )
+                    decl = std::format( "vec3 {} = {} * {};", var, InputExpr( node, 0, "vec3( 1.0 )" ),
+                                        InputExpr( node, 1, "1.0" ) );
+                else if ( node.Kind == "SplitVec3" )
+                    decl = std::format( "vec3 {} = {};", var, InputExpr( node, 0, "vec3( 0.0 )" ) );
+                else if ( node.Kind == "AddFloat" )
+                    decl = std::format( "float {} = {} + {};", var, InputExpr( node, 0, "0.0" ),
+                                        InputExpr( node, 1, "0.0" ) );
+                else if ( node.Kind == "SaturateFloat" )
+                    decl = std::format( "float {} = clamp( {}, 0.0, 1.0 );", var, InputExpr( node, 0, "0.0" ) );
+                else if ( node.Kind == "PowerFloat" )
+                    decl = std::format( "float {} = pow( max( {}, 0.0 ), {} );", var, InputExpr( node, 0, "0.0" ),
+                                        InputExpr( node, 1, "1.0" ) );
+                else if ( node.Kind == "LerpFloat" )
+                    decl = std::format( "float {} = mix( {}, {}, {} );", var, InputExpr( node, 0, "0.0" ),
+                                        InputExpr( node, 1, "1.0" ), InputExpr( node, 2, "0.5" ) );
                 else if ( node.Kind == "ColorConst" )
                     decl = std::format( "vec4 {} = {};", var, Vec4Lit( node.Value ) );
                 else if ( node.Kind == "FloatConst" )
@@ -309,13 +544,24 @@ namespace Desert::Editor::ShaderGraph
                     return "vec2";
                 case ValueType::Color:
                     return "vec4";
+                case ValueType::Vec3:
+                    return "vec3";
             }
             return "<unknown>";
         }
 
         const char* DomainName( Domain d )
         {
-            return d == Domain::PostProcess ? "Post Process" : "Surface";
+            switch ( d )
+            {
+                case Domain::PostProcess:
+                    return "Post Process";
+                case Domain::Volume:
+                    return "Cloud Medium";
+                case Domain::Surface:
+                    break;
+            }
+            return "Surface";
         }
 
         // How the node reads on the canvas — its palette title, plus the parameter name when it has
@@ -364,6 +610,28 @@ namespace Desert::Editor::ShaderGraph
                 if ( !SpecInDomain( *spec, domain ) )
                     return std::format( "node {} is not available in the {} domain", NodeLabel( node ),
                                         DomainName( domain ) );
+
+                // THE BAKE/MARCH SPLIT, MADE UNEXPRESSIBLE. About half of the cloud material's values are
+                // inputs to a CPU bake that runs for seconds and produces the volume this graph reads the
+                // RESULT of; they are not in the shader's scope at all. Refused BY NAME here, listing what
+                // is readable, rather than by an empty palette entry or a GLSL error in generated code.
+                if ( node.Kind == "CloudParam" )
+                {
+                    const bool readable =
+                         std::any_of( VolumeParams().begin(), VolumeParams().end(),
+                                      [&node]( const VolumeParam& p ) { return node.ParamName == p.SchemaName; } );
+                    if ( !readable )
+                    {
+                        std::string readableNames;
+                        for ( const auto& p : VolumeParams() )
+                            readableNames += ( readableNames.empty() ? "" : ", " ) + std::string( p.SchemaName );
+                        return std::format(
+                             "node {} reads cloud material property '{}', which a medium cannot see. Most "
+                             "of that material is baked on the CPU before the march runs; what a graph "
+                             "may read is: {}",
+                             NodeLabel( node ), node.ParamName, readableNames );
+                    }
+                }
 
                 // A node whose pin list disagrees with its kind is the crash case, not just a bad
                 // message: the emitter indexes node.Inputs[i] positionally for every kind it knows,
@@ -469,7 +737,8 @@ namespace Desert::Editor::ShaderGraph
 
         const Domain      domain   = doc.DomainEnum();
         const char* const outKind  = OutputKind( domain );
-        const char* const outTitle = domain == Domain::PostProcess ? "Post Process Output" : "Surface Output";
+        const NodeSpec*   outSpec  = FindSpec( outKind );
+        const std::string outTitle = outSpec ? outSpec->Title : outKind;
 
         // Structure and types first: everything below indexes pins positionally and emits typed GLSL
         // declarations, both of which assume a well-formed document.
@@ -488,6 +757,85 @@ namespace Desert::Editor::ShaderGraph
         }
         if ( !output )
             return Common::MakeError<std::string>( std::format( "graph needs a {} node", outTitle ) );
+
+        // ---------------------------------------------------------- Volume domain -----------------
+        //
+        // A PROGRAM FRAGMENT AND NOT A PROGRAM. The medium is compiled INTO the four shipped programs
+        // that sample the cloud field, as the substitution for one of their includes, so what is emitted
+        // here is a `Medium { ... }` block: no stages, no State, no vertex contract, and no Properties of
+        // its own (see NOT_VOLUME at the catalogue for why a graph declares no bindings here).
+        //
+        // FIVE FUNCTIONS, EACH COMPILED SEPARATELY. Every output pin gets its own Compiler, so a node is
+        // emitted only into the function that actually reads it — the alternative, one body shared by
+        // five returns, would evaluate the whole graph five times per sample and make the two
+        // scope-limited nodes (Layer Albedo, Layer Occlusion) impossible to police.
+        //
+        // AN UNCONNECTED PIN IS THE SHIPPED VALUE, NOT ZERO. That is what makes a half-authored graph a
+        // modification of the sky rather than a deletion of it, and it is why a Volume Output node with
+        // nothing wired into it compiles to five forwards that are byte-for-byte the default medium.
+        if ( domain == Domain::Volume )
+        {
+            struct MediumFunction
+            {
+                const char* Signature;
+                const char* Pin;      // the Volume Output input it is compiled from
+                const char* Fallback; // what an unconnected pin emits: the shipped default, never a zero
+            };
+
+            // clang-format off
+            static const MediumFunction kFunctions[] = {
+                { "float CloudSampleDensity( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )",
+                  "Density", "CloudDefaultDensity( params, field, positionKm )" },
+                { "float CloudSampleExtinctionFactor( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )",
+                  "Extinction", "CloudDefaultExtinctionFactor( params, field, positionKm )" },
+                { "vec3 CloudSampleAlbedo( CloudFieldParams params, CloudFieldSample field, vec3 positionKm, vec3 materialAlbedo )",
+                  "Albedo", "CloudDefaultAlbedo( params, field, positionKm, materialAlbedo )" },
+                { "vec3 CloudSampleEmissive( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )",
+                  "Emissive", "CloudDefaultEmissive( params, field, positionKm )" },
+                { "float CloudSampleOcclusion( CloudFieldParams params, CloudFieldSample field, vec3 positionKm, float ambientOcclusion )",
+                  "AmbientOcclusion", "CloudDefaultOcclusion( params, field, positionKm, ambientOcclusion )" },
+            };
+            // clang-format on
+
+            std::ostringstream out;
+            out << "// GENERATED by the Desert Shader Graph editor — edit the .dgraph, not this file.\n";
+            out << "Shader \"" << doc.Name << "\"\n{\n    Domain Volume\n\n";
+            out << "    Medium\n    {\n";
+            // The shipped bodies, so every fallback above and every Default node below resolves. It is an
+            // ordinary include of an ordinary header: this text is substituted for
+            // Generated/CloudMedium.glslh, and Common/CloudMediumDefault.glslh is never substituted.
+            out << "        #include <Common/CloudMediumDefault.glslh>\n\n";
+
+            for ( const auto& function : kFunctions )
+            {
+                // The pin is found by NAME rather than by index, because the two lists are maintained in
+                // different files: the catalogue's VolumeOutput spec and the table above. A rename in one
+                // is a named refusal here instead of five functions silently compiled from the wrong pins.
+                size_t pinIndex = output->Inputs.size();
+                for ( size_t i = 0; i < output->Inputs.size(); ++i )
+                    if ( output->Inputs[i].Name == function.Pin )
+                        pinIndex = i;
+                if ( pinIndex == output->Inputs.size() )
+                    return Common::MakeError<std::string>(
+                         std::format( "the Volume Output node has no '{}' input, so the medium's '{}' "
+                                      "function cannot be compiled",
+                                      function.Pin, function.Signature ) );
+
+                Compiler compiler( doc );
+                compiler.currentOutput       = function.Pin;
+                const std::string expression = compiler.InputExpr( *output, pinIndex, function.Fallback );
+                if ( !compiler.error.empty() )
+                    return Common::MakeError<std::string>( compiler.error );
+
+                out << "        " << function.Signature << "\n        {\n";
+                out << compiler.body.str();
+                out << std::format( "            return {};\n", expression );
+                out << "        }\n\n";
+            }
+
+            out << "    }\n}\n";
+            return Common::MakeSuccess( out.str() );
+        }
 
         // Exposed properties: dedupe by name, validate identifiers.
         std::vector<const Node*> textures, colorParams, floatParams;

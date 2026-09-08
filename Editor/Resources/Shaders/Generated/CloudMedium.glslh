@@ -1,0 +1,70 @@
+// THE SEAM. This file's BYTES are what a cloud material replaces.
+//
+// It is a real file on disk and its content is the shipped medium, so the default is not a special case
+// anywhere: the includer reads it, the cache key hashes it, and the four programs below compile it, all
+// through the ordinary path. A material whose Medium slot names a Volume-domain shader graph supplies
+// different bytes for this ONE name at compile time (Engine/Core/ShaderCompiler/ShaderVariant.hpp), and
+// nothing else in the tree changes.
+//
+// FOUR PROGRAMS SAMPLE THE MEDIUM, and that is why the seam is an include rather than a generated
+// program (Docs/Clouds/O1_DESIGN.md §10, measured by zeroing each consumer in turn on Clouds_Protocol):
+//
+//   Programs/Clouds/CloudRaymarch.shader           the march the camera sees
+//   Programs/Clouds/CloudShadowMap.shader          the clouds' shadow on the ground
+//   Programs/Clouds/CloudSkyOcclusionVolume.shader how much sky a column can see
+//   Programs/Compute/BakeProceduralSky.shader      the panorama the scene is LIT by (IBL)
+//
+// TWO OF THE FOUR MOVE NOTHING ABOVE THE HORIZON — the shadow map and the sky bake — so a medium that
+// reached only the march would pass a review that looked up. Each of those files says in its own header
+// why judging the same sky by a second field is a defect; the project has already paid for that shape
+// once, with grey clouds.
+//
+// THE CONTRACT — the Volume domain's five outputs (O1_DESIGN §3.3, accepted §9 п.2):
+//
+//   Density           [0,1]      the field the march integrates
+//   ExtinctionFactor  x/km       multiplies the layer's per-kilometre extinction; SCALAR by decision,
+//                                not a colour — the shadow ray, the shadow map and the occlusion volume
+//                                all integrate optical depth as one number, so a spectral extinction
+//                                would triple three separate marches (§7.1)
+//   Albedo            [0,1]^3    fraction scattered rather than absorbed, per colour
+//   Emissive          /km        radiance the medium ADDS, per kilometre
+//   Occlusion         [0,1]      multiplies the sky term the sample receives
+//
+// WHY THE BODIES ARE NOT HERE. Common/CloudMediumDefault.glslh holds them, and it is never substituted —
+// so an authored medium can still CALL them. That is what an authored medium almost always wants: "the
+// same clouds, warmer at the edges" rather than a cloud field written from nothing. It is also what makes
+// this mechanism's own acceptance expressible — a Volume Output node with nothing wired into it compiles
+// to exactly the five forwards below, so "a graph that changes nothing" is byte-for-byte "no graph".
+
+#ifndef CLOUD_MEDIUM_GLSLH
+#define CLOUD_MEDIUM_GLSLH
+
+#include <Common/CloudMediumDefault.glslh>
+
+float CloudSampleDensity( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )
+{
+    return CloudDefaultDensity( params, field, positionKm );
+}
+
+float CloudSampleExtinctionFactor( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )
+{
+    return CloudDefaultExtinctionFactor( params, field, positionKm );
+}
+
+vec3 CloudSampleAlbedo( CloudFieldParams params, CloudFieldSample field, vec3 positionKm, vec3 materialAlbedo )
+{
+    return CloudDefaultAlbedo( params, field, positionKm, materialAlbedo );
+}
+
+vec3 CloudSampleEmissive( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )
+{
+    return CloudDefaultEmissive( params, field, positionKm );
+}
+
+float CloudSampleOcclusion( CloudFieldParams params, CloudFieldSample field, vec3 positionKm,
+                            float ambientOcclusion )
+{
+    return CloudDefaultOcclusion( params, field, positionKm, ambientOcclusion );
+}
+
+#endif // CLOUD_MEDIUM_GLSLH

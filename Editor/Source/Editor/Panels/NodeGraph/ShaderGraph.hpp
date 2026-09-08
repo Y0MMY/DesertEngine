@@ -19,6 +19,12 @@ namespace Desert::Editor
             Float = 0,
             Vec2  = 1,
             Color = 2, // vec4
+            // APPENDED AND NEVER REORDERED, like the pin lists below: a .dgraph stores Pin::Type as this
+            // integer, so inserting a value would silently retype every saved pin above it. Vec3 exists
+            // because the Volume domain's contract is written in three-component quantities that are NOT
+            // colours-with-alpha — a position in kilometres, an albedo, an emission per kilometre — and
+            // spelling them vec4 would make "what does .w mean here" a question with no answer.
+            Vec3 = 3,
         };
 
         // Where a graph runs (mirrors UE's Material Domain / Godot's shader Mode). The domain is the
@@ -29,6 +35,12 @@ namespace Desert::Editor
         {
             Surface     = 0, // lit/unlit material on scene meshes (mesh vertex + normals)
             PostProcess = 1, // full-screen effect over the rendered scene color (fullscreen triangle)
+            // THE CLOUD MEDIUM — what a cloud IS at a point in space, and the one domain that compiles to
+            // a program FRAGMENT rather than to a program. Its output is a `Medium { ... }` block that
+            // four shipped programs are compiled against (Docs/Clouds/O1_DESIGN.md §10.3); it has no
+            // vertex contract, no framebuffer and no draw of its own, because it never draws — it is
+            // substituted into things that do.
+            Volume = 2,
         };
 
         // Where the graph's OWN textures start in the descriptor set. Above every engine binding a
@@ -110,6 +122,43 @@ namespace Desert::Editor
 
         const std::vector<NodeSpec>& Specs();
         const NodeSpec*              FindSpec( const std::string& kind );
+
+        // ---- The Volume domain's material-parameter register -------------------------------------
+        //
+        // WHICH OF THE CLOUD MATERIAL'S OWN PROPERTIES A GRAPH NODE MAY READ, and it is a REGISTER with a
+        // reason per row rather than a list, because the interesting half is what is NOT here.
+        //
+        // ABOUT HALF OF THAT MATERIAL'S VALUES ARE INPUTS TO A CPU BAKE — a 256x32x256 volume over
+        // several thousand cloud bodies, 3.3 to 14.1 seconds — and the graph runs on the GPU, per sample,
+        // inside a march that reads the RESULT of that bake. A `Timing(Rebake)` property is therefore not
+        // merely inconvenient to reach from here: it is not in the shader's scope at all, and a node
+        // pretending to read one would either fail to compile or, worse, read a same-named field that
+        // means something else. The split is shown to the author in the Material Editor (every property
+        // states its Timing) and is made UNEXPRESSIBLE here.
+        //
+        // AND IT IS A TEST, NOT A CONVENTION. Desert/Tests/Editor/ShaderGraphVolumeDomain parses the
+        // shipped CloudRaymarch.shader and asserts, in both directions:
+        //   * every row below names a property that exists and is Timing(Immediate) — so exposing a bake
+        //     input goes RED;
+        //   * every Immediate property of the schema is either a row below or a row of the out-of-scope
+        //     register beside it, with its reason — so a NEW property cannot be added without somebody
+        //     deciding whether the graph may read it.
+        // There is no hand-written name list anywhere in that suite.
+        struct VolumeParam
+        {
+            const char* SchemaName; // the property's name in CloudRaymarch.shader's Properties block
+            const char* Expression; // the GLSL it becomes inside a Medium block
+            const char* Units;      // what the number IS at that point, which is not always what the panel shows
+        };
+        const std::vector<VolumeParam>& VolumeParams();
+
+        /// An Immediate property the graph deliberately does NOT expose, and why. See VolumeParams().
+        struct VolumeParamOutOfScope
+        {
+            const char* SchemaName;
+            const char* Reason;
+        };
+        const std::vector<VolumeParamOutOfScope>& VolumeParamsOutOfScope();
 
         // Node kind that terminates a graph in the given domain (SurfaceOutput / PostProcessOutput).
         const char* OutputKind( Domain domain );

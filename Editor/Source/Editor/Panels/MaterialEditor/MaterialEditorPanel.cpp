@@ -17,8 +17,10 @@
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/CloudLayoutAsset.hpp>
 #include <Engine/Assets/CloudTypeAsset.hpp>
+#include <Engine/Assets/Shader/ShaderAsset.hpp>
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
+#include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 #include <Engine/Graphic/Materials/MaterialFactory.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
@@ -1214,11 +1216,12 @@ namespace Desert::Editor
             ImGui::TableNextColumn();
             ImGui::PushItemWidth( -FLT_MIN );
 
-            // Non-texture asset references (CloudType / CloudLayout) — the schema declares the asset
-            // class, the value rides the same name->handle map the textures use. The rows are the ones
-            // the Details panel drew while these were component fields, moved here with the fields (O1):
-            // there is nothing to thumbnail, the files are authored in their own document windows, and an
-            // empty slot MEANS something good in both cases.
+            // Non-texture asset references (CloudType / CloudLayout / the authored Medium) — the schema
+            // declares the asset class, the value rides the same name->handle map the textures use. The
+            // first two are the rows the Details panel drew while these were component fields, moved here
+            // with the fields (O1); the third is a Volume shader graph. All three share the same three
+            // properties: there is nothing to thumbnail, the file is authored in its own window, and an
+            // empty slot MEANS something good rather than something missing.
             if ( p.IsAssetRef() )
             {
                 if ( isInstance )
@@ -1502,6 +1505,88 @@ namespace Desert::Editor
 
         const bool isType   = p.AssetKind == "CloudTypeAsset";
         const bool isLayout = p.AssetKind == "CloudLayoutAsset";
+
+        // ---- THE AUTHORED MEDIUM ---------------------------------------------------------------------
+        //
+        // A reference to a Volume-domain shader graph — what a cloud IS at a point in space. It is drawn
+        // by its own block rather than threaded through the two above because almost nothing is shared:
+        // the candidates come from the shader tree instead of an asset type, "empty" means the ENGINE's
+        // medium rather than a built-in asset, and there is no document to open (see the note at the
+        // missing Edit button).
+        if ( p.AssetKind == "ShaderAsset" )
+        {
+            // Every registered `.shader` that declares a Medium block. Enumerated only while the combo is
+            // OPEN, because it parses shader source and there are hundreds of shaders.
+            std::string preview = "Engine default";
+            if ( handle != 0 )
+            {
+                preview = "(missing)";
+                if ( m_AssetManager )
+                {
+                    if ( auto shader =
+                              m_AssetManager->FindByHandle<Assets::ShaderAsset>( Common::UUID( handle ) ) )
+                        preview = shader->GetMetadata().Filepath.stem().string();
+                }
+            }
+
+            if ( ImGui::BeginCombo( hiddenId.c_str(), preview.c_str() ) )
+            {
+                if ( ImGui::Selectable( "Engine default", handle == 0 ) && handle != 0 )
+                {
+                    data.SetTexture( p.Name, 0 );
+                    changed = true;
+                }
+                if ( m_AssetManager )
+                {
+                    for ( const auto& [h, shader] : m_AssetManager->FindAllByType<Assets::ShaderAsset>() )
+                    {
+                        if ( !shader )
+                            continue;
+                        // Parsed rather than guessed from the path: "is this a medium" is a property of
+                        // the FILE, and a folder convention would let a shader in the wrong directory be
+                        // offered for a slot that cannot use it.
+                        const auto parsed =
+                             ::Desert::Core::Preprocess::DShaderParser::Parse( shader->GetShaderContent() );
+
+                        // TWO SKIPS AND THEY ARE NOT THE SAME EVENT, which is what GpuWriteCensus went
+                        // red about and it was right. "This shader is not a medium" is a FILTER — most
+                        // shaders are not, and saying so about each of them would be noise. "This shader
+                        // would not parse" is a REFUSAL: the file is broken, and a broken file that
+                        // simply vanishes from a list looks exactly like a file the artist never saved.
+                        // It is shown, greyed and unpickable, the same way the material shader picker
+                        // shows one that does not compile.
+                        const auto name = shader->GetMetadata().Filepath.stem().string();
+                        if ( !parsed.IsSuccess() )
+                        {
+                            ImGui::TextDisabled( "%s  (does not parse)", name.c_str() );
+                            continue;
+                        }
+                        if ( !parsed.GetValue().Meta.IsMediumProgram() )
+                            continue;
+
+                        const bool selected = ( static_cast<uint64_t>( h ) == handle );
+                        const auto label    = name;
+                        if ( ImGui::Selectable( label.c_str(), selected ) )
+                        {
+                            data.SetTexture( p.Name, static_cast<uint64_t>( h ) );
+                            changed = true;
+                        }
+                        if ( selected )
+                            ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+
+            // NO "EDIT" BUTTON, AND IT IS A MEASURED ABSENCE RATHER THAN AN OVERSIGHT. What this slot
+            // holds is the COMPILED artifact of a graph; the document an artist would want to open is the
+            // `.dgraph` it was compiled from, and a `.dgraph` carries no identity at all — no GUID, no
+            // back-reference — so the owner cannot be resolved from here (task У7-2's measurement, and
+            // task У14 is where that would be fixed). Offering a button that opened the generated
+            // `.shader` as text would answer a different question than the one being asked.
+            return changed;
+        }
+
         if ( !isType && !isLayout )
         {
             // A kind this panel has no row for is a schema ahead of this binary — said instead of drawn
