@@ -628,7 +628,15 @@ namespace Desert::Graphic::API::Vulkan
         VmaAllocationCreateInfo cAllocInfo = { .usage = VMA_MEMORY_USAGE_GPU_ONLY };
         VK_CHECK_RESULT( vmaCreateImage( allocator, &cInfo, &cAllocInfo, &m_ColorImages.Image, (VmaAllocation*)&m_VmaAllocation[0], nullptr ) );
         
-        m_ColorImages.ImageView = Utils::CreateImageView( device->GetVulkanLogicalDevice(), m_ColorImages.Image, m_ColorFormat, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1, 1 ).GetValue();
+        // A refused view used to be stored as VK_NULL_HANDLE and attached to the swap chain's
+        // framebuffer anyway; the resulting failure surfaced at framebuffer creation with no mention
+        // of the view that never existed.
+        auto colorView = Utils::CreateImageView( device->GetVulkanLogicalDevice(), m_ColorImages.Image, m_ColorFormat, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1, 1 );
+        if ( !colorView )
+        {
+            return Common::MakeFormattedError<VkResult>( "swap chain colour image view: {}", colorView.GetError() );
+        }
+        m_ColorImages.ImageView = colorView.GetValue();
 
         // Depth
         VkFormat dFormat = device->GetPhysicalDevice()->GetDepthFormat();
@@ -636,7 +644,12 @@ namespace Desert::Graphic::API::Vulkan
         VmaAllocationCreateInfo dAllocInfo = { .usage = VMA_MEMORY_USAGE_GPU_ONLY };
         VK_CHECK_RESULT( vmaCreateImage( allocator, &dInfo, &dAllocInfo, &m_DepthStencilImages.Image, (VmaAllocation*)&m_VmaAllocation[1], nullptr ) );
         
-        m_DepthStencilImages.ImageView = Utils::CreateImageView( device->GetVulkanLogicalDevice(), m_DepthStencilImages.Image, dFormat, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_VIEW_TYPE_2D, 1, 1 ).GetValue();
+        auto depthView = Utils::CreateImageView( device->GetVulkanLogicalDevice(), m_DepthStencilImages.Image, dFormat, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_VIEW_TYPE_2D, 1, 1 );
+        if ( !depthView )
+        {
+            return Common::MakeFormattedError<VkResult>( "swap chain depth image view: {}", depthView.GetError() );
+        }
+        m_DepthStencilImages.ImageView = depthView.GetValue();
 
         return Common::MakeSuccess( VK_SUCCESS );
     }

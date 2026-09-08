@@ -18,8 +18,21 @@ namespace Desert::Graphic
         {
             // The asset's metadata carries the FULL path (registration owns path composition) — the
             // engine draw layer never glues directory prefixes onto asset paths.
-            std::shared_ptr<Texture2D> imagePanorama =
-                 Texture2D::Create( { true }, skyboxAsset->GetMetadata().Filepath ).ExtractValue();
+            // A PANORAMA THAT DID NOT LOAD USED TO BE DEREFERENCED ON THE NEXT LINE. `ExtractValue()`
+            // on a failed Create handed back a null shared_ptr in silence, and
+            // `imagePanorama->GetImageHandle()` below is an unconditional dereference — so a skybox
+            // whose .hdr was missing, unreadable or malformed took the process down rather than
+            // leaving the scene without an environment. An empty Environment is a shape this function
+            // already produces (the non-.hdr return below), so the caller needs nothing new.
+            auto panorama = Texture2D::Create( { true }, skyboxAsset->GetMetadata().Filepath );
+            if ( !panorama )
+            {
+                LOG_ERROR( "[SceneEnvironment] the skybox panorama '{}' did not load, so this scene gets "
+                           "NO environment (no radiance, no irradiance, no prefiltered specular): {}",
+                           skyboxAsset->GetMetadata().Filepath.string(), panorama.GetError() );
+                return {};
+            }
+            std::shared_ptr<Texture2D> imagePanorama = panorama.ExtractValue();
 
             auto* imageService = Runtime::ResourceRegistry::GetImageService();
 
