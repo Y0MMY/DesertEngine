@@ -59,6 +59,11 @@ namespace Desert::Editor::Control
         return m_ClientFd >= 0;
     }
 
+    uint64_t ControlSocket::ClientGeneration() const noexcept
+    {
+        return m_ClientGeneration;
+    }
+
     bool ControlSocket::HasUnsentOutput() const noexcept
     {
         return !m_Outgoing.empty();
@@ -95,6 +100,10 @@ namespace Desert::Editor::Control
     std::optional<std::string> ControlSocket::PollRequestLine()
     {
         return std::nullopt;
+    }
+
+    void ControlSocket::ServiceConnection()
+    {
     }
 
     void ControlSocket::SendResponseLine( const std::string& /*line*/ )
@@ -325,11 +334,19 @@ namespace Desert::Editor::Control
         }
     }
 
-    std::optional<std::string> ControlSocket::PollRequestLine()
+    void ControlSocket::ServiceConnection()
     {
         if ( m_ListenFd < 0 )
-            return std::nullopt;
+            return;
 
+        // SPLIT OUT OF PollRequestLine BECAUSE THE EDITOR NOW HAS A REASON TO DO THIS AND NOT READ.
+        //
+        // A request can be parked for a whole boot while the editor comes up (FrameGate's readiness wait),
+        // and during that time it must not read a SECOND request — one command in flight is the whole of
+        // the ordering guarantee. But it must still notice that the asker has GONE, and a disconnected
+        // peer is only detected by reading from it. Without this the editor would hold the channel for a
+        // client that is no longer there, refusing every new one until the wait finished on its own.
+        //
         // THE CLIENT WE HAVE IS SERVICED BEFORE A NEW ONE IS JUDGED, and the order is not cosmetic.
         //
         // A disconnected peer is only noticed by READING from it — recv returning zero is the whole of the
@@ -373,15 +390,26 @@ namespace Desert::Editor::Control
             (void)::setsockopt( incoming, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof( on ) );
 #endif
             m_ClientFd = incoming;
+            // A NEW CONNECTION IS A NEW GENERATION, and this is the line that lets a caller tell a
+            // reconnect from a connection that never went away. Without it a request parked across a
+            // disconnect-then-accept — which happens inside ONE service call, since the accept loop runs
+            // right after the read that noticed the loss — would have its reply written to whoever took
+            // the freed slot. Measured: a 311-command answer to client A, delivered to client B.
+            ++m_ClientGeneration;
             m_Incoming.clear();
             m_Outgoing.clear();
-            LOG_INFO( "[Control] client connected." );
+            LOG_INFO( "[Control] client connected (generation {}).", m_ClientGeneration );
         }
 
         // A client accepted just above has not been read from yet. Reading here rather than waiting for
         // the next poll is what makes a request answerable on the frame it arrived on; without it every
         // command would cost an extra frame for no reason anybody could see.
         DrainIncoming();
+    }
+
+    std::optional<std::string> ControlSocket::PollRequestLine()
+    {
+        ServiceConnection();
 
         if ( m_ClientFd < 0 )
             return std::nullopt;

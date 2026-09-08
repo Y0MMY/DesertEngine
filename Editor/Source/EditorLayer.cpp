@@ -1411,6 +1411,15 @@ namespace Desert::Editor
         // "the command the next settled frame proves".
         if ( m_ControlInFlight )
         {
+            // THE CONNECTION IS STILL SERVICED, THE SOCKET IS JUST NOT READ FROM. A second request must
+            // not be taken while one is in flight — that is the whole of the ordering guarantee — but a
+            // readiness wait can last a whole boot, and a peer that has GONE is only ever detected by
+            // reading from it. Without this the editor would hold the channel open for a client that is no
+            // longer there and refuse every new one until the wait ended by itself.
+            m_ControlSocket.ServiceConnection();
+            if ( AbandonControlRequestIfItsAskerIsGone() )
+                return;
+
             // ONE STATE MEANS ONE THING: a request in flight with an IDLE gate is a request the readiness
             // wait has just released and that has not run yet. Every other combination clears itself in
             // OnFramePresented, so this is the only way to be here. Running it at the top of OnUpdate and
@@ -1462,7 +1471,8 @@ namespace Desert::Editor
         {
             LOG_INFO( "[Control] request {} is waiting for the editor to finish coming up: {}.", request.Id,
                       m_FrameQuiescence.Describe() );
-            m_ControlInFlight = request;
+            m_ControlInFlight       = request;
+            m_ControlInFlightClient = m_ControlSocket.ClientGeneration();
             m_ControlGate.ArmForReadiness( m_FrameIndex );
             return;
         }
@@ -1510,7 +1520,40 @@ namespace Desert::Editor
 
         m_ControlInFlight     = request;
         m_ControlPendingReply = std::move( response );
+        m_ControlInFlightClient = m_ControlSocket.ClientGeneration();
         m_ControlGate.ArmAfterExecution( m_FrameIndex );
+    }
+
+    /**
+     * @brief Is the connection that asked still the connection on the other end? Abandon the request if
+     *        not, and say whether it did.
+     *
+     * A REPLY MUST REACH THE CLIENT THAT ASKED FOR IT, and "somebody is connected" does not say that.
+     * Measured while building the readiness wait: client A parked a `commands` during the boot and was
+     * killed; the editor noticed the loss and, in the SAME service call, accepted client B into the freed
+     * slot — the accept loop runs immediately after the read that detects a disconnect. HasClient() was
+     * true again, the parked request went on, and A's answer of 311 commands was written to B's socket.
+     * B had also sent id 1, so the reply was indistinguishable from its own at both ends.
+     *
+     * The generation is what makes the question answerable. Nothing is sent to the vanished client — there
+     * is nobody to tell — and nothing is sent to its successor either, which is the whole point.
+     */
+    bool EditorLayer::AbandonControlRequestIfItsAskerIsGone()
+    {
+        if ( !m_ControlInFlight )
+            return false;
+        if ( m_ControlSocket.HasClient() && m_ControlSocket.ClientGeneration() == m_ControlInFlightClient )
+            return false;
+
+        LOG_INFO( "[Control] the client that asked for request {} is gone (generation {} -> {}); abandoning "
+                  "it unanswered rather than replying to whoever holds the channel now.",
+                  m_ControlInFlight->Id, m_ControlInFlightClient, m_ControlSocket.ClientGeneration() );
+
+        m_ControlGate.Disarm();
+        m_ControlInFlight.reset();
+        m_ControlPendingReply.reset();
+        m_ControlInFlightClient = 0;
+        return true;
     }
 
     void EditorLayer::SampleFrameQuiescence()
@@ -1550,6 +1593,12 @@ namespace Desert::Editor
         }
 
         if ( !m_ControlInFlight )
+            return;
+
+        // A reply must reach the client that ASKED. Checked here as well as in ServiceControlChannel
+        // because a shot's capture and its answer both happen on this side of the frame, and writing
+        // either to a successor connection would hand one client another's picture.
+        if ( AbandonControlRequestIfItsAskerIsGone() )
             return;
 
         // WHICH OF THE TWO WAITS this frame is being judged for, sampled BEFORE the verdict: a discharge

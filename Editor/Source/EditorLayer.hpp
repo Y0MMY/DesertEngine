@@ -125,6 +125,9 @@ namespace Desert::Editor
         // it. THE ONLY place a control request is run: there are two ways to arrive at one — read off the
         // socket, or released by the readiness gate several frames later — and one way to run it.
         void RunControlRequest( const Control::Request& request );
+        // Drop an in-flight request whose CONNECTION has gone, rather than answering its successor. True
+        // when it did. See the definition: a reply of 311 commands was measured reaching the wrong client.
+        [[nodiscard]] bool AbandonControlRequestIfItsAskerIsGone();
         // Sampled after the deferred queues have drained and BEFORE the scene is rendered — "was anything
         // outstanding while this frame was being made". Judged later, by the gate, at OnFramePresented.
         // Also called once at the end of OnAttach: an unsampled census must not read as a settled editor.
@@ -577,6 +580,12 @@ namespace Desert::Editor
         // request parked without its reply would have to be re-run to produce one.
         std::optional<Control::Request>  m_ControlInFlight;
         std::optional<Control::Response> m_ControlPendingReply;
+
+        // WHICH CONNECTION asked for it. Not "was somebody connected": the editor notices a disconnect and
+        // accepts the next client in the SAME service call, so a request parked across that gap would have
+        // its reply written to a stranger. Measured — a 311-command answer delivered to the wrong client,
+        // with an id that matched because both had sent 1.
+        uint64_t m_ControlInFlightClient = 0;
 
         // The outstanding work sampled while THIS frame was being built. Not read at the moment the gate
         // judges it: by then the answer has moved on, and the question is about the picture.

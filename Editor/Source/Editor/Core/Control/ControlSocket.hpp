@@ -2,6 +2,7 @@
 
 #include <Common/Core/ResultStr.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -53,6 +54,21 @@ namespace Desert::Editor::Control
         [[nodiscard]] bool HasClient() const noexcept;
 
         /**
+         * @brief WHICH CONNECTION IS ON THE OTHER END — a number that changes on every accept.
+         *
+         * NOT "is somebody connected", and the difference is a reply delivered to the wrong client.
+         * Measured while building the readiness wait: client A parked a `commands` during the boot and was
+         * killed; the editor noticed the disconnect and, in the SAME service call, accepted client B into
+         * the freed slot. `HasClient()` was true again, the parked request went on, and A's answer — 311
+         * commands — was written to B's socket. B had sent id 1 as well, so the reply looked entirely
+         * correct at both ends.
+         *
+         * A generation makes "the asker is still there" answerable, which "somebody is there" is not. The
+         * editor records it when it parks a request and abandons the request if it has moved.
+         */
+        [[nodiscard]] uint64_t ClientGeneration() const noexcept;
+
+        /**
          * @brief Accept a waiting connection, flush pending output, and return ONE complete request line
          *        if a whole one has arrived. Never blocks.
          *
@@ -61,6 +77,18 @@ namespace Desert::Editor::Control
          * the client's hands. Bytes already received stay buffered and are offered on a later poll.
          */
         [[nodiscard]] std::optional<std::string> PollRequestLine();
+
+        /**
+         * @brief Flush, accept, and NOTICE A CLIENT THAT HAS GONE — without consuming a request.
+         *
+         * PollRequestLine's own first half. It is separate because the editor now has a reason to do this
+         * and NOT read: a request can be parked for a whole boot while the editor comes up (FrameGate's
+         * readiness wait), during which reading a second request would hand the ordering guarantee to the
+         * client. It must still see the asker disconnect — a peer that has gone is only detected by
+         * reading from it — or it would hold the channel for nobody and refuse every new client until the
+         * wait ended by itself. Ask HasClient() afterwards.
+         */
+        void ServiceConnection();
 
         /// Queue one response line. Written on this call if the socket takes it, on a later poll if not —
         /// a full send buffer must not block the editor's frame.
@@ -83,6 +111,9 @@ namespace Desert::Editor::Control
         // and <sys/socket.h> in a header that also sees windows.h is a fight nobody needs.
         int         m_ListenFd = -1;
         int         m_ClientFd = -1;
+        // Bumped on every accept. Zero means "nobody has ever connected", which no live connection can be,
+        // so a caller that recorded a generation before there was a client cannot match a later one.
+        uint64_t    m_ClientGeneration = 0;
         std::string m_Path;
         std::string m_Incoming; ///< bytes received, not yet a complete line
         std::string m_Outgoing; ///< bytes to send that the socket has not taken yet

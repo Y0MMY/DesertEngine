@@ -392,6 +392,142 @@ TEST( ControlTransport, AnIdlePollKeepsTheClient )
     socket.Close();
 }
 
+// ── 7. WHICH CONNECTION IS ON THE OTHER END, AND WHY "SOMEBODY IS" IS NOT THE SAME QUESTION ────────
+//
+// A6-1 gave the channel a wait that can last a whole boot: a request that arrives before the editor has
+// read the project is PARKED rather than answered from a half-built one. That turned a four-second window
+// into a thirty-second one, and it is what made the following reachable.
+//
+// MEASURED ON THE REAL EDITOR. Client A parked a `commands` during the boot and was killed. The editor
+// noticed the disconnect and, in the SAME service call, accepted client B into the freed slot — the accept
+// loop runs immediately after the read that detects a loss. `HasClient()` was true again, the parked
+// request went on, and A's answer of 311 commands was written to B's socket. Both had sent id 1, so the
+// reply was indistinguishable from B's own at both ends: a completely convincing answer to a question
+// nobody asked.
+//
+// So the transport carries a GENERATION. Not "is somebody connected" — that was true throughout — but
+// "is it the SAME somebody".
+
+TEST( ControlTransport, EveryAcceptedConnectionIsANewGeneration )
+{
+    const std::string path = TempSocketPath( "generation" );
+    ::unlink( path.c_str() );
+
+    ControlSocket socket;
+    ASSERT_TRUE( socket.Listen( path ).IsSuccess() );
+
+    // Before anyone has ever connected. Zero cannot be a live connection's generation, so a caller that
+    // recorded one here could never mistake a later client for it.
+    EXPECT_EQ( socket.ClientGeneration(), 0u );
+
+    uint64_t previous = 0;
+    for ( int i = 0; i < 4; ++i )
+    {
+        Client client( path );
+        ASSERT_TRUE( client.Connected() ) << "connection " << i;
+        client.Send( R"({"id":1,"op":"state"})" );
+        ASSERT_TRUE( socket.PollRequestLine().has_value() ) << "connection " << i;
+
+        EXPECT_GT( socket.ClientGeneration(), previous ) << "connection " << i << " reused a generation";
+        previous = socket.ClientGeneration();
+
+        socket.SendResponseLine( R"({"id":1,"ok":true})" );
+        (void)client.ReadLine();
+    }
+
+    socket.Close();
+}
+
+// AN IDLE CLIENT KEEPS ITS GENERATION. The whole value of the number is that it moves ONLY on a new
+// connection: one that drifted per poll would abandon every request that waited a frame, which is every
+// request the channel makes a promise about.
+TEST( ControlTransport, AGenerationDoesNotMoveWhileOneClientStays )
+{
+    const std::string path = TempSocketPath( "generation-stable" );
+    ::unlink( path.c_str() );
+
+    ControlSocket socket;
+    ASSERT_TRUE( socket.Listen( path ).IsSuccess() );
+
+    Client client( path );
+    ASSERT_TRUE( client.Connected() );
+    (void)socket.PollRequestLine(); // accept
+    ASSERT_TRUE( socket.HasClient() );
+
+    const uint64_t generation = socket.ClientGeneration();
+    for ( int i = 0; i < 10; ++i )
+    {
+        socket.ServiceConnection();
+        EXPECT_EQ( socket.ClientGeneration(), generation ) << "poll " << i;
+    }
+
+    socket.Close();
+}
+
+// THE DEFECT, IN ITS OWN SHAPE. The first client goes away and the second arrives; `HasClient()` says yes
+// both before and after, and only the generation distinguishes them. A caller holding the old number is
+// what stops one client's answer reaching another's socket.
+TEST( ControlTransport, AReplacementClientIsDistinguishableFromTheOneItReplaced )
+{
+    const std::string path = TempSocketPath( "generation-swap" );
+    ::unlink( path.c_str() );
+
+    ControlSocket socket;
+    ASSERT_TRUE( socket.Listen( path ).IsSuccess() );
+
+    uint64_t asker = 0;
+    {
+        Client first( path );
+        ASSERT_TRUE( first.Connected() );
+        first.Send( R"({"id":1,"op":"commands"})" );
+        ASSERT_TRUE( socket.PollRequestLine().has_value() );
+        ASSERT_TRUE( socket.HasClient() );
+        asker = socket.ClientGeneration();
+        // ...and the reply is NOT sent: this is a request parked for the readiness wait.
+    } // the asker goes away, exactly as a client killed mid-wait does
+
+    Client second( path );
+    ASSERT_TRUE( second.Connected() );
+
+    // ONE service call, which is where the loss and the accept both happen. This is the call that used to
+    // leave the editor believing its asker was still there.
+    socket.ServiceConnection();
+
+    EXPECT_TRUE( socket.HasClient() ) << "the question 'is somebody connected' answers YES here, which is "
+                                         "exactly why it is the wrong question";
+    EXPECT_NE( socket.ClientGeneration(), asker )
+         << "the parked request's reply would have been written to a client that never asked for it";
+
+    socket.Close();
+}
+
+// ServiceConnection does everything PollRequestLine's first half does and takes NO request. The editor
+// needs that while a request is in flight: reading a second one would hand the channel's ordering
+// guarantee to whoever wrote the client, but not looking at all leaves it holding a dead connection.
+TEST( ControlTransport, ServicingTheConnectionDoesNotConsumeARequest )
+{
+    const std::string path = TempSocketPath( "service-only" );
+    ::unlink( path.c_str() );
+
+    ControlSocket socket;
+    ASSERT_TRUE( socket.Listen( path ).IsSuccess() );
+
+    Client client( path );
+    ASSERT_TRUE( client.Connected() );
+    client.Send( R"({"id":7,"op":"state"})" );
+
+    for ( int i = 0; i < 5; ++i )
+        socket.ServiceConnection();
+    EXPECT_TRUE( socket.HasClient() );
+
+    // Still there, whole, and offered on the poll that does ask for it.
+    const auto line = socket.PollRequestLine();
+    ASSERT_TRUE( line.has_value() ) << "servicing the connection swallowed the request";
+    EXPECT_EQ( *line, R"({"id":7,"op":"state"})" );
+
+    socket.Close();
+}
+
 #endif // DESERT_PLATFORM_WINDOWS
 
 int main( int argc, char** argv )
