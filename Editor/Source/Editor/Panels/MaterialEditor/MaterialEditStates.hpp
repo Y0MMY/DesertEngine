@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -497,11 +498,34 @@ namespace Desert::Editor::MaterialEdit
 
     // ── THE PARAMETER TABLE'S GROUPS ───────────────────────────────────────────────────────────────────
 
+    /// The name the hoisted group is drawn under. ONE definition, because the window prints it and the
+    /// census reports it as `group`, and a second spelling would make a client's filter miss half the rows.
+    inline constexpr const char* kInputsGroupName = "Inputs";
+
+    /// WHAT KIND OF GROUP THIS IS, because three of them exist and only one belongs to the shader author.
+    /// Told apart by a field rather than by inspecting the name, so a category somebody literally calls
+    /// "Inputs" cannot be mistaken for the hoisted one.
+    enum class ParameterGroupKind : uint8_t
+    {
+        /// The material's own ASSET REFERENCES, hoisted to the front. Not one of the author's stages.
+        Inputs,
+
+        /// A `Category` the shader author wrote. Numbered, in the order the file declares them.
+        Authored,
+
+        /// Params that declare no Category at all. Drawn last, under a heading that says so.
+        Uncategorised,
+    };
+
     /// ONE GROUP of the parameter table: a `Category` the shader author wrote, and the params carrying it.
     struct ParameterGroup
     {
-        /// The author's category text, verbatim. EMPTY means these params declare no Category at all — a
-        /// group of its own rather than a silent default; see PlanParameterGroups.
+        /// Which of the three this is. Read this rather than testing @ref Category against a string.
+        ParameterGroupKind Kind = ParameterGroupKind::Authored;
+
+        /// The author's category text, verbatim; "Inputs" for the hoisted group. EMPTY means these params
+        /// declare no Category at all — a group of its own rather than a silent default; see
+        /// PlanParameterGroups.
         std::string Category;
 
         /// Indices into ShaderProgramMeta::Params, in declaration order within the group. INDICES AND NOT
@@ -510,8 +534,8 @@ namespace Desert::Editor::MaterialEdit
         std::vector<std::size_t> Params;
 
         /// Where this group sits in the author's own work order, 0-based — the number the window prints
-        /// ("00 · Cloud Types"). ABSENT for the uncategorised group, which is not a stage of anyone's order
-        /// and must not be given a place in it.
+        /// ("00 · Cloud Types"). ABSENT for Inputs and for the uncategorised group, neither of which is a
+        /// stage of anyone's order and neither of which may take a place in it.
         std::optional<std::size_t> Ordinal;
     };
 
@@ -549,15 +573,53 @@ namespace Desert::Editor::MaterialEdit
     {
         std::vector<ParameterGroup> groups;
 
+        // THE MATERIAL'S OWN INPUTS, HOISTED TO THE FRONT — the other half of the shape the owner picked.
+        //
+        // An ASSET REFERENCE is not a value an artist dials; it is a dependency on another document, and
+        // "which clouds is this sky made of" is the question this whole task exists to answer. Gathering
+        // them at the top is what variant A drew and what the owner chose: the four cloud type slots read
+        // as a roster there, instead of as four combo boxes among thirty scalars.
+        //
+        // MEMBERSHIP IS DERIVED, exactly as the order is: a param belongs here IF IT IS AN ASSET REFERENCE
+        // (ShaderParam::IsAssetRef, which is the schema's own AssetKind field). A hand-written list of
+        // parameter names would be the second census the rest of this file spends its comments refusing,
+        // and a fifth cloud type slot would silently fail to appear in it.
+        //
+        // TEXTURES ARE NOT HOISTED, AND THAT IS THE LINE. A texture is bound to a slot of THIS material and
+        // authored nowhere else — it is a value. An asset reference is a link to a document with a window of
+        // its own. StaticMeshPBR's author already grouped its textures under "Textures"; hoisting them would
+        // be this code re-deciding a grouping that was made correctly, which is the thing it must not do.
         for ( std::size_t index = 0; index < schema.Params.size(); ++index )
         {
+            if ( !schema.Params[index].IsAssetRef() )
+                continue;
+
+            if ( groups.empty() )
+            {
+                ParameterGroup inputs;
+                inputs.Kind     = ParameterGroupKind::Inputs;
+                inputs.Category = kInputsGroupName;
+                groups.push_back( std::move( inputs ) );
+            }
+            groups.front().Params.push_back( index );
+        }
+
+        for ( std::size_t index = 0; index < schema.Params.size(); ++index )
+        {
+            // Already hoisted. Drawing it in both places would be two controls over one value, which is the
+            // duplicated-state defect this codebase removes rather than adds.
+            if ( schema.Params[index].IsAssetRef() )
+                continue;
+
             const std::string& category = schema.Params[index].Category;
 
-            auto group = std::find_if( groups.begin(), groups.end(),
-                                       [&category]( const ParameterGroup& g ) { return g.Category == category; } );
+            auto group =
+                 std::find_if( groups.begin(), groups.end(), [&category]( const ParameterGroup& g )
+                               { return g.Kind != ParameterGroupKind::Inputs && g.Category == category; } );
             if ( group == groups.end() )
             {
                 ParameterGroup fresh;
+                fresh.Kind = category.empty() ? ParameterGroupKind::Uncategorised : ParameterGroupKind::Authored;
                 fresh.Category = category;
                 groups.push_back( std::move( fresh ) );
                 group = std::prev( groups.end() );
@@ -565,34 +627,41 @@ namespace Desert::Editor::MaterialEdit
             group->Params.push_back( index );
         }
 
+        // A GROUP THE HOIST EMPTIED IS NOT DRAWN. CloudRaymarch's "Cloud Types" category is nothing but its
+        // four type slots, so after the hoist it has no rows left. A heading with nothing under it reads as
+        // a section that failed to load, not as one whose contents moved somewhere better.
+        groups.erase( std::remove_if( groups.begin(), groups.end(),
+                                      []( const ParameterGroup& g ) { return g.Params.empty(); } ),
+                      groups.end() );
+
         // The uncategorised group goes LAST, wherever its first member happened to be declared. Two reasons,
         // and the second is the one that matters: it is not a stage of the author's order, so it must not
         // take a number in the middle of it; and moving it to the end means a shader that categorised
         // NOTHING produces exactly one group, which is what lets the window reproduce the old flat table
         // without a special case in the drawing code.
-        const auto unnamed = std::find_if( groups.begin(), groups.end(),
-                                           []( const ParameterGroup& g ) { return g.Category.empty(); } );
+        const auto unnamed = std::find_if( groups.begin(), groups.end(), []( const ParameterGroup& g )
+                                           { return g.Kind == ParameterGroupKind::Uncategorised; } );
         if ( unnamed != groups.end() && std::next( unnamed ) != groups.end() )
             std::rotate( unnamed, std::next( unnamed ), groups.end() );
 
         std::size_t ordinal = 0;
         for ( ParameterGroup& group : groups )
         {
-            if ( !group.Category.empty() )
+            if ( group.Kind == ParameterGroupKind::Authored )
                 group.Ordinal = ordinal++;
         }
 
         return groups;
     }
 
-    /// Does this plan divide the table at all? FALSE for a shader that categorised nothing — one group, with
-    /// no name — which the window draws as the single flat table it drew before groups existed. The
-    /// distinction is the whole point: an undivided table is what "this shader has no categories" looks
-    /// like, and a table under one heading called something would be this code inventing a fact.
+    /// Does this plan divide the table at all? FALSE for a shader with no asset references that categorised
+    /// nothing — one group, with no name — which the window draws as the single flat table it drew before
+    /// groups existed. The distinction is the whole point: an undivided table is what "this shader has no
+    /// categories" looks like, and a table under one heading called something would be inventing a fact.
     [[nodiscard]] inline bool HasNamedGroups( const std::vector<ParameterGroup>& groups )
     {
-        return std::any_of( groups.begin(), groups.end(),
-                            []( const ParameterGroup& group ) { return !group.Category.empty(); } );
+        return std::any_of( groups.begin(), groups.end(), []( const ParameterGroup& group )
+                            { return group.Kind != ParameterGroupKind::Uncategorised; } );
     }
 
     /// EVERY property the document offers, in the order the WINDOW DRAWS THEM — which since the parameter

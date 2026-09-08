@@ -456,13 +456,20 @@ TEST( MaterialEditStates, TheCensusIsExactlyTheSchemaAndCarriesWhatTheWindowShow
 
     const auto census = MaterialEdit::DescribeProperties( schema, data, nullptr, /*isInstance=*/false );
 
-    // EVERY declared property is present, in declaration order -- which is the order the window draws its
-    // rows in, so a client walking this list and a person reading the panel walk the same rows.
+    // EVERY declared property is present, in the order THE WINDOW DRAWS ITS ROWS -- so a client walking
+    // this list and a person reading the panel walk the same rows.
+    //
+    // That order stopped being declaration order when the table gained groups: the asset reference is
+    // hoisted into the leading "Inputs" group, and the three values follow in their own. This assertion
+    // used to read RoughnessFactor, AlbedoColor, AlbedoMap, CloudType, and updating it is the point rather
+    // than a cost -- had the census kept the old order while the window moved, this suite would have gone
+    // on passing while the relation it exists to protect was broken.
     ASSERT_EQ( census.size(), 4u );
-    EXPECT_EQ( census[0].Name, "RoughnessFactor" );
-    EXPECT_EQ( census[1].Name, "AlbedoColor" );
-    EXPECT_EQ( census[2].Name, "AlbedoMap" );
-    EXPECT_EQ( census[3].Name, "CloudType" );
+    EXPECT_EQ( census[0].Name, "CloudType" ) << "an asset reference is an input and comes first";
+    EXPECT_EQ( census[0].Group, "Inputs" );
+    EXPECT_EQ( census[1].Name, "RoughnessFactor" );
+    EXPECT_EQ( census[2].Name, "AlbedoColor" );
+    EXPECT_EQ( census[3].Name, "AlbedoMap" ) << "a texture is a value and keeps its declared place";
 
     // The value the WINDOW is showing: this material's own override where it has one...
     const auto* roughness = Find( census, "RoughnessFactor" );
@@ -907,18 +914,18 @@ TEST( MaterialEditStates, GroupsAreTheShadersOwnCategoriesInTheOrderTheFileDecla
     seed.Category                 = "Weather";
     Formats::ShaderParam albedo   = Ranged( "ScatteringAlbedo", 0.0f, 1.0f, 0.98f );
     albedo.Category               = "Lighting";
-    Formats::ShaderParam type1    = AssetRef( "CloudType1", "CloudTypeAsset" );
-    type1.Category                = "Cloud Types";
+    Formats::ShaderParam gloss    = Ranged( "Glossiness", 0.0f, 1.0f, 0.5f );
+    gloss.Category                = "Detail";
 
-    // Declared Weather, Weather, Lighting, Cloud Types -- so the GROUPS come out in that order of first
+    // Declared Weather, Weather, Lighting, Detail -- so the GROUPS come out in that order of first
     // appearance, and their numbers with them. No table of preferred category names exists anywhere for
     // this to disagree with, which is the whole design: a second list is what falls behind.
-    const auto groups = MaterialEdit::PlanParameterGroups( SchemaOf( { coverage, seed, albedo, type1 } ) );
+    const auto groups = MaterialEdit::PlanParameterGroups( SchemaOf( { coverage, seed, albedo, gloss } ) );
 
     ASSERT_EQ( groups.size(), 3u );
     EXPECT_EQ( groups[0].Category, "Weather" );
     EXPECT_EQ( groups[1].Category, "Lighting" );
-    EXPECT_EQ( groups[2].Category, "Cloud Types" );
+    EXPECT_EQ( groups[2].Category, "Detail" );
 
     ASSERT_TRUE( groups[0].Ordinal.has_value() );
     EXPECT_EQ( *groups[0].Ordinal, 0u );
@@ -927,6 +934,65 @@ TEST( MaterialEditStates, GroupsAreTheShadersOwnCategoriesInTheOrderTheFileDecla
 
     EXPECT_EQ( groups[0].Params, ( std::vector<std::size_t>{ 0u, 1u } ) );
     EXPECT_TRUE( MaterialEdit::HasNamedGroups( groups ) );
+}
+
+TEST( MaterialEditStates, AssetReferencesAreHoistedIntoOneInputsGroupInFrontOfTheAuthorsStages )
+{
+    Formats::ShaderParam type1    = AssetRef( "CloudType1", "CloudTypeAsset" );
+    type1.Category                = "Cloud Types";
+    Formats::ShaderParam type2    = AssetRef( "CloudType2", "CloudTypeAsset" );
+    type2.Category                = "Cloud Types";
+    Formats::ShaderParam coverage = Ranged( "Coverage", 0.0f, 1.0f, 0.45f );
+    coverage.Category             = "Weather";
+    Formats::ShaderParam pattern  = AssetRef( "LayoutPattern", "CloudLayoutAsset" );
+    pattern.Category              = "Layout";
+    Formats::ShaderParam repeats  = Ranged( "LayoutRepeats", 1.0f, 16.0f, 1.0f );
+    repeats.Category              = "Layout";
+
+    const auto groups =
+         MaterialEdit::PlanParameterGroups( SchemaOf( { type1, type2, coverage, pattern, repeats } ) );
+
+    // The dependencies come FIRST and TOGETHER -- "which clouds is this sky made of" answered in one place,
+    // which is the shape the owner chose. Membership is IsAssetRef and nothing else, so a CloudType5 added
+    // to the shader joins them without anybody editing a list here.
+    ASSERT_EQ( groups.size(), 3u );
+    EXPECT_EQ( groups[0].Kind, MaterialEdit::ParameterGroupKind::Inputs );
+    EXPECT_EQ( groups[0].Category, "Inputs" );
+    EXPECT_FALSE( groups[0].Ordinal.has_value() ) << "the numbers belong to the author's stages, not to this";
+    EXPECT_EQ( groups[0].Params, ( std::vector<std::size_t>{ 0u, 1u, 3u } ) )
+         << "the two types and the layout, in declaration order";
+
+    // "Cloud Types" was nothing BUT its two slots, so the hoist emptied it and it is not drawn at all -- a
+    // heading with nothing under it reads as a section that failed to load. "Layout" keeps its scalar.
+    EXPECT_EQ( groups[1].Category, "Weather" );
+    EXPECT_EQ( groups[2].Category, "Layout" );
+    EXPECT_EQ( groups[2].Params, ( std::vector<std::size_t>{ 4u } ) );
+
+    // And the numbering restarts at the first surviving authored group, with no hole where Cloud Types was.
+    EXPECT_EQ( *groups[1].Ordinal, 0u );
+    EXPECT_EQ( *groups[2].Ordinal, 1u );
+}
+
+TEST( MaterialEditStates, ATextureIsNotAnInputAndStaysInTheGroupItsAuthorChose )
+{
+    // The line between the two: an asset reference links to a document with its own window, a texture is a
+    // value bound to this material. StaticMeshPBR's author already grouped its textures under "Textures";
+    // hoisting them would be this code overruling a grouping that was made correctly.
+    Formats::ShaderParam albedoMap = Texture( "AlbedoMap" );
+    albedoMap.Category             = "Textures";
+    Formats::ShaderParam normalMap = Texture( "NormalMap" );
+    normalMap.Category             = "Textures";
+    Formats::ShaderParam tint      = Ranged( "Tint", 0.0f, 1.0f, 1.0f );
+    tint.Category                  = "Surface";
+
+    const auto groups = MaterialEdit::PlanParameterGroups( SchemaOf( { tint, albedoMap, normalMap } ) );
+
+    ASSERT_EQ( groups.size(), 2u ) << "no Inputs group at all: this shader references no documents";
+    EXPECT_EQ( groups[0].Category, "Surface" );
+    EXPECT_EQ( groups[1].Category, "Textures" );
+    EXPECT_EQ( groups[1].Params, ( std::vector<std::size_t>{ 1u, 2u } ) );
+    for ( const auto& group : groups )
+        EXPECT_NE( group.Kind, MaterialEdit::ParameterGroupKind::Inputs );
 }
 
 TEST( MaterialEditStates, MembersOfOneCategoryMeetInOneGroupEvenWhenTheFileScattersThem )

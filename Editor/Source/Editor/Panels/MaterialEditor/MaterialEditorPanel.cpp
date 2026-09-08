@@ -976,6 +976,24 @@ namespace Desert::Editor
     // existing convention and not a sixth place settings are stored (K8/K9/K10).
     static bool DrawParameterGroupHeader( const MaterialEdit::ParameterGroup& group )
     {
+        if ( group.Kind == MaterialEdit::ParameterGroupKind::Inputs )
+        {
+            // THE MATERIAL'S DEPENDENCIES, GATHERED — what the owner asked to be able to see and choose
+            // without opening each file. Unnumbered on purpose: the numbers belong to the shader author's
+            // own stages, and this group is not one of them, it is every asset reference the schema
+            // declares, pulled to the front.
+            const std::string label = std::string( MaterialEdit::kInputsGroupName ) + " (" +
+                                      std::to_string( group.Params.size() ) + ")##param_group_inputs";
+            const bool open = ImGui::CollapsingHeader( label.c_str(), ImGuiTreeNodeFlags_DefaultOpen );
+            if ( ImGui::IsItemHovered() )
+            {
+                ImGui::SetTooltip( "The other documents this material is built from - cloud types and "
+                                   "layouts. Each row opens its own editor; the sky is what they make "
+                                   "together." );
+            }
+            return open;
+        }
+
         if ( !group.Ordinal.has_value() )
         {
             // THE UNCATEGORISED GROUP, SAID OUT LOUD. These params declare no Category in the shader, and
