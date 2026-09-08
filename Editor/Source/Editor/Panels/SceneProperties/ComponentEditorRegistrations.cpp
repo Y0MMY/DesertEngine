@@ -10,6 +10,7 @@
 #include <Editor/Panels/Clouds/CloudsPanel.hpp>
 #include <Editor/Panels/Particles/ParticleEditorPanel.hpp>
 
+#include <Common/Core/AssetHandle.hpp>
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/ECS/Entity.hpp>
@@ -1500,14 +1501,19 @@ namespace
     // under the assets root by the same change, because that is where this census row says a project's
     // scripts live — and the engine tree is not one of the five trees a package is built from, so
     // nothing under it could ever have shipped with a game.
-    std::vector<std::string> ProjectScriptPaths()
+    // Returns KEYS, not paths (I9). What a slot stores is the root-tagged key
+    // `Common::AssetHandle::StableKeyForPath` mints, because a rooted path does not survive packaging —
+    // see ECS::ScriptSlot::ScriptKey. Minting it HERE, at the one place the picker turns a file into a
+    // reference, is what keeps every stored value in that form: a widget that offered paths and left the
+    // tagging to whoever assigned them would be one forgotten call site away from the old defect.
+    std::vector<std::string> ProjectScriptKeys()
     {
         std::vector<std::string> scripts;
         for ( const std::filesystem::path& file :
               Common::Utils::FileSystem::ListFilesRecursive( Common::Constants::Path::SCRIPT_PATH ) )
         {
             if ( file.extension() == ".lua" )
-                scripts.push_back( file.generic_string() );
+                scripts.push_back( Common::AssetHandle::StableKeyForPath( file ) );
         }
         // Neither half of the enumeration promises an order, and a dropdown that reshuffles between
         // sessions is one nobody can learn.
@@ -1517,14 +1523,16 @@ namespace
 
     // What to CALL a script in the dropdown. The file name alone was ambiguous the moment two folders
     // held a `Main.lua`, and the walk was recursive even before this change — so the label is the path
-    // relative to the scripts root, which is unique by construction.
-    std::string ScriptLabel( const std::string& scriptPath )
+    // relative to the scripts root, which is unique by construction. Takes a KEY and resolves it first:
+    // the label has to name a place on this machine, and the key deliberately does not.
+    std::string ScriptLabel( const std::string& scriptKey )
     {
+        const std::filesystem::path file = Common::AssetHandle::PathForStableKey( scriptKey );
+
         std::error_code   ec;
         const std::string relative =
-             std::filesystem::relative( scriptPath, Common::Constants::Path::SCRIPT_PATH, ec ).generic_string();
-        return ( ec || relative.empty() ) ? std::filesystem::path( scriptPath ).filename().generic_string()
-                                          : relative;
+             std::filesystem::relative( file, Common::Constants::Path::SCRIPT_PATH, ec ).generic_string();
+        return ( ec || relative.empty() ) ? file.filename().generic_string() : relative;
     }
 } // namespace
 
@@ -1551,20 +1559,20 @@ DESERT_REGISTER_CUSTOM_COMPONENT(
                   ImGui::PushID( static_cast<int>( i ) );
                   auto& slot = sc.Scripts[i];
 
-                  const std::string preview = slot.ScriptPath.empty()
+                  const std::string preview = slot.ScriptKey.empty()
                                                    ? "Select script..."
-                                                   : fs::path( slot.ScriptPath ).filename().string();
+                                                   : slot.ResolvedPath().filename().string();
 
                   ImGui::SetNextItemWidth( -60.0f ); // leave room for the remove button
                   if ( ImGui::BeginCombo( "##ScriptSel", preview.c_str() ) )
                   {
-                      const std::vector<std::string> scripts = ProjectScriptPaths();
+                      const std::vector<std::string> scripts = ProjectScriptKeys();
                       for ( const std::string& script : scripts )
                       {
-                          if ( ImGui::Selectable( ScriptLabel( script ).c_str(), slot.ScriptPath == script ) )
+                          if ( ImGui::Selectable( ScriptLabel( script ).c_str(), slot.ScriptKey == script ) )
                           {
-                              slot.ScriptPath = script;
-                              slot.Started    = false;
+                              slot.ScriptKey = script;
+                              slot.Started   = false;
                               slot.Properties.clear(); // re-seed from the new script's schema below
                           }
                       }
@@ -1585,8 +1593,11 @@ DESERT_REGISTER_CUSTOM_COMPONENT(
                           const std::string dropped( static_cast<const char*>( payload->Data ) );
                           if ( dropped.size() > 4 && dropped.substr( dropped.size() - 4 ) == ".lua" )
                           {
-                              slot.ScriptPath = fs::path( dropped ).generic_string();
-                              slot.Started    = false;
+                              // Through the SAME minting as the dropdown: the payload is a path the File
+                              // Explorer is standing on, and storing it verbatim is precisely how the
+                              // rooted spelling got into the three scenes I9 had to migrate.
+                              slot.ScriptKey = Common::AssetHandle::StableKeyForPath( fs::path( dropped ) );
+                              slot.Started   = false;
                               slot.Properties.clear();
                           }
                       }
@@ -1597,22 +1608,24 @@ DESERT_REGISTER_CUSTOM_COMPONENT(
                   if ( ImGui::Button( "X" ) )
                       removeIndex = static_cast<int>( i );
 
-                  if ( !slot.ScriptPath.empty() )
+                  if ( !slot.ScriptKey.empty() )
                   {
-                      ImGui::TextDisabled( "%s", slot.ScriptPath.c_str() );
+                      ImGui::TextDisabled( "%s", slot.ScriptKey.c_str() );
 
                       if ( ImGui::Button( "Reload" ) )
                           slot.Started = false; // re-read on the next Play frame (hot-reload)
 
                       // ---- Exposed properties (the script's `Properties` table) ----
                       if ( slot.Properties.empty() )
-                          slot.Properties = ::Desert::Scripting::ReadScriptProperties( slot.ScriptPath );
+                          slot.Properties = ::Desert::Scripting::ReadScriptProperties(
+                               slot.ResolvedPath().generic_string() );
 
                       ImGui::SameLine();
                       if ( ImGui::Button( "Refresh Props" ) )
                       {
                           // Re-read the schema, keeping existing values for properties that still exist.
-                          auto schema = ::Desert::Scripting::ReadScriptProperties( slot.ScriptPath );
+                          auto schema =
+                               ::Desert::Scripting::ReadScriptProperties( slot.ResolvedPath().generic_string() );
                           for ( auto& s : schema )
                           {
                               auto old = std::find_if( slot.Properties.begin(), slot.Properties.end(),

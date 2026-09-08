@@ -390,6 +390,23 @@ namespace Desert::Migration
                 }
                 out << ")";
             }
+            if ( report.ScriptRootRaised )
+            {
+                out << " scene v" << Desert::Migration::kSceneVersionDebugView << "->v"
+                    << Desert::Migration::kSceneVersionScriptRoot << " (";
+                if ( report.ScriptRoot.Slots > 0 )
+                    out << report.ScriptRoot.Slots << " script reference(s) root-tagged on "
+                        << report.ScriptRoot.Entities << " entity(ies), " << report.ScriptRoot.Empty
+                        << " of them an empty slot";
+                else
+                    out << "stamp only - no entity named a script";
+                // Named, not counted, like every step above that can refuse a value: a reference the
+                // census could not place still does not resolve in a packaged game, and the operator has
+                // to see which entity to re-point.
+                for ( const auto& name : report.ScriptRoot.UnrootedNames )
+                    out << "; NOT under a Scripts/ folder, carried over untagged: " << name;
+                out << ")";
+            }
             if ( report.RetiredKeysRaised )
             {
                 // NOT a step's own pair of numbers, unlike every line above: the retirement pass is

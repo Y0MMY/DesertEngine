@@ -104,16 +104,21 @@ namespace Desert::ECS
                 for ( uint32_t slot = 0; slot < sc.Scripts.size(); ++slot )
                 {
                     auto& script = sc.Scripts[slot];
-                    if ( script.ScriptPath.empty() )
+                    if ( script.ScriptKey.empty() )
                         continue;
 
                     if ( !script.Started )
                     {
                         script.Started = true; // set first so a load error doesn't retry-spam every frame
-                        auto loaded    = m_Engine.LoadEntityScript( id, slot, script.ScriptPath );
+                        // The KEY names the script; the PATH is what an ifstream can open, and the two
+                        // differ in a packaged game because ASSETS_PATH is remapped there. Resolved once,
+                        // here, and both the loader and its error message get the same answer - an error
+                        // naming the key would send the reader looking for a file spelled "assets:...".
+                        const std::string file = script.ResolvedPath().generic_string();
+                        auto              loaded = m_Engine.LoadEntityScript( id, slot, file );
                         if ( !loaded )
                         {
-                            LOG_ERROR( "[Script] failed to load '{}': {}", script.ScriptPath,
+                            LOG_ERROR( "[Script] failed to load '{}' (from '{}'): {}", file, script.ScriptKey,
                                        loaded.GetError() );
                             continue;
                         }
@@ -134,7 +139,7 @@ namespace Desert::ECS
                     {
                         for ( const auto& notify : anim.PendingNotifies )
                             for ( uint32_t slot = 0; slot < sc.Scripts.size(); ++slot )
-                                if ( !sc.Scripts[slot].ScriptPath.empty() && sc.Scripts[slot].Started )
+                                if ( !sc.Scripts[slot].ScriptKey.empty() && sc.Scripts[slot].Started )
                                     m_Engine.CallAnimationNotify( id, slot, notify );
                         anim.PendingNotifies.clear();
                     }
@@ -182,18 +187,21 @@ namespace Desert::ECS
                 auto& sc = view.get<ScriptComponent>( entity );
                 for ( auto& script : sc.Scripts )
                 {
-                    if ( script.ScriptPath.empty() )
+                    if ( script.ScriptKey.empty() )
                         continue;
 
+                    // The mtime is a property of the FILE, so it is probed on the resolved path; the map
+                    // is keyed on the KEY, which is the one spelling that does not change under a project
+                    // remap - two slots naming one script share a row whichever root is mounted.
                     std::error_code ec;
-                    const auto      mtime = std::filesystem::last_write_time( script.ScriptPath, ec );
+                    const auto      mtime = std::filesystem::last_write_time( script.ResolvedPath(), ec );
                     if ( ec )
                         continue;
 
-                    auto it = m_ScriptTimes.find( script.ScriptPath );
+                    auto it = m_ScriptTimes.find( script.ScriptKey );
                     if ( it == m_ScriptTimes.end() )
                     {
-                        m_ScriptTimes[script.ScriptPath] = mtime; // baseline
+                        m_ScriptTimes[script.ScriptKey] = mtime; // baseline
                         continue;
                     }
                     if ( it->second == mtime )
@@ -201,7 +209,7 @@ namespace Desert::ECS
                     it->second = mtime;
 
                     script.Started = false; // re-load + OnStart on the next frame
-                    LOG_INFO( "[HotReload] Script '{}' reloading", script.ScriptPath );
+                    LOG_INFO( "[HotReload] Script '{}' reloading", script.ScriptKey );
                 }
             }
         }

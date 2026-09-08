@@ -1009,6 +1009,35 @@ namespace Desert::Migration
                 return std::nullopt;
             return relative;
         }
+
+        // `stored` with `root`'s leading components removed, as a generic ('/') string.
+        //
+        // NO STRING MATCHING, deliberately, and that is what makes it different from
+        // RelativeToAssetsRoot above: `root` here is not a root somebody handed us to look for, it is the
+        // one Constants::Path::RootForContentPath BUILT out of this very path's own components. So the
+        // number of components to drop is already known exactly, and searching for them again would only
+        // create a second answer that could disagree with the first.
+        std::string StripRoot( const std::string& stored, const std::filesystem::path& root )
+        {
+            std::size_t drop = 0;
+            for ( const auto& part : root )
+            {
+                if ( !part.empty() && part != "." )
+                    ++drop;
+            }
+
+            std::string relative;
+            std::size_t index = 0;
+            for ( const auto& part : std::filesystem::path( stored ).lexically_normal() )
+            {
+                if ( index++ < drop )
+                    continue;
+                if ( !relative.empty() )
+                    relative += '/';
+                relative += part.generic_string();
+            }
+            return relative;
+        }
     } // namespace
 
     GravityUnitsMigrationReport MigrateGravityUnitsV8ToV9( std::optional<rfl::Generic>& settings )
@@ -1392,6 +1421,158 @@ namespace Desert::Migration
         }
 
         settings = rfl::Generic( kept );
+        return report;
+    }
+
+    ScriptRootMigrationReport MigrateScriptRootV15ToV16( std::vector<Assets::EntityData>& entities )
+    {
+        static constexpr const char* kComponentKey = "Script";
+        static constexpr const char* kSlotsKey     = "Scripts";
+        static constexpr const char* kOldKey       = "Path";      // the rooted spelling, up to v15
+        static constexpr const char* kNewKey       = "ScriptKey"; // the root-tagged key, from v16
+
+        ScriptRootMigrationReport report;
+
+        // Composed ONCE, from the runtime's own table, so this function and
+        // Common::AssetHandle::StableKeyForPath cannot come to spell the prefix differently — the whole
+        // point of the migration is that what it writes is what the engine reads back.
+        const std::string prefix = std::string( Common::AssetHandle::AssetsTag() ) + ':';
+
+        for ( auto& entity : entities )
+        {
+            const std::string tag     = entity.Tag.value_or( "Entity" );
+            const auto        payload = entity.Components.get( kComponentKey );
+            if ( !payload.has_value() )
+                continue;
+
+            const auto fields = payload.value().to_object();
+            if ( !fields.has_value() )
+            {
+                LOG_WARN( "[SceneMigration] entity '{0}': the Script payload is {1}, not an object - its "
+                          "script references could not be root-tagged and stay as they are",
+                          tag, Describe( payload.value() ) );
+                continue;
+            }
+
+            const auto named = fields.value().get( kSlotsKey );
+            if ( !named.has_value() )
+                continue; // a Script component with no slot list - nothing to rewrite
+
+            const auto rows = named.value().to_array();
+            if ( !rows.has_value() )
+            {
+                LOG_WARN( "[SceneMigration] entity '{0}': Script.Scripts is {1}, not an array - the script "
+                          "references in it are left exactly as they are",
+                          tag, Describe( named.value() ) );
+                continue;
+            }
+
+            rfl::Generic::Array slots;
+            int                 rewrittenHere = 0; // slots whose reference was re-spelled as a key
+            int                 carriedHere   = 0; // slots the census could not place, carried verbatim
+
+            for ( const auto& row : rows.value() )
+            {
+                const auto slotFields = row.to_object();
+                if ( !slotFields.has_value() )
+                {
+                    LOG_WARN( "[SceneMigration] entity '{0}': a Script slot is {1}, not an object - it is "
+                              "left exactly as it is",
+                              tag, Describe( row ) );
+                    slots.push_back( row );
+                    continue;
+                }
+
+                // Rebuilt rather than edited in place, like every step above: rfl::Object is an ordered
+                // vector of pairs with no erase and no rename, so the rename IS a rebuild. Order is
+                // otherwise preserved, which keeps an already-raised file byte-identical.
+                rfl::Generic::Object kept;
+                bool                 sawOldKey = false;
+
+                for ( const auto& [key, value] : slotFields.value() )
+                {
+                    if ( key != kOldKey )
+                    {
+                        kept[key] = value;
+                        continue;
+                    }
+
+                    sawOldKey = true;
+
+                    const auto text = value.to_string();
+                    if ( !text.has_value() )
+                    {
+                        LOG_WARN( "[SceneMigration] entity '{0}': a Script slot's {1} is {2}, not a string "
+                                  "- it is carried over under {3} unchanged and still names no script",
+                                  tag, kOldKey, Describe( value ), kNewKey );
+                        report.UnrootedNames.push_back( tag + " > Script." + kOldKey + " = " +
+                                                        Describe( value ) );
+                        ++carriedHere;
+                        kept[kNewKey] = value;
+                        continue;
+                    }
+
+                    if ( text.value().empty() )
+                    {
+                        // An empty slot names nothing. It must stay EMPTY rather than become a bare
+                        // "assets:" — ScriptSystem tests the reference for emptiness to decide whether
+                        // the slot runs at all, and a tag with nothing after it would make every unfilled
+                        // slot start trying to load the assets root.
+                        kept[kNewKey] = value;
+                        report.Empty += 1;
+                        rewrittenHere += 1;
+                        continue;
+                    }
+
+                    // The root is read out of the STORED PATH, never out of a root this function was
+                    // handed — see the header for why the v7 -> v8 step's parameter cannot work here.
+                    const auto root = Common::Constants::Path::RootForContentPath(
+                         Common::Constants::Path::ContentDir::Script, text.value() );
+                    const std::string relative = root ? StripRoot( text.value(), *root ) : std::string();
+                    if ( relative.empty() )
+                    {
+                        // Not under a `Scripts/` folder, so the census has nothing to say about it.
+                        // Carried across verbatim: PathForStableKey returns an untagged string unchanged,
+                        // so the slot behaves exactly as it did — and it is NAMED, because "exactly as it
+                        // did" includes not resolving in a packaged game.
+                        report.UnrootedNames.push_back( tag + " > Script." + kOldKey + " = " + text.value() );
+                        ++carriedHere;
+                        LOG_WARN( "[SceneMigration] entity '{0}': the script '{1}' does not lie under a "
+                                  "'{2}' folder, so there is no content root to tag it with - it is "
+                                  "carried over unchanged and will not resolve in a packaged game",
+                                  tag, text.value(), "Scripts" );
+                        kept[kNewKey] = value;
+                        continue;
+                    }
+
+                    kept[kNewKey] = rfl::Generic( prefix + relative );
+                    rewrittenHere += 1;
+                }
+
+                if ( !sawOldKey )
+                {
+                    slots.push_back( row ); // already raised, or a slot that never named a script
+                    continue;
+                }
+                slots.push_back( rfl::Generic( std::move( kept ) ) );
+            }
+
+            // Counted PER ENTITY and not off the report's own list, which accumulates across the whole
+            // scene: a single unplaceable slot early in the file would otherwise make every later entity
+            // look touched and get rewritten, and a rewrite that changes nothing is exactly the thing a
+            // second run must not do.
+            if ( rewrittenHere == 0 && carriedHere == 0 )
+                continue; // already raised, or no slot named a script - leave the tree byte-identical
+
+            rfl::Generic::Object component;
+            for ( const auto& [key, value] : fields.value() )
+                component[key] = ( key == kSlotsKey ) ? rfl::Generic( slots ) : value;
+
+            entity.Components[kComponentKey] = rfl::Generic( std::move( component ) );
+            report.Entities += 1;
+            report.Slots += rewrittenHere;
+        }
+
         return report;
     }
 
@@ -1888,6 +2069,14 @@ namespace Desert::Migration
         {
             report.DebugViewRaised = true;
             report.DebugView       = MigrateDebugViewV12ToV13( scene.Settings );
+        }
+
+        // Touches only "Script" payloads, which no step above reads or writes, so it is independent of
+        // all of them and sits here because it is newest.
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionScriptRoot )
+        {
+            report.ScriptRootRaised = true;
+            report.ScriptRoot       = MigrateScriptRootV15ToV16( scene.Entities );
         }
 
         // LAST, and it has to be: every step above may WRITE keys, and this one is the statement of which

@@ -115,7 +115,7 @@ namespace Desert::Core::Serialize
         }
 
         // ScriptComponent has no reflected data block (reflection can't do std::string/variant lists), so it
-        // gets a manual serializer via a reflect-cpp mirror: the .lua path + the exposed-property values.
+        // gets a manual serializer via a reflect-cpp mirror: the .lua reference + the exposed-property values.
         struct ScriptPropSer
         {
             std::string Name;
@@ -124,9 +124,14 @@ namespace Desert::Core::Serialize
             bool        Bool   = false;
             std::string Str;
         };
+        // `ScriptKey` and not `Path`, because the value stopped being a path at scene v16 (I9): it is the
+        // root-tagged key ScriptSlot documents. Renaming the JSON field with the value is the point — a
+        // key called `Path` reads as something you may hand to std::filesystem, which is exactly the
+        // mistake the migration exists to undo, and the loader refuses anything below v16 anyway so there
+        // is no file in which both spellings can be present.
         struct ScriptSlotSer
         {
-            std::string                Path;
+            std::string                ScriptKey;
             std::vector<ScriptPropSer> Props;
         };
         // One entity runs a LIST of scripts (single-script legacy format removed).
@@ -166,7 +171,7 @@ namespace Desert::Core::Serialize
                 for ( const auto& slot : sc.Scripts )
                 {
                     ScriptSlotSer ss;
-                    ss.Path = slot.ScriptPath;
+                    ss.ScriptKey = slot.ScriptKey;
                     for ( const auto& p : slot.Properties )
                         ss.Props.push_back( { p.Name, static_cast<int>( p.Type ), p.Number, p.Bool, p.Str } );
                     slots.push_back( std::move( ss ) );
@@ -188,7 +193,7 @@ namespace Desert::Core::Serialize
                     for ( const auto& ss : *ser->Scripts )
                     {
                         ECS::ScriptSlot slot;
-                        slot.ScriptPath = ss.Path;
+                        slot.ScriptKey  = ss.ScriptKey;
                         slot.Started    = false;
                         slot.Properties = loadProps( ss.Props );
                         sc.Scripts.push_back( std::move( slot ) );

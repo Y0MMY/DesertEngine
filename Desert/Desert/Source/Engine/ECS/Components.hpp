@@ -2,7 +2,10 @@
 
 #include <entt/entt.hpp>
 
+#include <Common/Core/AssetHandle.hpp>
 #include <Common/Core/UUID.hpp>
+
+#include <filesystem>
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
@@ -1801,17 +1804,38 @@ namespace Desert::ECS
     // A behavior unit, like a UE ActorComponent: one .lua file + its exposed properties + lifecycle flag.
     struct ScriptSlot
     {
-        // The .lua file, as a path under the project's scripts root (Constants::Path::SCRIPT_PATH), e.g.
-        // "Resources/Assets/Scripts/Examples/MoveAlongX.lua" in the sandbox. This comment used to say
-        // "relative to the working dir" and cite "Resources/Scripts/x.lua" — a tree that is not project
-        // content and that no packaged game contains. It did not describe the field, it EXCUSED it.
+        // The .lua file, as a ROOT-TAGGED KEY — the exact form Common::AssetHandle::StableKeyForPath
+        // mints and Common::AssetHandle::PathForStableKey reads back, e.g.
+        // "assets:Scripts/Examples/MoveAlongX.lua". NOT a path: never hand it to std::filesystem or to
+        // an ifstream, ask ResolvedPath() below.
         //
-        // WHAT IS STILL WRONG WITH THE FIELD, since a comment must not excuse this one either: the value
-        // stored is ROOTED, so it does not survive packaging. Measured on a mounted archive, the stored
-        // spelling resolves to nothing while the same file addressed through SCRIPT_PATH resolves. Every
-        // other asset reference is an AssetHandle hashed from a ROOT-TAGGED RELATIVE path and is immune
-        // to the remap. Owned by I9, blocked behind K3 (it needs a scene-corpus migration).
-        std::string ScriptPath;
+        // WHY IT IS NOT A PATH ANY MORE (I9, scene schema v16). It used to hold the ROOTED spelling the
+        // editor happened to be standing in — "Resources/Assets/Scripts/Examples/MoveAlongX.lua" — and a
+        // rooted spelling does not survive packaging: a packaged game remaps ASSETS_PATH to
+        // <package>/Assets/, so the stored string named a directory that does not exist there. Measured
+        // on a mounted archive by I8: the stored spelling gave Exists=0 while the same file addressed
+        // through the scripts root gave Exists=1. A script was the ONLY kind of content that referred to
+        // itself this way; every other reference in a scene is an AssetHandle hashed from a root-tagged
+        // relative path and was already immune.
+        //
+        // WHY A KEY AND NOT A HANDLE, which is the other way this could have been fixed. An AssetHandle
+        // IS the FNV-1a of exactly this string, so the hash carries no location the key does not — what
+        // makes an asset reference survive the remap is the TAG plus the relative path, not the hashing.
+        // The hash is one-way, so a handle only becomes a path again through the asset REGISTRY, and a
+        // script has no registry entry, no loader and no payload the registry could hold: ScriptEngine
+        // opens the file itself and ScriptSystem polls its mtime. Minting a ScriptAsset class purely to
+        // invert a hash we would have computed from the string we already have is a table with one
+        // reader — the "mirror with only one reader" anti-pattern — so the string is stored as it is.
+        std::string ScriptKey;
+
+        // The file ScriptKey names, on THIS host, in THIS project, right now. One place, so no call site
+        // can forget the resolution and reintroduce the defect above; PathForStableKey returns an
+        // untagged string unchanged, so a key the tag table does not know still behaves exactly as the
+        // old rooted spelling did rather than silently becoming something else.
+        std::filesystem::path ResolvedPath() const
+        {
+            return Common::AssetHandle::PathForStableKey( ScriptKey );
+        }
 
         // Editor-exposed properties (from the script's `Properties` table): per-entity values, edited in
         // Details and serialized. Written into the script env before it runs (so the script reads them).
