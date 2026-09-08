@@ -68,6 +68,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -421,13 +422,23 @@ TEST( ContentScanners, TheScriptPickerAsksThePathCensusWhereScriptsAre )
     const std::string root = RepoRoot();
     ASSERT_FALSE( root.empty() );
 
-    const std::string code = Desert::Tests::ConsumerText::StripCommentsAndLiterals(
+    std::string code = Desert::Tests::ConsumerText::StripCommentsAndLiterals(
          ReadFile( root + "Editor/Source/Editor/Panels/SceneProperties/ComponentEditorRegistrations.cpp" ) );
     ASSERT_FALSE( code.empty() );
 
-    EXPECT_NE( code.find( "Path::SCRIPT_PATH" ), std::string::npos )
-         << "the script picker must take the scripts root from Common::Constants::Path, which follows "
-            "SetProjectRoot. A literal is resolved against the process's working directory and does not.";
+    // THE TWO NAMES TOGETHER, IN ONE CALL — not each of them somewhere in the file. Written as two
+    // separate searches this test PASSED against a mutation that put the raw literal walk back, because
+    // SCRIPT_PATH was still named a few lines further down in the empty-list message. Both sides were
+    // individually present and the thing they had to say about each other was gone: §4's shape, in the
+    // checker rather than in the engine.
+    std::erase_if( code, []( unsigned char c ) { return std::isspace( c ) != 0; } );
+
+    EXPECT_NE( code.find( "ListFilesRecursive(Common::Constants::Path::SCRIPT_PATH)" ), std::string::npos )
+         << "the script picker must enumerate the scripts root the PATH CENSUS names, in one call: "
+            "Common::Utils::FileSystem::ListFilesRecursive( Common::Constants::Path::SCRIPT_PATH ). The "
+            "census row follows SetProjectRoot; a literal is resolved against the process's working "
+            "directory and does not — measured with a second project open, the literal offered 6 scripts "
+            "belonging to the project that was NOT open and 0 belonging to the one that was.";
 }
 
 int main( int argc, char** argv )
