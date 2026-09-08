@@ -153,14 +153,15 @@ namespace Desert::Editor
         // The obvious arrangement — show the live preview, and ask for a cached picture only on the frames
         // there is no live one — asks for the fallback at exactly the moment it cannot be produced. What
         // takes the live preview away is a shortage of renderer slots, and a capture needs a renderer slot
-        // too; the service refuses to take the last one (ThumbnailService.cpp, kSlotsKeptFreeForTheUser),
-        // and rightly, so the row would sit on "queued" for as long as the shortage lasted. Measured, not
+        // too; the service refuses to take the last one (Editor/Widgets/PreviewSlotBudget.hpp), and
+        // rightly, so the row would sit on "queued" for as long as the shortage lasted. Measured, not
         // reasoned: with the request placed after the branch, a selected mesh produced no capture at all
         // and the log showed the queue draining a material nobody had asked this row for.
         //
         // So the cache is warmed WHILE there is room to warm it. It costs one capture per mesh asset, ever
-        // — 378 ms measured on this machine, then a PNG that survives restarts — and the service drops the
-        // request outright when the picture on disk is still fresh, which after the first time it is.
+        // — 360-385 ms over seven runs on this machine, then a PNG that survives restarts — and the service
+        // drops the request outright when the picture on disk is still fresh, which after the first time
+        // it is.
         //
         // Asked through the service, never by reading `ThumbnailCache::DiskPath` and hoping. That hope was
         // the defect: the file existed only if the asset browser had happened to walk past this asset, and
@@ -189,7 +190,7 @@ namespace Desert::Editor
                     // picture of the asset: handing over THIS entity's slot materials would put two
                     // entities that share one mesh in a fight over one file, and the second one selected
                     // would be shown the first one's paint with nothing able to tell them apart. The
-                    // per-entity answer is the live preview above; this one is per-asset by construction.
+                    // per-entity answer is the live preview BELOW; this one is per-asset by construction.
                     png = ThumbnailService::Get().RequestMesh( staticMesh.MeshHandle, source );
                 }
             }
