@@ -3,7 +3,6 @@
 #include <Common/Utilities/FileSystem.hpp>
 
 #include <chrono>
-#include <cstdlib>
 
 #include "Shader/ShaderAsset.hpp"
 #include "Mesh/StaticMeshAsset.hpp"
@@ -137,9 +136,6 @@ namespace Desert::Assets
                     textureAsset->Load();
                 Runtime::ResourceRegistry::GetTextureService()->RegisterAsset( textureAsset );
             }
-
-            if ( std::getenv( "F6_NO_PRELOAD_REG" ) ) // F6 TEMPORARY MEASUREMENT SCAFFOLD
-                return;
 
             for ( const auto& [handle, meshAsset] : manager->FindAllByType<Assets::MeshAsset>() )
             {

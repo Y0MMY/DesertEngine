@@ -6,7 +6,6 @@
 #include <Common/Core/Constants.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
-#include <cstdlib>
 #include <cstring>
 
 #include <Engine/ECS/Components.hpp>
@@ -217,22 +216,12 @@ namespace Desert::Core::Serialize
         //
         // The guard is `HasAsset` and not `Get`, for the same reason: `Get` BUILDS on a miss, so the old
         // `if ( !svc->Get( handle ) )` test did the work it was written to avoid.
-        // ===== F6 TEMPORARY MEASUREMENT SCAFFOLD — DELETED BEFORE THE FINAL COMMIT =====
-        bool F6FixOff()
-        {
-            static const bool off = std::getenv( "F6_FIX_OFF" ) != nullptr;
-            return off;
-        }
-        // ===============================================================================
-
         void EnsureMaterialRegistered( const Assets::Asset<Assets::MaterialAsset>& material,
                                        const std::string&                          named )
         {
             auto* service = Runtime::ResourceRegistry::GetMaterialService();
             if ( !service || service->HasAsset( material->GetMetadata().Handle ) )
                 return;
-            LOG_WARN( "[F6PROBE] material '{}' was NOT in the service when the scene named it", named );
-
             // The shell must carry its data before it is keyed: RegisterAsset indexes the material by the
             // EXTERNAL id stored inside the file, and an unparsed shell reports a zero one.
             if ( !material->IsReadyForUse() )
@@ -271,8 +260,6 @@ namespace Desert::Core::Serialize
             auto* service = Runtime::ResourceRegistry::GetMeshService();
             if ( !service || service->HasAsset( mesh->GetMetadata().Handle ) )
                 return;
-            LOG_WARN( "[F6PROBE] mesh '{}' was NOT in the service when the scene named it", named );
-
             if ( const auto registered = service->RegisterAsset( mesh, registry.weak_from_this() ); !registered )
             {
                 LOG_ERROR( "[Mesh] '{}' named by the scene could not be registered: {}", named,
@@ -459,12 +446,8 @@ namespace Desert::Core::Serialize
                          return Assets::Asset<Assets::MaterialAsset>(
                               m.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, full ) );
                      },
-                     []( const Assets::Asset<Assets::MaterialAsset>& material, ReferenceOrigin origin )
-                     {
-                         if ( F6FixOff() && origin == ReferenceOrigin::Found )
-                             return; // F6 TEMPORARY
-                         EnsureMaterialRegistered( material, material->GetMetadata().Filepath.string() );
-                     } );
+                     []( const Assets::Asset<Assets::MaterialAsset>& material, ReferenceOrigin )
+                     { EnsureMaterialRegistered( material, material->GetMetadata().Filepath.string() ); } );
                 return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
             }
             if ( type == "TextureAsset" )
@@ -551,12 +534,8 @@ namespace Desert::Core::Serialize
                                      : Assets::Asset<Assets::MeshAsset>( m.CreateAsset<Assets::StaticMeshAsset>(
                                             Assets::AssetPriority::High, path ) );
                      },
-                     [&m]( const Assets::Asset<Assets::MeshAsset>& mesh, ReferenceOrigin origin )
-                     {
-                         if ( F6FixOff() && origin == ReferenceOrigin::Found )
-                             return; // F6 TEMPORARY
-                         EnsureMeshRegistered( mesh, mesh->GetMetadata().Filepath.string(), m );
-                     } );
+                     [&m]( const Assets::Asset<Assets::MeshAsset>& mesh, ReferenceOrigin )
+                     { EnsureMeshRegistered( mesh, mesh->GetMetadata().Filepath.string(), m ); } );
                 return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
             }
             return 0;
