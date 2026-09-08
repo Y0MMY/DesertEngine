@@ -168,11 +168,16 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   types — the rig's SkinnedMeshComponent and a UI element's UIAnimComponent, which are two different
     //   kinds of thing and cannot share a key — so it carries two of those class constants instead of one,
     //   and its scene went shared -> weak with the other documents'.
+    //   789 -> 791 ПРИ СВЕДЕНИИ, и ни одна из двух веток не угадала: У7-2 пришёл с 789
+    //   (328/315/110/36), И14+М12 с 788 (325/319/110/34), а сумма дала 791 (328/317/110/36).
+    //   Слияние двух переписей — это НЕ выбор одной стороны: каждая измеряла своё дерево, и верно
+    //   только третье число, которого не видел никто. Оно ПОЛУЧЕНО ЗАПУСКОМ переписи на сведённом
+    //   дереве, а не выведено арифметикой из двух отчётов — арифметика здесь и была бы подгонкой.
     EXPECT_EQ( CountOf( Form::Raw ), 328 );
-    EXPECT_EQ( CountOf( Form::Shared ), 315 );
+    EXPECT_EQ( CountOf( Form::Shared ), 317 );
     EXPECT_EQ( CountOf( Form::Unique ), 110 );
     EXPECT_EQ( CountOf( Form::Weak ), 36 );
-    EXPECT_EQ( (int)Members().size(), 789 )
+    EXPECT_EQ( (int)Members().size(), 791 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }
@@ -383,7 +388,7 @@ TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
     // `shared_ptr` here is a false impression of shared ownership, and the register's job is to make
     // the true owner findable instead of mass-replacing them for uniformity -- churn that would hide
     // the seven real findings in a diff of two hundred files.
-    EXPECT_EQ( CountOf( Form::Shared ), 315 );
+    EXPECT_EQ( CountOf( Form::Shared ), 317 );
     EXPECT_GT( CountOf( Form::Shared ), CountOf( Form::Unique ) + CountOf( Form::Weak ) );
 }
 
