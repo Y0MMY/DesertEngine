@@ -25,6 +25,15 @@ namespace Desert::Graphic
                     mipGenerator->GenerateMips( image );
                 }
 
+                // WHAT IT COSTS ON THE DEVICE, INTO ITS LEDGER ROW. Recorded from the SPECIFICATION here
+                // rather than left to whoever ends up holding the image, because this is the one place
+                // every 2D image in the engine passes through — the eight callers of ImageService::Register
+                // are a fraction of them. The mip tail is the 1/3 geometric series, taken only when the
+                // chain was actually asked for. See Engine/Graphic/ResourceLedger.hpp.
+                image->RecordDeviceBytes( static_cast<std::size_t>(
+                     Core::Formats::CalculateImageSize( spec.Width, spec.Height, spec.Format ) *
+                     ( spec.Mips > 1 ? 4U : 3U ) / 3U ) );
+
                 return image;
             }
         }
@@ -48,6 +57,11 @@ namespace Desert::Graphic
                 {
                     mipGenerator->GenerateMips( image );
                 }
+
+                // Six faces, and the same mip tail as the 2D case.
+                image->RecordDeviceBytes( static_cast<std::size_t>(
+                     Core::Formats::CalculateImageSize( spec.Width, spec.Height, spec.Format ) * 6U *
+                     ( spec.Mips > 1 ? 4U : 3U ) / 3U ) );
 
                 return image;
             }
@@ -73,6 +87,10 @@ namespace Desert::Graphic
                                spec.Height, spec.Depth, result.GetError() );
                     return nullptr;
                 }
+
+                // A volume is a single mip by construction (Image3DSpecification says why), so no tail.
+                image->RecordDeviceBytes( static_cast<std::size_t>(
+                     Core::Formats::CalculateImageSize( spec.Width, spec.Height, spec.Format ) * spec.Depth ) );
 
                 return image;
             }

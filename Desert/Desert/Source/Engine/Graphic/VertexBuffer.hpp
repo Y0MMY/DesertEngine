@@ -161,6 +161,13 @@ namespace Desert::Graphic
         {
             m_Accounting.Claim( owner, asset );
         }
+
+        /// What this buffer costs on the device. Recorded by whoever knows — the base cannot ask
+        /// GetSize() from its own constructor, the backend has not allocated yet at that point.
+        void RecordDeviceBytes( const std::size_t bytes )
+        {
+            m_Accounting.RecordBytes( bytes );
+        }
         virtual void Use( BindUsage use = BindUsage::Bind ) const              = 0;
         virtual void RT_Use( BindUsage use = BindUsage::Bind ) const           = 0;
 

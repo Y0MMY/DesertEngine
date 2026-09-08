@@ -143,6 +143,14 @@ namespace Desert::Runtime
         // CollectGarbage() runs at a safe point.
         void Invalidate( const Assets::AssetHandle& handle );
 
+        // IS ANY RUNTIME MATERIAL BUILT FOR @p handle? Asked, and not answered by calling Get() — Get
+        // BUILDS on a miss, so the obvious way to test this is the one way that guarantees the answer is
+        // yes. Eviction needs to know whether it is about to drop something without creating it first.
+        [[nodiscard]] bool HasBuiltMaterial( const Assets::AssetHandle& handle ) const
+        {
+            return m_Materials.find( handle ) != m_Materials.end();
+        }
+
         // FORGET a material asset entirely — its runtime materials, its shell, and its entry in the
         // external -> internal map.
         //

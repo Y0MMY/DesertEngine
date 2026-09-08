@@ -10,6 +10,30 @@ namespace Desert::Assets
     class AssetManager final
     {
     public:
+        /**
+         * @brief EVERY REGISTRY THAT IS CURRENTLY ALIVE, in creation order.
+         *
+         * The same arrangement, for the same reason, as `Core::Scene::LiveScenes()`: asset eviction runs
+         * from the engine's frame loop, which has no way to be handed a registry — the thing that OWNS one
+         * is the editor or runtime layer, and both are above this layer. A registry that puts itself in a
+         * list is the only shape in which "sweep the registries" is answerable from below.
+         *
+         * Raw pointers, non-owning, entered by the constructor and removed by the destructor, so an entry
+         * can never outlive its object. There is one registry per project today; a project switch that
+         * built a second before releasing the first would simply have both swept, which is correct.
+         */
+        [[nodiscard]] static const std::vector<AssetManager*>& LiveManagers();
+
+        AssetManager();
+        ~AssetManager();
+
+        // Deleted for the reason the list makes newly load-bearing: a copy would enter a second pointer to
+        // one logical registry, a move would leave the moved-from husk in the list.
+        AssetManager( const AssetManager& )            = delete;
+        AssetManager& operator=( const AssetManager& ) = delete;
+        AssetManager( AssetManager&& )                 = delete;
+        AssetManager& operator=( AssetManager&& )      = delete;
+
         using KeyHandle      = Common::Filepath;
         using AssetContainer = std::vector<std::pair<AssetMetadata, Asset<AssetBase>>>;
         using AssetIndex     = uint32_t;

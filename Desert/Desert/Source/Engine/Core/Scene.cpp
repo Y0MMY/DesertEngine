@@ -12,7 +12,9 @@
 #include <Engine/Animation/Skeleton.hpp>
 #include <Engine/Animation/BoneInfo.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Assets/AssetEviction.hpp>
 
+#include <algorithm>
 #include <cfloat>
 #include <functional>
 #include <limits>
@@ -200,12 +202,43 @@ namespace Desert::Core
         outHit.Normal = glm::normalize( glm::mat3( bestXf ) * ln );
         return true;
     }
+    namespace
+    {
+        // The live-scene list. A function-local static so it is constructed on first use whatever the
+        // static-initialisation order is — a Scene can be built from another translation unit's static.
+        std::vector<Scene*>& LiveSceneList()
+        {
+            static std::vector<Scene*> scenes;
+            return scenes;
+        }
+    } // namespace
+
+    const std::vector<Scene*>& Scene::LiveScenes()
+    {
+        return LiveSceneList();
+    }
+
+    Scene::Scene()
+    {
+        LiveSceneList().push_back( this );
+    }
+
     Scene::Scene( std::string&& sceneName, Graphic::SceneRenderer* sceneRenderer )
          // Declaration order: m_SceneRenderer is declared before m_SceneName, and members are constructed
          // in declaration order no matter what this list says.
          : m_SceneRenderer( sceneRenderer ), m_SceneName( std::move( sceneName ) )
     {
+        LiveSceneList().push_back( this );
         SetupRegistryCallbacks();
+    }
+
+    Scene::~Scene()
+    {
+        // Erased in the destructor and nowhere else, so an entry cannot outlive the object it points at.
+        // That is the whole reason the list holds raw pointers rather than weak_ptrs: a Scene is in it for
+        // exactly its own lifetime and there is no window in which a reader could see a dead one.
+        auto& scenes = LiveSceneList();
+        scenes.erase( std::remove( scenes.begin(), scenes.end(), this ), scenes.end() );
     }
 
     NO_DISCARD Common::BoolResultStr Scene::BeginScene()
@@ -226,6 +259,15 @@ namespace Desert::Core
             SetActiveCamera( m_EditorCamera );
 
         m_Initialized = true;
+
+        // A WORLD HAS JUST CHANGED, SO THE ANSWER TO "WHAT IS STILL NEEDED" HAS CHANGED. Asked for rather
+        // than done here: the scene being replaced may still be alive at this instant (the caller usually
+        // drops it after the new one is up), and a sweep that saw it would find its assets reachable and
+        // release nothing — which is exactly how "evict on scene change" quietly does nothing. The frame
+        // loop runs it at the start of the next frame, by which time the old scene is gone and no command
+        // buffer is open. See Assets/AssetEviction.hpp.
+        Assets::AssetEvictionSchedule::Request( "scene '" + m_SceneName + "' was initialised" );
+
         return BOOLSUCCESS;
     }
 

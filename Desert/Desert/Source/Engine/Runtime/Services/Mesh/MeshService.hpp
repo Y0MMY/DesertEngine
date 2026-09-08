@@ -32,6 +32,19 @@ namespace Desert::Runtime
         void                Clear();
         std::optional<bool> IsSkinned( const Assets::AssetHandle& handle ) const;
 
+        // DROP THE BUILT GPU MESH, KEEP THE SHELL. Returns true when something was actually dropped.
+        //
+        // The shell is what makes this safe to do at all: `Get()` builds on a miss from `m_MeshAssets`, so
+        // the next draw rebuilds the vertex and index buffers through exactly the path a first use takes.
+        // Forgetting the shell as well would turn the next `Get()` into a null — which is the silent empty
+        // answer §1.4 forbids, and the reason this is not called `Release`.
+        //
+        // A PROCEDURAL MESH IS NOT DROPPED, whatever the caller asks. It was registered with no asset
+        // behind it (`RegisterProcedural`), so there is nothing to rebuild it from and releasing it is
+        // data loss rather than eviction. The ledger says the same thing in its own vocabulary by
+        // claiming those buffers to `ResourceOwner::Procedural`; this is the enforcement.
+        bool EvictBuilt( const Assets::AssetHandle& handle );
+
     private:
         // Load a shell that has not been parsed yet AND re-resolve what the parse just revealed. Both, or
         // neither: see AssetBase::EnsureLoaded.
