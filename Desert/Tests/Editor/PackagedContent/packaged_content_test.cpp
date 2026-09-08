@@ -39,6 +39,8 @@
 #include <string>
 #include <vector>
 
+#include "../../TestSupport/result_assert.hpp"
+
 namespace fs = std::filesystem;
 
 namespace
@@ -182,7 +184,7 @@ TEST( PackagedContent, BuildContentPakPacksWhatTheScannersFind )
     ASSERT_EQ( fonts.size(), 1u ) << "the packed font tree is invisible to the font scan";
     EXPECT_EQ( fonts[0].filename(), "fake.ttf" );
     // ...and the path the scan produced actually READS, which is what FontService::Get does next.
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( fonts[0] ).GetValue(), "font-body" );
+    DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( fonts[0] ), "font-body" );
 
     const auto icons = findByExt( Desert::Runtime::IconScanRoots(), ".svg" );
     ASSERT_EQ( icons.size(), 1u ) << "the packed icon tree is invisible to the icon scan";
@@ -192,7 +194,7 @@ TEST( PackagedContent, BuildContentPakPacksWhatTheScannersFind )
     const auto assets = Common::Utils::FileSystem::ListFilesRecursive( Common::Constants::Path::ASSETS_PATH );
     ASSERT_EQ( assets.size(), 1u );
     EXPECT_EQ( assets[0].filename(), "level.desce" );
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( assets[0] ).GetValue(), "scene-body" );
+    DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( assets[0] ), "scene-body" );
 }
 
 // ---- The COOKED-CACHE relation ------------------------------------------------------------------------
@@ -460,7 +462,10 @@ TEST( PackagedContent, PackageGameProducesTheLauncherAndBinaryTheHostDescription
 
     // ...and it is that host's shell, not merely that host's file name. The two can disagree, and a
     // `run.bat` full of bash is the failure the file name alone would not catch.
-    const std::string launcher = Common::Utils::FileSystem::ReadFileContent( root / host.LauncherName ).GetValue();
+    const auto launcherRead = Common::Utils::FileSystem::ReadFileContent( root / host.LauncherName );
+        ASSERT_TRUE( launcherRead.IsSuccess() )
+             << "the launcher script did not read back: " << launcherRead.GetError();
+        const std::string launcher = launcherRead.GetValue();
     ASSERT_FALSE( launcher.empty() );
     if ( host.Platform == Desert::Editor::TargetPlatform::Windows )
         EXPECT_NE( launcher.find( "@echo off" ), std::string::npos ) << launcher;
