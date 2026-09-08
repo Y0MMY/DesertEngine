@@ -306,6 +306,135 @@ TEST( PackagedContent, AScriptReferenceResolvesToTheSameFileLooseAndPackaged )
          << "' resolved inside the package, so this test cannot tell a fixed reference from a broken one";
 }
 
+// ── A FONT AND AN ICON RESOLVE TO THE SAME FILE, LOOSE AND PACKAGED (I10) ────────────────────────────
+//
+// THE SAME RELATION as the script test above, for the other two references that stored a path: a font
+// and a vector icon dropped into the PROJECT'S OWN assets tree. Both scan roots accept that tree
+// (Runtime/Services/ServiceScanRoots.hpp), and until I10 the scene stored the path the service's registry
+// held — which the packager's rebase under <package>/Assets/ breaks exactly as it broke a script slot.
+//
+// WHY THIS WENT UNSEEN and why the fixture below therefore uses PROJECT assets and not the engine ones:
+// every font and icon this repository ships names Resources/Fonts or Resources/Icons, engine trees the
+// packager stores under their own dev-time relative paths and SetProjectRoot never remaps. A test built
+// from those would pass before the fix as well as after it, and would be measuring nothing.
+//
+// The negative control is the pre-migration spelling, and it must still fail on both.
+TEST( PackagedContent, AServiceAssetReferenceResolvesToTheSameFileLooseAndPackaged )
+{
+    EnvironmentGuard guard;
+
+    const fs::path base = fs::temp_directory_path() / "desert_pkg_service_ref";
+    fs::remove_all( base );
+    const fs::path proj = base / "proj";
+    const fs::path pkg  = base / "pkg";
+
+    // AssetsRoot deliberately NOT "Assets", so the packaged root genuinely differs from the dev one.
+    //
+    // The two files are SYNTHETIC BYTES, and the package cook says so out loud — "could not be baked
+    // into an SDF atlas", "has no filled shapes the icon importer understands". That is the cook working
+    // and it is not what this test is about: the relation under test is where a stored reference
+    // RESOLVES, and the raw file travels into the archive and back whether or not its SDF could be
+    // pre-baked. Real fixtures would add megabytes to the suite to change nothing it asserts.
+    const std::string fontBody = "not-a-real-ttf-but-bytes-are-bytes";
+    const std::string iconBody = "<svg><path d=\"M0 0 L1 1\"/></svg>";
+    WriteFile( proj / "GameAssets" / "Fonts" / "Custom.ttf", fontBody );
+    WriteFile( proj / "GameAssets" / "UI" / "Glyphs" / "spark.svg", iconBody );
+    WriteFile( proj / "T.deproj", "{\"Name\":\"T\",\"AssetsRoot\":\"GameAssets\",\"DefaultScene\":\"\"}" );
+
+    SetEnv( "HOME", base.string() );
+    fs::current_path( proj );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( proj / "T.deproj" ).string() ) );
+
+    struct Case
+    {
+        const char* What;
+        const char* Extension;
+        std::string Body;
+        const char* ExpectedKey;
+    };
+    const std::vector<Case> cases = {
+         { "font", ".ttf", fontBody, "assets:Fonts/Custom.ttf" },
+         { "icon", ".svg", iconBody, "assets:UI/Glyphs/spark.svg" },
+    };
+
+    // ---- the DEV side. Each reference is minted the way the services' own scan mints it: enumerate the
+    // scan root through the shared enumeration, then StableKeyForPath over what came back.
+    std::vector<std::string> stored;
+    std::vector<fs::path>    loosePaths;
+    std::vector<fs::path>    preMigrationSpellings;
+
+    for ( const Case& c : cases )
+    {
+        std::vector<fs::path> found;
+        for ( const auto& p :
+              Common::Utils::FileSystem::ListFilesRecursive( Common::Constants::Path::ASSETS_PATH ) )
+            if ( p.extension() == c.Extension )
+                found.push_back( p );
+        ASSERT_EQ( found.size(), 1u ) << c.What << ": the assets scan root does not see the project's own file";
+
+        const std::string key = Common::AssetHandle::StableKeyForPath( found[0] );
+        EXPECT_EQ( key, c.ExpectedKey ) << c.What;
+
+        const fs::path loose = Common::AssetHandle::PathForStableKey( key );
+        ASSERT_TRUE( Common::Utils::FileSystem::Exists( loose ) ) << c.What << ": " << loose.string();
+        DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( loose ), c.Body );
+
+        // The handle each service will mint for this file is FromCookedPath over the resolved path
+        // (FontService::RegisterFont / IconService::RegisterIcon), and it must be the handle the STORED
+        // key hashes to — otherwise a saved reference and a scanned file are two identities of one asset.
+        EXPECT_EQ( Common::AssetHandle::FromCookedPath( loose ), Common::AssetHandle::FromKey( key ) ) << c.What;
+
+        stored.push_back( key );
+        loosePaths.push_back( loose );
+
+        // What a v16 scene carried: the file as seen from the editor's working directory. Kept so the
+        // negative control below is the ACTUAL old value rather than an invented one.
+        preMigrationSpellings.push_back( fs::relative( loose, proj ) );
+        EXPECT_TRUE( Common::Utils::FileSystem::Exists( preMigrationSpellings.back() ) )
+             << c.What << ": the old spelling resolved in the dev tree - that half was never the defect";
+    }
+
+    // ---- the PACKAGED side: a bare directory holding only the archive and the regenerated descriptor.
+    const auto result = Desert::Editor::BuildContentPak();
+    ASSERT_TRUE( result.Success ) << result.Message;
+
+    fs::create_directories( pkg );
+    fs::copy_file( proj / "Content.dpak", pkg / "Content.dpak" );
+    WriteFile( pkg / "Game.deproj", std::string( "{\"Name\":\"T\",\"AssetsRoot\":\"" ) +
+                                         Desert::Editor::kPackagedAssetsRoot + "\",\"DefaultScene\":\"\"}" );
+
+    fs::current_path( pkg );
+    const auto mounted = Common::Utils::VFS::MountPak( pkg / "Content.dpak" );
+    ASSERT_TRUE( mounted.IsSuccess() ) << mounted.GetError();
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( pkg / "Game.deproj" ).string() ) );
+
+    for ( std::size_t i = 0; i < cases.size(); ++i )
+    {
+        const Case&    c        = cases[i];
+        const fs::path packaged = Common::AssetHandle::PathForStableKey( stored[i] );
+
+        ASSERT_TRUE( Common::Utils::FileSystem::Exists( packaged ) )
+             << c.What << ": the stored reference resolves to nothing in the package: " << packaged.string();
+
+        // THE RELATION: one reference, two roots, the same file.
+        DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( packaged ), c.Body );
+
+        // The identity round trip holds under the packaged root too. NOT an equality between the two
+        // resolutions' handles — that is I9's disproved hypothesis and it is false for an honest reason:
+        // a path-derived handle only means anything while the project that path belongs to is open.
+        EXPECT_EQ( Common::AssetHandle::FromCookedPath( packaged ), Common::AssetHandle::FromKey( stored[i] ) )
+             << c.What;
+
+        // ...and the test is not vacuous: the two resolutions really are different places on disk.
+        EXPECT_NE( loosePaths[i], packaged ) << c.What;
+
+        // ---- the NEGATIVE CONTROL: the pre-migration spelling against the same mounted archive.
+        EXPECT_FALSE( Common::Utils::FileSystem::Exists( preMigrationSpellings[i] ) )
+             << c.What << ": the rooted spelling '" << preMigrationSpellings[i].string()
+             << "' resolved inside the package, so this test cannot tell a fixed reference from a broken one";
+    }
+}
+
 // ---- The COOKED-CACHE relation ------------------------------------------------------------------------
 //
 // П2's defect, stated as the relation these tests pin: what the packager cooks into the archive must be

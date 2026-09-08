@@ -35,6 +35,42 @@ namespace Desert::Core::Serialize
 {
     namespace
     {
+        // ── THE FILE FORM OF A SERVICE-REGISTRY REFERENCE (I10) ──────────────────────────────────────
+        //
+        // Fonts, vector icons and videos are not AssetManager assets: FontService, IconService and
+        // VideoService each own a handle<->path registry keyed on AssetHandle::FromCookedPath. So a
+        // scene cannot store a handle for them (nothing would resolve it on the next launch before the
+        // service has scanned) and it used to store the PATH the service happened to hold.
+        //
+        // WHY THAT WAS WRONG, and it is the same sentence I9 removed from the script slot. A packaged
+        // game remaps ASSETS_PATH to <package>/Assets/, so a path written from the development tree
+        // names a directory that does not exist there. It survived until now only because every font
+        // and icon this repository ships names the ENGINE trees Resources/Fonts and Resources/Icons,
+        // which the packager stores under their own dev-time relative paths and SetProjectRoot never
+        // remaps. Both scan roots also accept the PROJECT'S OWN assets tree
+        // (Runtime/Services/ServiceScanRoots.hpp), and a `.ttf` or `.svg` dropped in from there took
+        // exactly the broken route.
+        //
+        // The file therefore stores the ROOT-TAGGED KEY — the same form every other content reference
+        // in a `.desce` uses, and precisely the string the service's own handle is the FNV of. These two
+        // functions are the ONLY place the conversion happens, so no site can hold half of it: the
+        // service registries stay path-keyed in memory and every editor picker keeps handing them paths.
+        std::string ServiceKeyForPath( const std::string& path )
+        {
+            // An empty path is "this slot names nothing" and must stay empty rather than become a bare
+            // tag — the read side below turns a non-empty string into a registration attempt.
+            return path.empty() ? std::string() : Common::AssetHandle::StableKeyForPath( path );
+        }
+
+        std::string ServicePathForKey( const std::string& key )
+        {
+            // PathForStableKey hands an untagged string back verbatim, so a key from outside the root
+            // table behaves exactly as the old bare path did instead of silently becoming something
+            // else. Nothing in this repository has one; a file hand-edited to hold one still works
+            // where it worked before.
+            return key.empty() ? std::string() : Common::AssetHandle::PathForStableKey( key ).generic_string();
+        }
+
         // Bridges a typed serialization struct to/from the generic JSON tree, reusing reflect-cpp's own
         // (de)serialization for the verbose asset-bearing payloads (mesh vertices, material path lists).
         template <class T>
@@ -294,20 +330,21 @@ namespace Desert::Core::Serialize
                     return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
                 return relStr;
             }
+            // The three SERVICE-REGISTRY types. Each owns its own handle<->path table (they are not
+            // AssetManager assets), and each persists as the ROOT-TAGGED KEY rather than the path the
+            // table holds — see ServiceKeyForPath at the top of this file for why a path could not
+            // survive packaging.
             if ( type == "FontAsset" )
             {
-                // Fonts aren't AssetManager assets — the FontService owns the handle<->path registry.
-                return Runtime::ResourceRegistry::GetFontService()->PathForHandle( handle );
+                return ServiceKeyForPath( Runtime::ResourceRegistry::GetFontService()->PathForHandle( handle ) );
             }
             if ( type == "VideoAsset" )
             {
-                // Videos aren't AssetManager assets — the VideoService owns the handle<->path registry.
-                return Runtime::ResourceRegistry::GetVideoService()->PathForHandle( handle );
+                return ServiceKeyForPath( Runtime::ResourceRegistry::GetVideoService()->PathForHandle( handle ) );
             }
             if ( type == "IconAsset" )
             {
-                // Vector icons aren't AssetManager assets — the IconService owns handle<->path.
-                return Runtime::ResourceRegistry::GetIconService()->PathForHandle( handle );
+                return ServiceKeyForPath( Runtime::ResourceRegistry::GetIconService()->PathForHandle( handle ) );
             }
             // Meshes (static/skinned both resolve handle->path via the MeshAsset base).
             auto a = mgr.FindByHandle<Assets::MeshAsset>( Common::UUID( handle ) );
@@ -422,20 +459,21 @@ namespace Desert::Core::Serialize
                                full.string(), registered.GetError() );
                 return static_cast<uint64_t>( a->GetMetadata().Handle );
             }
+            // The three SERVICE-REGISTRY types. `path` here is the file's ROOT-TAGGED KEY (I10), so it
+            // is resolved against the roots as they stand in THIS process before the service — whose
+            // registry is path-keyed — is asked to register it. Registration is idempotent and returns
+            // the deterministic handle; the icon service bakes its SDF on first draw.
             if ( type == "FontAsset" )
             {
-                // Register the path with the FontService (idempotent) and return its deterministic handle.
-                return Runtime::ResourceRegistry::GetFontService()->RegisterFont( path );
+                return Runtime::ResourceRegistry::GetFontService()->RegisterFont( ServicePathForKey( path ) );
             }
             if ( type == "VideoAsset" )
             {
-                // Register the path with the VideoService (idempotent) and return its deterministic handle.
-                return Runtime::ResourceRegistry::GetVideoService()->RegisterVideo( path );
+                return Runtime::ResourceRegistry::GetVideoService()->RegisterVideo( ServicePathForKey( path ) );
             }
             if ( type == "IconAsset" )
             {
-                // Register the .svg with the IconService (idempotent); it bakes the SDF on first draw.
-                return Runtime::ResourceRegistry::GetIconService()->RegisterIcon( path );
+                return Runtime::ResourceRegistry::GetIconService()->RegisterIcon( ServicePathForKey( path ) );
             }
             // Meshes: find, else cook-create as the concrete type + register + load.
             if ( type == "StaticMeshAsset" || type == "SkinnedMeshAsset" || type == "MeshAsset" )
@@ -1051,11 +1089,13 @@ namespace Desert::Core::Serialize
             s.Serialize = []( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
             {
                 const auto& tc = e.GetComponent<ECS::TextComponent>();
-                // The font is an asset HANDLE in memory but persists as its stable ttf PATH — keeps scenes
-                // portable and backward-compatible with pre-handle saves (which stored the path directly).
-                const std::string fontPath = Runtime::ResourceRegistry::GetFontService()->PathForHandle(
-                     static_cast<uint64_t>( tc.Font ) );
-                Assets::TextComponentSer ser{ tc.Text,     fontPath, tc.Color, tc.Size, tc.EmissiveIntensity,
+                // The font is an asset HANDLE in memory and persists as the ROOT-TAGGED KEY its handle is
+                // the FNV of — the same form the reflected UIText.Font slot above writes, through the
+                // same two functions, so the world-space and UI text routes cannot drift apart.
+                const std::string fontKey =
+                     ServiceKeyForPath( Runtime::ResourceRegistry::GetFontService()->PathForHandle(
+                          static_cast<uint64_t>( tc.Font ) ) );
+                Assets::TextComponentSer ser{ tc.Text,     fontKey, tc.Color, tc.Size, tc.EmissiveIntensity,
                                               tc.Billboard };
                 return ToGeneric( ser );
             };
@@ -1071,7 +1111,7 @@ namespace Desert::Core::Serialize
                 // Path -> stable handle (registers it so the handle resolves at render time). Empty stays null,
                 // which the render path falls back to the default font for.
                 tc.Font = Assets::AssetHandle(
-                     Runtime::ResourceRegistry::GetFontService()->RegisterFont( d.FontPath ) );
+                     Runtime::ResourceRegistry::GetFontService()->RegisterFont( ServicePathForKey( d.Font ) ) );
                 tc.Color             = d.Color;
                 tc.Size              = d.Size;
                 tc.EmissiveIntensity = d.EmissiveIntensity;

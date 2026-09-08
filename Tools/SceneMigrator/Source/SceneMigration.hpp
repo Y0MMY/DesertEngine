@@ -139,11 +139,24 @@ namespace Desert::Migration
     //                   longer a path and a name that says otherwise is how it got used as one
     inline constexpr int kSceneVersionScriptRoot = 16;
 
+    //  17             - a reference to a SERVICE-REGISTRY asset - a font, a vector icon, a video - is a
+    //                   ROOT-TAGGED KEY too, for the reason step 16 gives about scripts. These three are
+    //                   not AssetManager assets: FontService / IconService / VideoService each own a
+    //                   handle<->path registry, so a scene stored the PATH the registry held and that
+    //                   path does not survive the packager rebasing content under <package>/Assets/. It
+    //                   went unseen because every value this repository ships names the ENGINE trees
+    //                   Resources/Fonts and Resources/Icons, which are never remapped; a `.ttf` or
+    //                   `.svg` dropped in from the project's own assets tree - which both scan roots
+    //                   accept - took the broken route. Four sites: `Text.FontPath` (renamed to
+    //                   `Text.Font` with the value, since it is no longer a path), `UIText.Font`,
+    //                   `UIIcon.Icon` and `UIPanel.Video`
+    inline constexpr int kSceneVersionServiceAssetRoot = 17;
+
     // The last step this tool knows and the generation the engine requires are ONE number, and this is
     // where that is checked. If a schema step is ever added here without raising Core::kSceneVersion, the
     // tool would stamp files at a version the loader refuses - every scene in the repository would stop
     // opening at once, and the file that caused it would look correct in isolation.
-    static_assert( kSceneVersionScriptRoot == kSceneVersion,
+    static_assert( kSceneVersionServiceAssetRoot == kSceneVersion,
                    "the last migration step and the engine's required scene version must be the same "
                    "generation - raise Core::kSceneVersion in Engine/Core/Serialize/SceneFormat.hpp" );
 
@@ -898,6 +911,55 @@ namespace Desert::Migration
     // SHELF LIFE: this raises v15 to v16 and nothing else. It is deleted once no v15 file remains.
     ScriptRootMigrationReport MigrateScriptRootV15ToV16( std::vector<Assets::EntityData>& entities );
 
+    // What MigrateServiceAssetRootV16ToV17 did to one file.
+    struct ServiceAssetRootMigrationReport
+    {
+        int Entities = 0; // entities carrying at least one of the four payloads that was touched
+        int Refs     = 0; // references re-spelled as a root-tagged key
+        int Empty    = 0; // of those, the slots that named nothing - they stay empty, not a bare tag
+
+        // References the two content roots cannot place, carried across unchanged and NAMED. Such a
+        // value still does not resolve in a packaged game, and a count alone would not say which slot
+        // to re-point (DC 1.4). No scene in this repository has one.
+        std::vector<std::string> UnrootedNames;
+    };
+
+    // Raises a scene from schema v16 to v17: a reference to a font, a vector icon or a video stops being
+    // the PATH its service's registry happened to hold and becomes the root-tagged key every other
+    // content reference in the file already is.
+    //
+    // WHAT IT REWRITES - four sites, because the same value reaches the file by two different routes and
+    // fixing one would leave the other (the defect shape this project keeps paying for):
+    //
+    //   * `Text.FontPath`  -> `Text.Font`   (the world-space SDF label's manual serializer; the KEY is
+    //                                        renamed with the value, since it is no longer a path)
+    //   * `UIText.Font`, `UIIcon.Icon`, `UIPanel.Video`  (the reflected AssetHandle slots; their names
+    //                                        already say "reference" rather than "path" and do not move)
+    //
+    // HOW THE ROOT IS FOUND, WITHOUT A FILESYSTEM. Two roots can contain one of these: the ENGINE tree,
+    // which is the compile-time constant `Resources/` and never moves, and the PROJECT'S assets root,
+    // whose name is per-project and is therefore the `assetsRoot` this function is handed. Neither can be
+    // matched by its full spelling, because the editor writes paths from its own working directory
+    // (`Editor/`) while the tool is run from the repository root - so the match is on each root's
+    // TRAILING components, longest first, which is the same "longest match wins" rule
+    // AssetHandle::StableKeyForPath applies to the absolutised roots at run time. It has to be that rule
+    // and not a simpler one: in the sandbox layout `Resources/Assets/` is NESTED INSIDE `Resources/`, so
+    // a shorter match would tag every project asset as an engine resource.
+    //
+    // A value neither root can place is carried over unchanged and NAMED - PathForStableKey returns an
+    // untagged string verbatim, so the slot keeps exactly the behaviour it had, and the report says
+    // which slot still has it.
+    //
+    // PURE - no GPU, no filesystem, no global state. The tags come from Common::AssetHandle's own table
+    // (AssetsTag / EngineTag), which is string literals whose value cannot vary with the project root.
+    //
+    // Idempotent: a payload already carrying the new spelling has no old key to find and is left
+    // byte-identical.
+    //
+    // SHELF LIFE: this raises v16 to v17 and nothing else. It is deleted once no v16 file remains.
+    ServiceAssetRootMigrationReport MigrateServiceAssetRootV16ToV17( std::vector<Assets::EntityData>& entities,
+                                                                     const std::filesystem::path&     assetsRoot );
+
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
     {
@@ -938,6 +1000,9 @@ namespace Desert::Migration
         // the schema was below kSceneVersionScriptRoot
         bool                      ScriptRootRaised = false;
         ScriptRootMigrationReport ScriptRoot;
+        // the schema was below kSceneVersionServiceAssetRoot
+        bool                            ServiceAssetRootRaised = false;
+        ServiceAssetRootMigrationReport ServiceAssetRoot;
         // the schema was below kSceneVersionRetiredKeys
         bool                       RetiredKeysRaised = false;
         RetiredKeysMigrationReport RetiredKeys;
@@ -947,7 +1012,7 @@ namespace Desert::Migration
             return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised || CloudSpeciesRaised ||
                    CloudTypeRaised || CloudSetRaised || TerrainMaterialRaised || MaterialPathRaised ||
                    GravityUnitsRaised || UIVisibilityRaised || SSRUnitsRaised || CloudMaterialRaised ||
-                   DebugViewRaised || ScriptRootRaised || RetiredKeysRaised;
+                   DebugViewRaised || ScriptRootRaised || ServiceAssetRootRaised || RetiredKeysRaised;
         }
     };
 

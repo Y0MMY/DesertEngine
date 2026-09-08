@@ -85,6 +85,19 @@ namespace Common
             return roots;
         }
 
+        // The tag a given content root's keys are written behind, looked up by that root's own ADDRESS so
+        // there is no second spelling of any tag anywhere in the repository. Empty if the root is not in
+        // the table, which is a broken invariant of the table rather than a case a caller handles.
+        static std::string_view TagForRoot( const std::filesystem::path& root ) noexcept
+        {
+            for ( const PathRoot& candidate : ContentRoots() )
+            {
+                if ( candidate.Root == &root )
+                    return candidate.Tag;
+            }
+            return {};
+        }
+
         // The tag PROJECT CONTENT is keyed behind, read out of the table above instead of spelled a
         // second time. It exists for callers that must compose a key WITHOUT touching the filesystem or
         // the live project root: a scene migration is pure by contract (DC §4.4), so it cannot call
@@ -96,12 +109,16 @@ namespace Common
         // spelling of "assets" anywhere in the repository.
         static std::string_view AssetsTag() noexcept
         {
-            for ( const PathRoot& candidate : ContentRoots() )
-            {
-                if ( candidate.Root == &Constants::Path::ASSETS_PATH )
-                    return candidate.Tag;
-            }
-            return {};
+            return TagForRoot( Constants::Path::ASSETS_PATH );
+        }
+
+        // The tag ENGINE RESOURCES are keyed behind, for the same callers and the same reason. A font or
+        // a vector icon may legitimately live under either root — both are scan roots for their services
+        // (Runtime/Services/ServiceScanRoots.hpp) — so a migration that can only name one of the two
+        // would have to guess about the other.
+        static std::string_view EngineTag() noexcept
+        {
+            return TagForRoot( Constants::Path::RESOURCE_PATH );
         }
 
         // Builds the stable key a path-derived handle is hashed from: the path RELATIVE to whichever
