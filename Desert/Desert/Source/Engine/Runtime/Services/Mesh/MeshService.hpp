@@ -23,6 +23,14 @@ namespace Desert::Runtime
         //
         // So the load is inside now. Success means the built mesh matches the asset it was built from
         // (BuildAndCache asserts exactly that); failure names the file and the reason and caches NOTHING.
+        //
+        // THE ROUTE THAT DELIVERED THAT SHELL IS CLOSED SEPARATELY, and this does not depend on it. The
+        // registry used to answer "is this file registered" two ways — `CreateAsset` on the identity key,
+        // `FindByPath` on a verbatim path compare — so the scene's caller missed, created, and was handed
+        // the preloader's shell believing it was fresh. `FindByPath` asks the same question now
+        // (Desert/Tests/Engine/AssetPathIdentity), which makes that arrival rare rather than routine. It
+        // does not make it impossible: a mesh the preloader genuinely never saw still reaches here as a
+        // shell, and building one eagerly without parsing it is a defect whatever handed it over.
         NO_DISCARD Common::BoolResultStr Register( const std::shared_ptr<Assets::MeshAsset>& meshAsset );
 
         // Lazy: register the asset SHELL only — the .stmesh/.skmesh parse + GPU build are deferred to the

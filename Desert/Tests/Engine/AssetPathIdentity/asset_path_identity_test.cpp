@@ -190,8 +190,8 @@ namespace
 // (`CloudTypeAsset` names a noise volume that IS registered and falls back to the built-in sky).
 TEST( AssetPathIdentity, EverySpellingOfOneFileFindsTheAssetRegisteredUnderAnother )
 {
-    const ProjectRootGuard  roots;
-    const auto              project = OpenProject( "find_only" );
+    const ProjectRootGuard      roots;
+    const auto                  project = OpenProject( "find_only" );
     const WorkingDirectoryGuard cwd( project );
 
     AssetManager mgr;
@@ -214,8 +214,8 @@ TEST( AssetPathIdentity, EverySpellingOfOneFileFindsTheAssetRegisteredUnderAnoth
 // the two AGREE cannot, whichever of them moves.
 TEST( AssetPathIdentity, TheTwoEntryPointsAnswerOneQuestionTheSameWay )
 {
-    const ProjectRootGuard  roots;
-    const auto              project = OpenProject( "agreement" );
+    const ProjectRootGuard      roots;
+    const auto                  project = OpenProject( "agreement" );
     const WorkingDirectoryGuard cwd( project );
 
     AssetManager mgr;
@@ -244,15 +244,14 @@ TEST( AssetPathIdentity, TheTwoEntryPointsAnswerOneQuestionTheSameWay )
 // shell DIRECTLY, before any create-on-miss is reached at all.
 TEST( AssetPathIdentity, TheScenesSpellingFindsThePreloadersUnparsedShell )
 {
-    const ProjectRootGuard  roots;
-    const auto              project = OpenProject( "preloader_shell" );
+    const ProjectRootGuard      roots;
+    const auto                  project = OpenProject( "preloader_shell" );
     const WorkingDirectoryGuard cwd( project );
 
     AssetManager mgr;
 
-    const Common::Filepath preloaderSpelling =
-         Common::Constants::Path::COOKED_PATH / "Meshes" / "base.stmesh";
-    const Common::Filepath sceneSpelling = std::filesystem::path( "Cooked" ) / "Meshes" / "base.stmesh";
+    const Common::Filepath preloaderSpelling = Common::Constants::Path::COOKED_PATH / "Meshes" / "base.stmesh";
+    const Common::Filepath sceneSpelling     = std::filesystem::path( "Cooked" ) / "Meshes" / "base.stmesh";
 
     const auto shell =
          mgr.CreateAsset<TextureProbe>( AssetPriority::Low, preloaderSpelling, /*loadAfterCreate=*/false );
@@ -271,8 +270,8 @@ TEST( AssetPathIdentity, TheScenesSpellingFindsThePreloadersUnparsedShell )
 // worth asserting directly and not only through the lookups.
 TEST( AssetPathIdentity, TheRecordsOwnKeyEqualsTheKeyOfEverySpellingOfIt )
 {
-    const ProjectRootGuard  roots;
-    const auto              project = OpenProject( "record_key" );
+    const ProjectRootGuard      roots;
+    const auto                  project = OpenProject( "record_key" );
     const WorkingDirectoryGuard cwd( project );
 
     AssetManager mgr;
@@ -323,8 +322,8 @@ TEST( AssetPathIdentity, TwoDifferentFilesStayTwoAssets )
 // `AsRequestedType` exists to refuse.
 TEST( AssetPathIdentity, OnePathTwoTypesStaysTwoRecordsUnderEverySpelling )
 {
-    const ProjectRootGuard  roots;
-    const auto              project = OpenProject( "two_types" );
+    const ProjectRootGuard      roots;
+    const auto                  project = OpenProject( "two_types" );
     const WorkingDirectoryGuard cwd( project );
 
     AssetManager mgr;
@@ -344,10 +343,8 @@ TEST( AssetPathIdentity, OnePathTwoTypesStaysTwoRecordsUnderEverySpelling )
     // Registered under opposite ends of the spelling list, and each type still resolves from both ends.
     for ( const auto& spelling : spellings )
     {
-        EXPECT_EQ( mgr.FindByPath<TextureProbe>( spelling ).get(), texture.get() )
-             << spelling.generic_string();
-        EXPECT_EQ( mgr.FindByPath<SkyboxProbe>( spelling ).get(), skybox.get() )
-             << spelling.generic_string();
+        EXPECT_EQ( mgr.FindByPath<TextureProbe>( spelling ).get(), texture.get() ) << spelling.generic_string();
+        EXPECT_EQ( mgr.FindByPath<SkyboxProbe>( spelling ).get(), skybox.get() ) << spelling.generic_string();
     }
 }
 
