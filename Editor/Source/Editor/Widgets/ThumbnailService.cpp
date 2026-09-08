@@ -33,6 +33,21 @@ namespace Desert::Editor
         // by hand, seconds apart. Five seconds is past any scroll burst and far inside any two deliberate
         // clicks.
         constexpr int kIdleTicksBeforeRelease = 300;
+
+        // HOW MANY RENDERER SLOTS MUST STILL BE FREE BEFORE THIS SERVICE MAY CLAIM ONE.
+        //
+        // A capture is BACKGROUND work: nobody clicked for it, and the picture it produces is a nicety on a
+        // row that already draws a placeholder. A scene view, a material document, the Details preview are
+        // the opposite — a person opened them and is looking at them now. There are six slots
+        // (Engine/Core/RendererSlotPool.hpp) and a SceneRenderer that finds none free does NOT fail: it
+        // records into slot 0 and shares the main viewport's per-frame state, which reads as "my preview
+        // moved when I moved the scene camera" and has cost days to diagnose.
+        //
+        // So the background consumer yields first, and it yields BEFORE the situation is critical rather
+        // than at it: one free slot is kept so that the next surface the user opens has somewhere to go.
+        // This is the standing condition on any bulk "generate the missing thumbnails" action too — the
+        // queue is what such an action fills, and this is the gate every request in it passes through.
+        constexpr uint32_t kSlotsKeptFreeForTheUser = 1;
     } // namespace
 
     ThumbnailService& ThumbnailService::Get()
@@ -126,6 +141,7 @@ namespace Desert::Editor
         m_InFlightTicks = 0;
         m_Captured      = 0;
         m_Skipped       = 0;
+        m_SlotRefused   = false;
 
         // ~AssetThumbnailRenderer idles the device and releases the scene before the renderer, which is what
         // returns the slot. Identical to the idle path above — the DIFFERENCE is only that this one is not
@@ -135,6 +151,39 @@ namespace Desert::Editor
 
         LOG_INFO( "[Thumbnails] renderer released on shutdown ({}/{} renderer slots in use).",
                   Graphic::SceneRenderer::GetLiveRendererCount(), EngineContext::kMaxRendererSlots );
+    }
+
+    bool ThumbnailService::AcquireRenderer()
+    {
+        // THE ONE PLACE THIS SERVICE MAY TAKE A SLOT, so the condition cannot be true in one caller and
+        // forgotten in the next — and so the refusal has exactly one voice.
+        const uint32_t live = Graphic::SceneRenderer::GetLiveRendererCount();
+        if ( live + kSlotsKeptFreeForTheUser >= EngineContext::kMaxRendererSlots )
+        {
+            // IT SAYS SO. A queue that quietly stops draining is indistinguishable from a queue that has
+            // nothing in it, and "nothing to do" is the reading a person will reach for — the same empty
+            // successful answer the contract forbids. Once per stretch of scarcity, because the state ends
+            // when a window is closed and a line per frame would bury the log it belongs in.
+            if ( !m_SlotRefused )
+            {
+                m_SlotRefused = true;
+                LOG_WARN( "[Thumbnails] {} of {} renderer slots are in use — {} preview(s) are waiting "
+                          "rather than taking the last one. Close a scene view, a material window or an "
+                          "asset preview and they will render.",
+                          live, EngineContext::kMaxRendererSlots, m_Queue.size() );
+            }
+            return false;
+        }
+
+        if ( m_SlotRefused )
+        {
+            m_SlotRefused = false;
+            LOG_INFO( "[Thumbnails] a renderer slot came free ({} of {} in use) — {} waiting preview(s) "
+                      "will now render.",
+                      live, EngineContext::kMaxRendererSlots, m_Queue.size() );
+        }
+        m_Renderer = std::make_unique<AssetThumbnailRenderer>();
+        return true;
     }
 
     void ThumbnailService::Tick()
@@ -175,8 +224,8 @@ namespace Desert::Editor
         }
         m_IdleTicks = 0;
 
-        if ( !m_Renderer )
-            m_Renderer = std::make_unique<AssetThumbnailRenderer>();
+        if ( !m_Renderer && !AcquireRenderer() )
+            return; // the queue is kept, not dropped: a slot freed later drains it
 
         m_Renderer->Tick();
 

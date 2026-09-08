@@ -255,9 +255,9 @@ namespace Desert::Editor
         // this row now asks for its own picture, so the browser is not what it is waiting for.
         // Three states, not two: "here it is", "it is coming" and "there is nothing to draw one of" are
         // different answers, and collapsing the last two would let an empty slot look like a slow one.
-        Utils::ImGuiUtilities::Tooltip( thumb            ? "Cached preview of this asset"
-                                        : png.empty()   ? "Nothing in this slot to preview"
-                                                        : "Preview queued — it will appear in a moment" );
+        Utils::ImGuiUtilities::Tooltip( thumb         ? "Cached preview of this asset"
+                                        : png.empty() ? "Nothing in this slot to preview"
+                                                      : "Preview queued — it will appear in a moment" );
 
         ImGui::SameLine();
     }
