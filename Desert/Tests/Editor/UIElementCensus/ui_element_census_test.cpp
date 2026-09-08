@@ -48,13 +48,21 @@ namespace
     };
 
     constexpr Exclusion kExclusions[] = {
-         { "UICanvasComponent", "the canvas root itself — created by its own 'Create UI Canvas' action, "
-                                "and a second canvas would not be drawn (the renderer takes the first)" },
+         // The named action moved when the UI editor became a document (U7-2): its "Create UI Canvas"
+         // button was an empty state INSIDE the window, and a document is opened over a canvas that
+         // exists. The two doors that were always there are the ones left.
+         { "UICanvasComponent", "the canvas root itself — created by the viewport toolbar's UI ▸ UI Canvas "
+                                "or Details ▸ Add Component ▸ UI Canvas, and a second canvas would not be "
+                                "drawn (the renderer takes the first)" },
          { "UILayoutComponent", "the rect. Every element gets one automatically in AddUIChild; on its own "
                                 "it is an invisible box" },
          { "UIScreenComponent", "the screen machine: a screen with no name is skipped by the renderer's "
                                 "seeding loop, so a menu-created one would be invisible" },
          { "UIScreenStackComponent", "belongs on the canvas entity, not on a child element" },
+         // TRUE SINCE U7-2 AND NOT BEFORE IT. This row said "added in Details" while the only control that
+         // added one was a button inside the Sequencer panel; the timeline is a document over this
+         // component now, so a window cannot exist without it and the button moved to Details ▸ UI Layout
+         // ▸ "Add UI Animation", where the thing is actually made.
          { "UIAnimComponent", "modifier — a keyed clip added in Details to an element that already exists" },
          { "UIBindingComponent", "modifier — binds a data-store value into an element that already exists" },
          { "UITweenComponent", "modifier — a from/to animation on an element that already exists" },

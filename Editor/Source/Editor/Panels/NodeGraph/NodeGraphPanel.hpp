@@ -29,6 +29,21 @@ namespace Desert::Editor
     // registered graph go through the normal shader hot-reload. Graphs save/load as .dgraph JSON
     // under Assets/ShaderGraphs/.
     // Hidden by default; enable via View -> Node Graph.
+    //
+    // ── THE LAST EDITOR THAT IS STILL A TOOL, AND WHY (U7-2) ──────────────────────────────────────
+    //
+    // U7 moved the material, the four cloud stages, the anim graph and the particle emitter into
+    // documents; U7-2 moved the UI canvas and the two timelines. This one did not move, and the task
+    // that left it here MEASURED the reason rather than deferring it by habit — the four things in the
+    // way are written out at the surviving hand-written arm in
+    // Editor/Source/Editor/Panels/FileExplorer/FileExplorerPanel.cpp, at the `FileType::ShaderGraph`
+    // branch. The short form: a `.dgraph` is not an asset and carries no identity of its own, so the
+    // work is an ASSET TYPE and a FORMAT MIGRATION, not the block of registration the other six were.
+    //
+    // WHAT THAT COSTS TODAY, so nobody has to rediscover it: `New`, `Load` and the browser's
+    // double-click (RequestOpen) all replace m_Doc unconditionally, so a second graph discards unsaved
+    // work with no prompt — and because this window is not a document, the command palette can only
+    // show it, never put a graph in it, which is why none of those three paths can be photographed.
     class NodeGraphPanel final : public IPanel
     {
     public:

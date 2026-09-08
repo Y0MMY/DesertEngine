@@ -9,6 +9,8 @@
 #include <Editor/Panels/PanelContext.hpp>
 #include <Editor/Panels/Clouds/CloudsPanel.hpp>
 #include <Editor/Panels/Particles/ParticleEditorPanel.hpp>
+#include <Editor/Panels/UI/UIEditorPanel.hpp>
+#include <Editor/Panels/Sequencer/SequencerPanel.hpp>
 
 #include <Common/Core/AssetHandle.hpp>
 #include <Engine/Core/Scene.hpp>
@@ -75,7 +77,10 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::RigidBodyComponent, Data, "R
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::AudioSourceComponent, Data, "AudioSourceData", "Audio Source" )
 // Particle Emitter is a CUSTOM entry: the reflected fields plus a transport (play / pause / restart),
 // because "is it emitting right now" is a state you drive, not a value you type. See MakeEmitterEntry.
-DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UICanvasComponent, Data, "UICanvasData", "UI Canvas" )
+// UI Canvas is a CUSTOM entry: the reflected fields PLUS "Open in UI Editor", which is what the UI Editor
+// becoming a document (U7-2) bought. The window used to be a tool that drew FindUICanvas(registry) — the
+// first canvas in the scene — so a button here could only ever have said "reveal that window", never "edit
+// THIS canvas". See MakeUICanvasEntry.
 // UI Layout is a CUSTOM entry (not the reflected one-liner) so the Details panel gets Unity-style anchor
 // presets ("Fill / Match Parent" + a 4x4 grid) above the raw anchor/offset fields. See MakeUILayoutEntry.
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIPanelComponent, Data, "UIPanelData", "UI Panel" )
@@ -921,6 +926,46 @@ namespace Desert::Editor
         return e;
     }
 
+    // UI Canvas: the reflected fields, plus the way into the window that authors this canvas.
+    static ComponentEditorEntry MakeUICanvasEntry()
+    {
+        using C = ::Desert::ECS::UICanvasComponent;
+        ComponentEditorEntry e;
+        e.Name              = "UI Canvas";
+        e.CanRemove         = true;
+        e.ReflectedTypeName = "UICanvasData";
+        e.Has               = []( ::Desert::ECS::Entity& en ) { return en.HasComponent<C>(); };
+        e.Add               = []( ::Desert::ECS::Entity& en ) { en.AddComponent<C>(); };
+        e.Remove            = []( ::Desert::ECS::Entity& en ) { en.RemoveComponent<C>(); };
+        e.DataPtr           = []( ::Desert::ECS::Entity& en ) -> void* { return &en.GetComponent<C>().Data; };
+        e.Draw = []( ::Desert::ECS::Entity& en, ::Desert::Core::Scene*, const ComponentEditContext& ctx )
+        {
+            auto& c = en.GetComponent<C>();
+
+            if ( !ctx.FieldFilter ) // while searching, only the matched fields are on screen
+            {
+                // ONE CANVAS, NAMED. The button sends a SUBJECT (this entity's UICanvasComponent), so a
+                // scene with two canvases has two windows and each is about the one it was opened from. The
+                // UI Editor used to be a singleton tool over the FIRST canvas in the registry, and with one
+                // window there was nothing a button could say — which is why there was no button.
+                // Open-or-focus falls out of the subject: pressing it twice brings the window that is
+                // already on this canvas forward rather than making a second one.
+                if ( ImGui::Button( ICON_MDI_VIEW_DASHBOARD "  Open in UI Editor", ImVec2( -FLT_MIN, 0.0f ) ) )
+                {
+                    ::Desert::Editor::Core::SubjectOpenRequests::Request(
+                         ::Desert::Editor::UIEditorPanel::SubjectFor( ::Desert::Editor::EntityId( en ) ) );
+                }
+                ::Desert::Editor::Utils::ImGuiUtilities::Tooltip(
+                     "Place elements on this canvas and preview it at its design resolution, in a window of "
+                     "its own" );
+                ImGui::Spacing();
+            }
+
+            PropertyEditorBuilder::Draw( &c.Data, "UICanvasData", ctx.AssetMgr(), ctx.UIHelper, ctx.FieldFilter );
+        };
+        return e;
+    }
+
     // UI Layout (RectTransform): anchor-preset controls ("Fill / Match Parent" + 4x4 grid) on top of the
     // reflected anchor/offset fields, so you can match the parent from the inspector (not just the
     // viewport toolbar). Presets act in design space (keep the authored size; stretch fills the axis).
@@ -938,6 +983,31 @@ namespace Desert::Editor
             auto& c = en.GetComponent<C>();
             UIAnchors::DrawControls( c.Data );
             PropertyEditorBuilder::Draw( &c.Data, "UILayoutData", ctx.AssetMgr(), ctx.UIHelper );
+
+            // ── THE ELEMENT'S PROPERTY TIMELINE ────────────────────────────────────────────────────────
+            //
+            // CREATE-THEN-OPEN when there is no clip yet, the way the terrain and cloud material rows
+            // create a `.demat` and open it in one press. The Sequencer's UI half is a document over the
+            // UIAnimComponent, so an element without one has no subject to open — the old "Add UI
+            // Animation" button lived INSIDE that window, which meant the window had to be able to exist
+            // over nothing. It cannot any more, so the button moved to where the thing is made.
+            if ( ctx.FieldFilter )
+                return; // while searching, only the matched fields are on screen
+
+            const bool hasClip = en.HasComponent<::Desert::ECS::UIAnimComponent>();
+            ImGui::Spacing();
+            if ( ImGui::Button( hasClip ? ICON_MDI_CHART_TIMELINE_VARIANT "  Open in Sequencer"
+                                        : ICON_MDI_PLUS "  Add UI Animation",
+                                ImVec2( -FLT_MIN, 0.0f ) ) )
+            {
+                if ( !hasClip )
+                    en.AddComponent<::Desert::ECS::UIAnimComponent>();
+                ::Desert::Editor::Core::SubjectOpenRequests::Request(
+                     ::Desert::Editor::SequencerPanel::UISubjectFor( ::Desert::Editor::EntityId( en ) ) );
+            }
+            ::Desert::Editor::Utils::ImGuiUtilities::Tooltip(
+                 hasClip ? "Key this element's Offset / Size / Opacity / Color over time"
+                         : "Add a clip that keys Offset / Size / Opacity / Color over time, and open it" );
         };
         return e;
     }
@@ -1477,6 +1547,8 @@ namespace
     const int _desert_foliage_component_reg =
          ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeFoliageEntry() );
 
+    const int _desert_uicanvas_component_reg =
+         ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeUICanvasEntry() );
     const int _desert_uilayout_component_reg =
          ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeUILayoutEntry() );
 

@@ -1,9 +1,10 @@
 #include "SequencerPanel.hpp"
-#include <Editor/Panels/PanelContext.hpp>
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
-#include <Editor/Core/Selection/SelectionManager.hpp>
+// SelectionManager and PanelContext are gone from this file with the selection it used to follow. What is
+// left of Selection here is SkeletonEditMode, which is not a selection at all: it is the viewport MODE the
+// bone gizmo runs in, and keying by manipulation reads it.
 #include <Editor/Core/Selection/SkeletonEditMode.hpp>
 
 #include <Engine/Core/Scene.hpp>
@@ -43,17 +44,41 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
-    SequencerPanel::SequencerPanel( std::shared_ptr<::Desert::Core::Scene> scene,
+    SequencerPanel::SequencerPanel( const SubjectId& subject, const std::string& displayName,
+                                    const Timeline timeline, const std::shared_ptr<::Desert::Core::Scene>& scene,
                                     Animation::AnimationLibrary* library, Assets::AssetManager* assetManager )
-         : IPanel( "Sequencer", /*showPanel=*/false ), m_Scene( std::move( scene ) ), m_Library( library ),
-           m_AssetManager( assetManager )
+         : ISubjectDocument( displayName, subject ), m_Scene( scene ), m_Library( library ),
+           m_AssetManager( assetManager ), m_Timeline( timeline )
     {
+    }
+
+    std::optional<std::reference_wrapper<const ECS::Entity>> SequencerPanel::ResolveEntity() const
+    {
+        const auto scene = m_Scene.lock();
+        if ( !scene )
+            return std::nullopt;
+        return scene->FindEntityByID( Subject().Owner );
+    }
+
+    bool SequencerPanel::IsSubjectAlive() const
+    {
+        const auto entOpt = ResolveEntity();
+        if ( !entOpt )
+            return false;
+
+        const ECS::Entity& entity = entOpt->get();
+        if ( m_Timeline == Timeline::UI )
+            return entity.HasComponent<ECS::UIAnimComponent>();
+
+        // BOTH, and the class note says why: a rig with no AnimationComponent has no clip to pick and no
+        // animator to pose, so there is nothing this window could key. Asking for only the component the
+        // subject is named after would leave a window open over half a subject, drawing an empty state —
+        // which is the shape making it a document removes.
+        return entity.HasComponent<ECS::SkinnedMeshComponent>() && entity.HasComponent<ECS::AnimationComponent>();
     }
 
     namespace
     {
-        bool s_OpenRequested = false;
-
         // A hoverable "(?)" that shows a wrapped explanation — used to demystify advanced controls.
         void HelpMarker( const char* text )
         {
@@ -120,19 +145,12 @@ namespace Desert::Editor
         upsertPos( track->ScaleKeys, s, []( auto& k, const glm::vec3& v ) { k.Scale = v; } );
     }
 
-    void SequencerPanel::RequestOpen()
-    {
-        s_OpenRequested = true;
-    }
-
-    void SequencerPanel::OnPreUpdate()
-    {
-        if ( s_OpenRequested )
-        {
-            GetVisibility() = true;
-            s_OpenRequested = false;
-        }
-    }
+    // RequestOpen() AND ITS FILE-STATIC INBOX ARE GONE, and the deletion is the change rather than a
+    // tidy-up. `static void RequestOpen()` carried no payload, so the Details button that called it could
+    // only ever mean "reveal the one Sequencer window"; opening a SECOND rig beside the first was
+    // inexpressible, and so was the window knowing which rig it was about. The button sends a SUBJECT now
+    // (Core::SubjectOpenRequests), which is the one wire every document open goes through — see
+    // Editor/Core/SubjectOpenRequest.hpp for why there are no longer three private ones.
 
     std::string SequencerPanel::CreateEmptyClip( const Animation::Skeleton& skeleton )
     {
@@ -219,42 +237,36 @@ namespace Desert::Editor
         return path.string();
     }
 
+    // FOUR EMPTY STATES USED TO STAND HERE — no scene, nothing selected, selection not in the scene,
+    // selection is neither a rig nor a UI element — and every one of them existed because the window was
+    // about "whatever is selected" and therefore had to have an opinion about every way that can be
+    // nothing. A document is about its subject: the only thing left to say is that the subject has gone,
+    // and even that is one frame at most, because the editor's own liveness sweep (IsSubjectAlive) closes
+    // the window with a named reason on the same frame it notices.
     void SequencerPanel::OnUIRender()
     {
-        if ( !m_Scene )
+        const auto entOpt = ResolveEntity();
+        if ( !entOpt || !IsSubjectAlive() )
         {
-            ImGui::TextDisabled( "No active scene." );
+            ImGui::TextDisabled( "What this timeline was editing no longer exists; closing." );
             return;
         }
 
-        const auto& sel = Core::SelectionManager::GetSelected();
-        if ( !sel )
-        {
-            ImGui::TextDisabled( "Select a skinned-mesh entity to sequence its animation." );
-            return;
-        }
-        const auto entOpt = m_Scene->FindEntityByID( *sel );
-        if ( !entOpt )
-        {
-            ImGui::TextDisabled( "Selection not found in the scene." );
-            return;
-        }
-        auto& entity = entOpt->get();
+        // Entity is a HANDLE and the resolution hands back a const one; copying gives a writable handle
+        // onto the same entity, which is what both timelines edit through.
+        ECS::Entity entity = entOpt->get();
 
-        // A UI element gets the property timeline instead of the skeletal one — same panel, same idiom.
-        if ( entity.HasComponent<ECS::UILayoutComponent>() || entity.HasComponent<ECS::UIAnimComponent>() )
+        if ( m_Timeline == Timeline::UI )
         {
-            ECS::Entity uiEntity = entity; // Entity is a handle; the UI editor writes through it
-            DrawUITracks( uiEntity );
+            DrawUITracks( entity );
             return;
         }
 
-        if ( !entity.HasComponent<ECS::AnimationComponent>() || !entity.HasComponent<ECS::SkinnedMeshComponent>() )
-        {
-            ImGui::TextDisabled( "Select a skinned-mesh entity (Animation + Skinned Mesh) or a UI element." );
-            return;
-        }
+        DrawSkeletalTimeline( entity );
+    }
 
+    void SequencerPanel::DrawSkeletalTimeline( ECS::Entity& entity )
+    {
         auto&       anim = entity.GetComponent<ECS::AnimationComponent>();
         const auto& smc  = entity.GetComponent<ECS::SkinnedMeshComponent>();
         // Editor-built runtime rig (Convert to Skinned) has no MeshHandle — prefer it (mirrors the render /
@@ -816,17 +828,11 @@ namespace Desert::Editor
     {
         namespace ImGui = ::ImGui;
 
-        if ( !entity.HasComponent<ECS::UIAnimComponent>() )
-        {
-            ImGui::TextDisabled( "This UI element has no animation clip yet." );
-            ImGui::Spacing();
-            if ( ImGui::Button( ICON_MDI_PLUS "  Add UI Animation" ) )
-                entity.AddComponent<ECS::UIAnimComponent>();
-            ImGui::SameLine();
-            ImGui::TextDisabled( "(a clip keys Offset / Size / Opacity / Color over time)" );
-            return;
-        }
-
+        // NO "ADD UI ANIMATION" BUTTON HERE ANY MORE. The clip IS this window's subject, so a window over
+        // an element that has none is a window over nothing — it cannot open at all (IsSubjectAlive), and
+        // it closes if the component is removed underneath it. Adding the clip is Details ▸ UI Layout ▸
+        // "Add UI Animation", which adds the component and opens this window on it in one press: the same
+        // create-then-open the terrain and cloud material rows use.
         auto& clip = entity.GetComponent<ECS::UIAnimComponent>().Data;
 
         // --- transport -------------------------------------------------------------------------------
@@ -1014,12 +1020,8 @@ namespace Desert::Editor
         }
     }
 
-    bool SequencerPanel::IsRelevant() const
-    {
-        // Skeletal clips OR a UI element's property timeline — both live in this panel.
-        return ( SelectionHas<ECS::AnimationComponent>( m_Scene ) &&
-                 SelectionHas<ECS::SkinnedMeshComponent>( m_Scene ) ) ||
-               SelectionHas<ECS::UILayoutComponent>( m_Scene );
-    }
+    // IsContextual/IsRelevant ARE GONE WITH THE PANEL. They answered "should this window appear because
+    // of what is selected?", which is a question only a singleton tool can be asked — a document is
+    // opened, by subject, and selecting something else is not a request to open or close one.
 
 } // namespace Desert::Editor
