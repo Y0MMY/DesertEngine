@@ -223,16 +223,11 @@ namespace Desert::Editor
         auto& settings       = m_Scene->GetSettings();
         settings.EnableBloom = false;
 
-        // THE QUALITY THIS PANE RENDERS AT, applied to a COPY of the machine's answer and pushed into
-        // this renderer alone (К3). Two of the three lines that used to stand here wrote SceneSettings:
-        // `AA = FXAA`, which merely restated the default and said nothing, and `CloudQualityTier = Low`,
-        // which was a real override of a value that has since stopped being scene data. A preview pane is
-        // 512 pixels marching at quarter resolution and has no use for the viewport's sample ceiling, so
-        // the tier still drops — but the user's stored answer is never touched, which is К10's rule: a
-        // view's transient idea of what it needs must not become the user's permanent one.
-        Common::Settings::MachineSettings quality = Common::Settings::MachineSettings::Get();
-        quality.CloudQualityTier                  = Common::Settings::CloudQuality::Low;
-        m_Renderer->SetQuality( quality );
+        // The three quality lines that used to stand here are gone: two of them (`AA = FXAA`) merely
+        // restated the default, and the third (`CloudQualityTier = Low`) was a real override of a value
+        // that has since stopped being scene data. The tier still drops — see PushQuality(), called every
+        // frame from Update() rather than once from here, so a machine-quality change reaches this pane
+        // in the same frame it reaches the viewport.
 
         // The selection outline is pushed by the editor loop every frame; this renderer is never fed by it,
         // so disable it explicitly or a stale outline could bleed into the preview.
@@ -908,6 +903,16 @@ namespace Desert::Editor
         // The preview world, written onto the entities before the scene records. Unconditionally: see
         // ApplySetup for why there is no dirty flag.
         ApplySetup();
+
+        // THE QUALITY THIS PANE RENDERS AT, applied to a COPY of the machine's answer (К3). A preview is
+        // a few hundred pixels marching at quarter resolution and has no use for the viewport's cloud
+        // budget, so the tier drops here — on the way in, never in the store. That is К10's rule and the
+        // reason it exists: a view's transient idea of what it needs must not become the user's permanent
+        // one. Pushed every frame, like EditorLayer pushes the viewport's, so the pane follows a change
+        // made in Scene Settings instead of holding whatever the machine said when the panel opened.
+        Common::Settings::MachineSettings quality = Common::Settings::MachineSettings::Get();
+        quality.CloudQualityTier                  = Common::Settings::CloudQuality::Low;
+        m_Renderer->SetQuality( quality );
 
         ApplyCamera( width, height );
 

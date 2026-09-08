@@ -24,6 +24,8 @@
 #include <Engine/Core/Serialize/SceneFormat.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 
+#include <Common/Settings/MachineSettings.hpp>
+
 #include <rflcpp/rfl/json.hpp>
 
 #include <gtest/gtest.h>
@@ -168,9 +170,9 @@ TEST( CloudProtocolScene, EveryReflectedFieldIsWrittenExplicitlySoNoDefaultCanMo
     }
 }
 
-// The scene-wide settings block is reflected too, and it is where CloudQualityTier lives — the tier every
-// six-point table in CALIBRATION.md was implicitly shot at without ever naming it.
-TEST( CloudProtocolScene, TheSettingsBlockIsWrittenInFullIncludingTheCloudQualityTier )
+// The scene-wide settings block is reflected too, so the same rule applies to it: every field it can
+// state, it states, or a C++ default moves the instrument.
+TEST( CloudProtocolScene, TheSettingsBlockIsWrittenInFull )
 {
     const TypeInfo* type = Reflected( "SceneSettings" );
     ASSERT_NE( type, nullptr );
@@ -188,8 +190,41 @@ TEST( CloudProtocolScene, TheSettingsBlockIsWrittenInFullIncludingTheCloudQualit
         for ( const auto& field : type->Fields )
             EXPECT_TRUE( present.count( field.Name ) != 0 )
                  << sceneName << ": 'Settings." << field.Name << "' is not written, so it is a default";
+    }
+}
 
-        EXPECT_TRUE( present.count( "CloudQualityTier" ) != 0 ) << sceneName;
+// THE TIER THE PROTOCOL IS MEASURED AT, AND IT IS NO LONGER A KEY IN THE FILE.
+//
+// `EXPECT_TRUE( present.count( "CloudQualityTier" ) )` stood at the end of the test above — the tier every
+// six-point table in CALIBRATION.md was implicitly shot at without ever naming it, pinned into the file so
+// that it could not move. К3 moved it out: a quality tier is what a MACHINE can afford, and while it lived
+// in the level file a weak machine could only turn it down by editing a file that goes to everybody.
+//
+// SO THE INSTRUMENT IS PINNED DIFFERENTLY, AND — this is the part worth stating — more tightly than
+// before. A file could always be edited to say Low, and then one protocol scene would have been measured
+// at a different tier from its three siblings with nothing to catch it. There is no such key now: every
+// protocol scene is measured at whatever ONE answer the machine gives, and on a machine that has never
+// chosen (which is every CI runner and every fresh worktree) that answer is the schema default. This
+// asserts the two halves of that: the default is High, and no protocol scene may state a tier of its own.
+TEST( CloudProtocolScene, TheTierTheProtocolIsMeasuredAtIsTheMachineDefaultAndThatDefaultIsHigh )
+{
+    EXPECT_EQ( Common::Settings::MachineSettings{}.CloudQualityTier, Common::Settings::CloudQuality::High )
+         << "the calibrated reference tier moved; every number in Docs/Clouds/CALIBRATION.md was taken at "
+            "High and a new default silently re-measures all of them";
+
+    for ( const char* sceneName : kProtocolScenes )
+    {
+        const auto parsed = rfl::json::read<SceneSerialized>( ReadAll( ScenePath( sceneName ) ) );
+        ASSERT_TRUE( parsed ) << sceneName;
+        ASSERT_TRUE( parsed.value().Settings.has_value() ) << sceneName;
+        const auto settings = parsed.value().Settings->to_object();
+        ASSERT_TRUE( settings ) << sceneName;
+
+        const std::set<std::string> present = KeysOf( settings.value() );
+        for ( const char* key : { "CloudQualityTier", "AA", "MeshLOD", "TextureFilterMode", "Anisotropy" } )
+            EXPECT_TRUE( present.count( key ) == 0 )
+                 << sceneName << " states Settings." << key
+                 << ", which is machine quality and cannot be in a level file (К3). Run Tools/SceneMigrator.";
     }
 }
 

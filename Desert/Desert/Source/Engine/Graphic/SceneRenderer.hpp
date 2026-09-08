@@ -215,9 +215,11 @@ namespace Desert::Graphic
         // stored one. That is К10's rule for viewport modes, and the reason it exists: a view's transient
         // idea of what it needs must never be written back into the user's permanent answer.
         //
-        // A renderer nobody pushes to keeps the schema defaults, which are High everywhere — correct
-        // rather than cheap. MSAA is NOT here: pipelines bake their sample count, so Init reads
-        // MachineSettings directly and a later push could not change it.
+        // A renderer nobody pushes to holds the machine's own answer as of its construction (see the
+        // member), not the schema defaults — because two of these five reach a GLOBAL the sampler path
+        // reads, and a stale copy there is everyone's problem, not just this view's. MSAA is NOT here:
+        // pipelines bake their sample count, so Init reads MachineSettings directly and a later push
+        // could not change it.
         //
         // Call it BEFORE BeginScene: the values reach the systems from there.
         void SetQuality( const Common::Settings::MachineSettings& quality )
@@ -539,9 +541,17 @@ namespace Desert::Graphic
         // nobody pushes to renders correctly rather than cheaply.
         Common::Settings::CloudQuality m_CloudQuality = Common::Settings::CloudQuality::High;
         // WHAT THIS MACHINE CAN AFFORD. NOT read from the scene — pushed in by whoever owns the view
-        // (SetQuality), and at the schema defaults until someone does. See Common/Settings/
-        // MachineSettings.hpp for why it stopped being scene data.
-        Common::Settings::MachineSettings m_Quality;
+        // (SetQuality). See Common/Settings/MachineSettings.hpp for why it stopped being scene data.
+        //
+        // INITIALISED FROM THE MACHINE'S OWN ANSWER, and this is where it differs from m_DebugView beside
+        // it, whose "nobody pushed to me" default is deliberately all-off. Two of these five escape into
+        // GLOBAL state — RenderConfig::TextureFilter and AnisotropyLevel, which the Vulkan sampler path
+        // reads off whichever thread is cooking a texture — so a renderer holding the schema defaults
+        // would overwrite the user's choice for every other renderer the moment it drew a frame. The
+        // offscreen thumbnail and photogrammetry previews are exactly such renderers: nobody pushes to
+        // them, and before this initialiser they would have quietly reset the sampler to Trilinear/8x.
+        // "Not pushed to" therefore has to mean "this machine's answer" here rather than "the defaults".
+        Common::Settings::MachineSettings m_Quality = Common::Settings::MachineSettings::Get();
         // What this VIEW is drawing on top of the world. NOT refreshed from the scene — pushed in by
         // whoever owns the view (SetDebugView), and "show nothing" until someone does. See
         // Graphic/DebugViewState.hpp for why it stopped being scene data.

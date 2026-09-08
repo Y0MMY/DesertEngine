@@ -349,6 +349,19 @@ namespace Desert::Editor
         m_StartupStages.push_back(
              { "Preloading painted layouts...", [this] { m_AssetPreloader->PreloadCloudLayouts(); } } );
 
+        // WHAT THIS MACHINE CAN AFFORD — a different file from editor.json and deliberately so (К3).
+        // editor.json is one person's copy of the EDITOR and the packaged game never opens it, while every
+        // value in machine.json is read by SceneRenderer, which the packaged game runs; the schema is one
+        // and the PLACE is the parameter, so a shipped build reads the same fields out of the player's own
+        // directory (Runtime/Source/Main.cpp).
+        //
+        // FIRST, before any SceneRenderer is CONSTRUCTED, and for two independent reasons. MSAA is baked
+        // into the pipelines at SceneRenderer::Init, so a later load would apply one start behind; and a
+        // renderer initialises its own copy of these values from this store, so one built before the load
+        // would hold the schema defaults and push two of them into global sampler state.
+        Common::Settings::MachineSettings::Load( std::filesystem::path( ProjectContext::ConfigDirectory() ) /
+                                                 "machine.json" );
+
         m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager );
         m_AnimationLibrary = std::make_unique<Animation::AnimationLibrary>( m_AssetManager.get() );
         m_SceneRenderer    = std::make_unique<Graphic::SceneRenderer>();
@@ -365,15 +378,6 @@ namespace Desert::Editor
         // User prefs (snap steps, camera speed, autosave) from ~/.desertengine/editor.json. Snap values
         // apply immediately; the camera speed is applied on the first frame (the camera exists by then).
         EditorPreferences::Load();
-
-        // WHAT THIS MACHINE CAN AFFORD — a different file and deliberately so (К3). editor.json is one
-        // person's copy of the EDITOR and the packaged game never opens it, while every value in
-        // machine.json is read by SceneRenderer, which the packaged game runs; the schema is one and the
-        // PLACE is the parameter, so a shipped build reads the same fields out of the player's own
-        // directory. Loaded HERE, beside the prefs and before any SceneRenderer initializes, because
-        // MSAA is baked into the pipelines at Init and a later load would apply one start behind.
-        Common::Settings::MachineSettings::Load( std::filesystem::path( ProjectContext::ConfigDirectory() ) /
-                                                 "machine.json" );
 
         // Sandbox one-time bake of the Cornell showcase to a loadable scene (File -> Open ->
         // CornellDemo.desce). Runs BEFORE the default-scene handling below and clears itself, so it
