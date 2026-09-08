@@ -199,6 +199,25 @@ TEST( SceneScriptRootMigration, TheKeyIsTheOneStableKeyForPathWouldMint )
     EXPECT_EQ( ScriptKeyOf( entities[0] ).value_or( "<none>" ), Common::AssetHandle::StableKeyForPath( file ) );
 }
 
+// THE TAG THIS STEP WRITES IS ONE THE READER RECOGNISES, asserted rather than assumed. The migration
+// composes its prefix from AssetHandle::AssetsTag(), which finds the assets row by that root's own
+// address; if the row ever stopped being there the lookup would return an empty tag, the step would
+// write a bare ":Scripts/x.lua", and IsProjectRelativeKey — the function the rest of the engine asks
+// "does this name a place inside the project" — would say no. That is a silent wrong answer with a
+// successful-looking migration in front of it (§1.4), so it gets its own line here.
+TEST( SceneScriptRootMigration, TheTagTheStepWritesIsOneTheReaderKnows )
+{
+    ASSERT_FALSE( Common::AssetHandle::AssetsTag().empty() )
+         << "the assets row vanished from AssetHandle::ContentRoots(); every key this step writes would "
+            "be untagged";
+
+    std::vector<Assets::EntityData> entities{
+         ScriptedWith( std::vector<std::string>{ "Resources/Assets/Scripts/Examples/MoveAlongX.lua" } ) };
+    Migration::MigrateScriptRootV15ToV16( entities );
+
+    EXPECT_TRUE( Common::AssetHandle::IsProjectRelativeKey( ScriptKeyOf( entities[0] ).value_or( "" ) ) );
+}
+
 // The editor writes `Resources/Assets/Scripts/...` (its working directory is `Editor/`), the migrator is
 // run from the repository root and a hand-edited file may carry an absolute path. All three name one
 // file and must produce ONE key — which is why the root is derived from the stored path rather than
