@@ -93,6 +93,7 @@
 #include "Editor/Panels/Clouds/CloudTypePanel.hpp"
 #include "Editor/Panels/Animation/AnimLayersPanel.hpp"
 #include "Editor/Core/ToastManager.hpp"
+#include "Editor/Core/OpenableAssets.hpp"
 #include "Editor/Core/SubjectEditorRegistry.hpp"
 #include "Editor/Core/SubjectOpenRequest.hpp"
 
@@ -746,7 +747,12 @@ namespace Desert::Editor
         // per kind of document, and this file carried a second copy of the same chain. Registered here
         // instead, beside the editors they feed, so the browser asks once and a new format is a line in
         // this block rather than an edit in two files somebody has to remember exist.
+        //
+        // AND WHICH EXTENSIONS EACH ONE ANSWERS FOR. Taken from the format's own constant, never spelled
+        // again here: the palette ENUMERATES the project's openable files against this list, so a literal
+        // that drifted from the resolver's would produce a list of entries the resolver then refuses.
         m_SubjectEditors.RegisterPathOpener(
+             { std::string( Common::Constants::Extensions::MATERIAL_EXTENSION ) },
              [this]( const std::string& path )
              {
                  switch ( RequestMaterialDocument( m_AssetManager.get(), path ) )
@@ -761,6 +767,9 @@ namespace Desert::Editor
                  return SubjectEditorRegistry::PathOpenOutcome::NotMine;
              } );
         m_SubjectEditors.RegisterPathOpener(
+             { std::string( Assets::kCloudNoiseVolumeExtension ), std::string( Assets::kCloudTypeExtension ),
+               std::string( Assets::kCloudModellingVolumeExtension ),
+               std::string( Assets::kCloudLayoutExtension ) },
              [this]( const std::string& path )
              {
                  switch ( RequestCloudDocument( m_AssetManager.get(), path ) )
@@ -3120,21 +3129,42 @@ namespace Desert::Editor
         // unattended, since a document does not exist until something opens its asset and therefore has
         // no name to be reached by.
         //
-        // The list is the project's registered assets filtered by "does an editor open this kind", which
-        // is m_SubjectEditors and not a hand-written type list — so a new document type appears here the
-        // moment its factory is registered.
-        if ( m_AssetManager )
+        // ENUMERATED FROM THE PROJECT'S FILES, NOT FROM THE ASSET MANAGER'S CACHE. This loop used to walk
+        // `RegisteredAssets()` — whatever the startup preloader had got round to registering — which is a
+        // container whose contents are derived from the same source as the question being asked of it.
+        // Measured through the control channel, once per frame: the group goes 0 -> 106 -> 130 entries,
+        // because FIVE separate startup stages fill that cache, so for 3.3 s of every boot the palette
+        // successfully offered every material in this project and none of its twenty-four cloud assets.
+        //
+        // The entity half above never had that problem, and the reason is the shape: it walks the SCENE,
+        // which is what says which entities exist. The equivalent for files is the content enumeration —
+        // ListFilesRecursive, which is also what the preloader walks to build the cache in the first
+        // place, and which covers a mounted .dpak as well as loose files. Reading it one step earlier
+        // removes the window rather than shortening it.
+        //
+        // Nothing is loaded to build this list, which is the other half of the argument: a project with
+        // ten thousand materials costs one directory walk here, and the file is parsed by the OPENER, on
+        // the frame somebody actually asks for it.
+        //
+        // See Editor/Core/OpenableAssets.hpp for the labelling rule and the three `model.demat` that
+        // motivated it.
+        for ( const OpenableAsset& asset :
+              CollectOpenableAssets( Common::Utils::FileSystem::ListFilesRecursive(
+                                          Common::Constants::Path::ASSETS_PATH ),
+                                     m_SubjectEditors.ClaimedExtensions(),
+                                     Common::Constants::Path::ASSETS_PATH ) )
         {
-            for ( const auto& [metadata, asset] : m_AssetManager->RegisteredAssets() )
-            {
-                const SubjectId subject =
-                     AssetSubject( metadata.Handle, static_cast<uint32_t>( metadata.AssetType ) );
-                if ( !metadata.IsValid() || !m_SubjectEditors.HasEditorFor( subject.Type() ) )
-                    continue;
-
-                commands.push_back( { "Open", metadata.Filepath.filename().generic_string(),
-                                      [subject] { Core::SubjectOpenRequests::Request( subject ); } } );
-            }
+            const std::string path = asset.Path;
+            commands.push_back( { "Open", asset.Label, [this, path]
+                                  {
+                                      // THROUGH THE PATH OPENERS, the same route the asset browser's
+                                      // double-click takes. Resolving a path to a subject here would be a
+                                      // second copy of the find-or-create-and-load chain — the exact
+                                      // duplication SubjectEditorRegistry::RegisterPathOpener was
+                                      // introduced to delete, when the browser and EditorLayer each
+                                      // carried one.
+                                      (void)m_SubjectEditors.OpenPath( path );
+                                  } } );
         }
 
         // THE LEVELS, which every other kind of document could already be opened by name from here and a

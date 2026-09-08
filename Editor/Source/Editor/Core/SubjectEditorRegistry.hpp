@@ -148,7 +148,28 @@ namespace Desert::Editor
 
         using PathOpener = std::function<PathOpenOutcome( const std::string& path )>;
 
-        void RegisterPathOpener( PathOpener opener );
+        // AN OPENER SAYS WHICH EXTENSIONS IT ANSWERS FOR, and that is not bookkeeping — it is what makes
+        // the project's openable files ENUMERABLE rather than merely openable.
+        //
+        // The palette has to offer one entry per openable asset, and it used to build that list from the
+        // asset manager's cache: whatever the startup preloader had registered so far. Measured, that list
+        // is 0 entries, then 106, then 130 as five separate startup stages fill it — so for 3.3 s of every
+        // boot the palette successfully offered every material and no cloud asset at all. The fix is to
+        // enumerate the FILES, which means something has to know which files are openable, and the only
+        // honest owner of that fact is the opener itself. A list kept anywhere else is the second census
+        // that falls behind — this registry exists because there used to be three of those.
+        //
+        // Dot included, lower case ({ ".demat" }): the filter compares against a lower-cased extension, so
+        // a registration spelled ".DEMAT" would silently claim nothing. An EMPTY list is refused rather
+        // than accepted as "claims nothing": an opener that answers for no extension can still be reached
+        // through OpenPath and would therefore be openable-but-not-listed, which is exactly the
+        // reachable-only-by-hand state the command palette exists to abolish.
+        void RegisterPathOpener( std::vector<std::string> extensions, PathOpener opener );
+
+        // Every extension any registered opener claims, deduplicated, for whoever is enumerating content.
+        // The union and not a per-opener view: a caller asking "can this project's files be opened?" does
+        // not care which opener would take them, and would only be able to get that wrong.
+        [[nodiscard]] std::vector<std::string> ClaimedExtensions() const;
 
         // Consults the registered openers in registration order and stops at the first that claims the
         // path. NotMine when none does — which is a normal answer (a `.png` is not a document) and is why
@@ -165,8 +186,16 @@ namespace Desert::Editor
         [[nodiscard]] std::vector<SubjectTypeKey> RegisteredTypes() const;
 
     private:
+        // An opener and the formats it answers for, held together because they are one registration: two
+        // containers would let a format be claimed by nothing, or listed with no opener behind it.
+        struct RegisteredOpener
+        {
+            std::vector<std::string> Extensions;
+            PathOpener               Open;
+        };
+
         std::unordered_map<SubjectTypeKey, Registration> m_Editors;
-        std::vector<PathOpener>                          m_PathOpeners;
+        std::vector<RegisteredOpener>                    m_PathOpeners;
     };
 
     // ── THE RELATION, NOT A LIST ───────────────────────────────────────────────────────────────────────

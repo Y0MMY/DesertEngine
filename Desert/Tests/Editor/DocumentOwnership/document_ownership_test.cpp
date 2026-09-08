@@ -834,18 +834,20 @@ TEST( PathOpening, TheFirstOpenerThatClaimsThePathWins )
     SubjectEditorRegistry    registry;
     std::vector<std::string> asked;
 
-    registry.RegisterPathOpener(
-         [&asked]( const std::string& path )
-         {
-             asked.push_back( "materials" );
-             return path.ends_with( ".demat" ) ? PathOpenOutcome::Requested : PathOpenOutcome::NotMine;
-         } );
-    registry.RegisterPathOpener(
-         [&asked]( const std::string& path )
-         {
-             asked.push_back( "clouds" );
-             return path.ends_with( ".decloudtype" ) ? PathOpenOutcome::Requested : PathOpenOutcome::NotMine;
-         } );
+    registry.RegisterPathOpener( { ".demat" },
+                                 [&asked]( const std::string& path )
+                                 {
+                                     asked.push_back( "materials" );
+                                     return path.ends_with( ".demat" ) ? PathOpenOutcome::Requested
+                                                                       : PathOpenOutcome::NotMine;
+                                 } );
+    registry.RegisterPathOpener( { ".decloudtype" },
+                                 [&asked]( const std::string& path )
+                                 {
+                                     asked.push_back( "clouds" );
+                                     return path.ends_with( ".decloudtype" ) ? PathOpenOutcome::Requested
+                                                                             : PathOpenOutcome::NotMine;
+                                 } );
 
     EXPECT_EQ( registry.OpenPath( "M_Crate.demat" ), PathOpenOutcome::Requested );
     EXPECT_EQ( asked, ( std::vector<std::string>{ "materials" } ) )
@@ -862,7 +864,7 @@ TEST( PathOpening, APathNothingClaimsIsNotAnError )
     // is a normal answer and not a failure, which is why the browser logs nothing for it.
     SubjectEditorRegistry registry;
     registry.RegisterPathOpener(
-         []( const std::string& path )
+         { ".demat" }, []( const std::string& path )
          { return path.ends_with( ".demat" ) ? PathOpenOutcome::Requested : PathOpenOutcome::NotMine; } );
 
     EXPECT_EQ( registry.OpenPath( "Rock_Albedo.png" ), PathOpenOutcome::NotMine );
@@ -877,7 +879,7 @@ TEST( PathOpening, AFailureIsDistinguishedFromNotMine )
     // nothing to report at all. Collapsing the two is how a double-click that does nothing becomes
     // indistinguishable from a window that failed to draw.
     SubjectEditorRegistry registry;
-    registry.RegisterPathOpener( []( const std::string& ) { return PathOpenOutcome::Failed; } );
+    registry.RegisterPathOpener( { ".demat" }, []( const std::string& ) { return PathOpenOutcome::Failed; } );
 
     EXPECT_EQ( registry.OpenPath( "Broken.demat" ), PathOpenOutcome::Failed );
 }
@@ -886,6 +888,91 @@ TEST( PathOpening, ARegistryWithNoOpenersClaimsNothing )
 {
     SubjectEditorRegistry registry;
     EXPECT_EQ( registry.OpenPath( "M_Crate.demat" ), PathOpenOutcome::NotMine );
+    EXPECT_TRUE( registry.ClaimedExtensions().empty() );
+}
+
+// ── AND WHAT AN OPENER CLAIMS IS WHAT MAKES ITS FORMATS ENUMERABLE ──────────────────────────────────
+//
+// A6-1. The command palette offers one entry per openable file in the project, and to build that list
+// something has to know which files are openable. That fact has exactly one honest owner — the opener —
+// and every other home for it is the second census that falls behind. The palette used to dodge the
+// question by walking the asset manager's CACHE instead, which is why it offered 106 of this project's
+// 130 openable assets for the first seconds of every session.
+
+TEST( PathOpening, TheClaimedExtensionsAreTheUnionOfEveryOpenersOwnDeclaration )
+{
+    SubjectEditorRegistry registry;
+    registry.RegisterPathOpener( { ".demat" },
+                                 []( const std::string& ) { return PathOpenOutcome::Requested; } );
+    registry.RegisterPathOpener( { ".dcnv", ".decloudtype", ".dcmv", ".dclayout" },
+                                 []( const std::string& ) { return PathOpenOutcome::Requested; } );
+
+    EXPECT_EQ( registry.ClaimedExtensions(),
+               ( std::vector<std::string>{ ".demat", ".dcnv", ".decloudtype", ".dcmv", ".dclayout" } ) );
+}
+
+// Two openers claiming one format is a programming error either way, but the LIST must not repeat it: a
+// duplicate would make every file of that kind appear twice in the palette, and two rows spelled the same
+// is the ambiguity OpenableAssets exists to remove.
+TEST( PathOpening, AFormatClaimedTwiceIsListedOnce )
+{
+    SubjectEditorRegistry registry;
+    registry.RegisterPathOpener( { ".demat" },
+                                 []( const std::string& ) { return PathOpenOutcome::Requested; } );
+    registry.RegisterPathOpener( { ".demat", ".dcnv" },
+                                 []( const std::string& ) { return PathOpenOutcome::Requested; } );
+
+    EXPECT_EQ( registry.ClaimedExtensions(), ( std::vector<std::string>{ ".demat", ".dcnv" } ) );
+}
+
+// AN OPENER THAT CLAIMS NOTHING IS REFUSED WHOLE, not registered-and-unlisted. Left in, its formats would
+// open by double-click and appear in NO enumeration of the project — reachable by hand and by nothing
+// else, which is the state the command palette exists to abolish (Г14: the channel's vocabulary IS the
+// palette's list). Refusing the registration makes the omission a startup error instead of a silence.
+TEST( PathOpening, AnOpenerThatClaimsNoExtensionIsRefusedRatherThanSilentlyUnlisted )
+{
+    SubjectEditorRegistry registry;
+    registry.RegisterPathOpener( {}, []( const std::string& ) { return PathOpenOutcome::Requested; } );
+
+    EXPECT_TRUE( registry.ClaimedExtensions().empty() );
+    EXPECT_EQ( registry.OpenPath( "M_Crate.demat" ), PathOpenOutcome::NotMine )
+         << "a refused registration must not go on opening paths behind the enumeration's back";
+}
+
+// The extension is compared against a LOWER-CASED one, so a registration spelled otherwise claims
+// nothing. Refused with the spelling quoted rather than normalised here: silently fixing it would make
+// the filter agree by accident while every other reader of the list still printed what nobody meant.
+TEST( PathOpening, AnExtensionThatIsNotWrittenAsOneIsRefused )
+{
+    SubjectEditorRegistry registry;
+    registry.RegisterPathOpener( { "demat" }, []( const std::string& ) { return PathOpenOutcome::Requested; } );
+    registry.RegisterPathOpener( { "" }, []( const std::string& ) { return PathOpenOutcome::Requested; } );
+
+    EXPECT_TRUE( registry.ClaimedExtensions().empty() );
+}
+
+// THE RELATION, and it is the one that matters: everything the registry says it can open, it does open.
+// The two are separate mechanisms — a declared list and a chain of resolvers — so each is individually
+// plausible and only their AGREEMENT is the property a client depends on. A palette entry the openers
+// then refuse is a command that reports success and does nothing.
+TEST( PathOpening, EveryClaimedExtensionIsActuallyClaimedByAnOpener )
+{
+    SubjectEditorRegistry registry;
+    registry.RegisterPathOpener(
+         { ".demat" }, []( const std::string& path )
+         { return path.ends_with( ".demat" ) ? PathOpenOutcome::Requested : PathOpenOutcome::NotMine; } );
+    registry.RegisterPathOpener( { ".dcnv", ".decloudtype" },
+                                 []( const std::string& path ) {
+                                     return ( path.ends_with( ".dcnv" ) || path.ends_with( ".decloudtype" ) )
+                                                 ? PathOpenOutcome::Requested
+                                                 : PathOpenOutcome::NotMine;
+                                 } );
+
+    for ( const std::string& extension : registry.ClaimedExtensions() )
+    {
+        EXPECT_NE( registry.OpenPath( "SomeAsset" + extension ), PathOpenOutcome::NotMine )
+             << "'" << extension << "' is offered by the palette and claimed by no opener";
+    }
 }
 
 int main( int argc, char** argv )
