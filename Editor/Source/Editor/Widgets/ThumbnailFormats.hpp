@@ -181,6 +181,11 @@ namespace Desert::Editor::ThumbnailFormats
            "worth having, the editor already sets live text in the face — the Details font row and the UI "
            "editor's font slot both do" },
 
+         { "ini", Producer::None,
+           "a settings file is text, and the browser's preview pane shows its opening lines — the same "
+           "answer a script gets, for the same reason. Its own content is key-value pairs whose picture "
+           "would be the text itself, rendered smaller" },
+
          { "wav", Producer::None,
            "a waveform. At tile size it is a grey smear that looks the same for every take of the same "
            "instrument, so it would distinguish nothing while costing a decode of the whole file. Audio "

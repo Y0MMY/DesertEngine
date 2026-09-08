@@ -163,6 +163,12 @@ namespace Desert::Editor
          { "desce", FileType::Scene },
          { "demesh", FileType::Model },
          { "dgraph", FileType::ShaderGraph },
+         // `.ini` WAS TYPED BY NOBODY AND READ BY SOMEBODY. `DrawPreviewPane` has always asked
+         // `entry->Type == FileType::Ini` to decide whether to show a text excerpt, and no key in this
+         // map ever produced that value — a condition that could not be true, guarding a feature that
+         // therefore did not exist. One line makes the reader's intent real: an ini IS text, and the
+         // excerpt is what a person wants from one.
+         { "ini", FileType::Ini },
          // The four cloud formats. Typed here for the first time in M11 — they used to fall through to
          // FileType::Unknown, which is why they had one grey glyph between them, no colour, no entry in
          // the type filter and no thumbnail. THIS MAP IS THE CENSUS'S SUBJECT: every key in it must have
@@ -186,6 +192,7 @@ namespace Desert::Editor
          { FileType::Audio, { 0.20f, 0.80f, 0.50f, 1.00f } },
          { FileType::ShaderGraph, { 0.55f, 0.35f, 0.85f, 1.00f } },
          { FileType::Cloud, { 0.62f, 0.78f, 0.95f, 1.00f } },
+         { FileType::Ini, { 0.65f, 0.65f, 0.68f, 1.00f } },
     };
 
     static const std::unordered_map<FileType, const char*> s_FileTypesToIcon = {
@@ -203,6 +210,7 @@ namespace Desert::Editor
          // The same glyph the cloud-type document registers itself with (EditorLayer's subject-editor
          // registration), so the browser tile and the window it opens are recognisably the same thing.
          { FileType::Cloud, ICON_MDI_WEATHER_CLOUDY },
+         { FileType::Ini, ICON_MDI_FILE_DOCUMENT },
     };
 
     FileExplorerPanel::FileExplorerPanel( const std::filesystem::path&         rootPath,

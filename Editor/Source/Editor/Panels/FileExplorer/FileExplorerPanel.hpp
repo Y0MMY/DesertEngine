@@ -52,7 +52,9 @@ namespace Desert::Editor
         Model,
         Material,
         ShaderGraph,
-        Project,
+        // `Project` USED TO SIT HERE AND WAS DEAD IN BOTH DIRECTIONS: no extension mapped to it and no
+        // code read it. It could not have worked either — a `.deproj` lives at the PROJECT root, above
+        // the assets root this browser is rooted at, so the tile it typed can never be drawn.
         Ini,
         Font,
 
