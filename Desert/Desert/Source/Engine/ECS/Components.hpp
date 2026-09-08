@@ -1801,7 +1801,17 @@ namespace Desert::ECS
     // A behavior unit, like a UE ActorComponent: one .lua file + its exposed properties + lifecycle flag.
     struct ScriptSlot
     {
-        std::string ScriptPath; // .lua file, relative to the working dir (e.g. "Resources/Scripts/x.lua")
+        // The .lua file, as a path under the project's scripts root (Constants::Path::SCRIPT_PATH), e.g.
+        // "Resources/Assets/Scripts/Examples/MoveAlongX.lua" in the sandbox. This comment used to say
+        // "relative to the working dir" and cite "Resources/Scripts/x.lua" — a tree that is not project
+        // content and that no packaged game contains. It did not describe the field, it EXCUSED it.
+        //
+        // WHAT IS STILL WRONG WITH THE FIELD, since a comment must not excuse this one either: the value
+        // stored is ROOTED, so it does not survive packaging. Measured on a mounted archive, the stored
+        // spelling resolves to nothing while the same file addressed through SCRIPT_PATH resolves. Every
+        // other asset reference is an AssetHandle hashed from a ROOT-TAGGED RELATIVE path and is immune
+        // to the remap. Owned by I9, blocked behind K3 (it needs a scene-corpus migration).
+        std::string ScriptPath;
 
         // Editor-exposed properties (from the script's `Properties` table): per-entity values, edited in
         // Details and serialized. Written into the script env before it runs (so the script reads them).

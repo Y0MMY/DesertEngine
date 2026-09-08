@@ -201,9 +201,6 @@ namespace Desert::Editor
         }
 
     private:
-        void CreateThumbnailPath( DirectoryInformation* directoryInfo, std::string& assetPath,
-                                  std::string& AbsolutePath );
-
         // Collects a finished cloud-volume generation, exactly once. Called from OnPreUpdate rather than
         // from the render so that a collapsed or hidden Assets window still finishes what it started.
         void PollCloudAssetBake();

@@ -65,6 +65,8 @@
 // that lesson is already paid for (its own header lists a character literal that ate hundreds of lines).
 #include "../../Engine/SettingConsumers/setting_consumers_reader.hpp"
 
+#include <Common/Core/Constants.hpp>
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -439,6 +441,62 @@ TEST( ContentScanners, TheScriptPickerAsksThePathCensusWhereScriptsAre )
             "census row follows SetProjectRoot; a literal is resolved against the process's working "
             "directory and does not — measured with a second project open, the literal offered 6 scripts "
             "belonging to the project that was NOT open and 0 belonging to the one that was.";
+}
+
+// A SCRIPT THE EDITOR NAMES IS A SCRIPT THAT EXISTS.
+//
+// The defect this closes was one literal: the New Project template attached SCRIPT_PATH joined to a
+// lower-case, underscored player-controller file name, and no tree of this project has ever held a
+// file spelled that way. (The old spelling is deliberately not quoted anywhere in this file: this test
+// reads RAW source, so writing it out here would make the suite fail on its own description — the
+// inverted comment-is-not-the-code trap the blanker exists for, in the one test that cannot use it.) The slot was
+// created broken, every time, and said nothing until somebody pressed Play and read the log. Both halves were
+// individually plausible — the join is through the path census, and the file name looks like the file that is
+// there — and the thing they had to say about each other was never checked, which is this project's most-repeated
+// defect shape.
+//
+// Deliberately over the RAW source: the blanker's whole job is to remove literals, and a literal is
+// exactly what this test is about. Extension-only spellings (".lua") carry no file name and are skipped.
+TEST( ContentScanners, EveryLuaFileNamedInTheEditorExists )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    // SCRIPT_PATH is relative to the EDITOR'S working directory, which is Editor/ — that is what
+    // RunEditor.sh cds to and what makes "Resources/..." resolve at all. From the repository root the
+    // same file therefore sits one level deeper.
+    const std::string scriptsRoot = "Editor/" + Common::Constants::Path::SCRIPT_PATH.generic_string();
+
+    std::size_t checked = 0;
+    for ( auto it = std::filesystem::recursive_directory_iterator( root + "Editor/Source" );
+          it != std::filesystem::recursive_directory_iterator(); ++it )
+    {
+        if ( !it->is_regular_file() || it->path().extension() != ".cpp" )
+            continue;
+
+        const std::string source = ReadFile( it->path().string() );
+        for ( std::size_t at = source.find( ".lua\"" ); at != std::string::npos;
+              at             = source.find( ".lua\"", at + 1 ) )
+        {
+            const std::size_t open = source.rfind( '"', at );
+            if ( open == std::string::npos )
+                continue;
+            const std::string named = source.substr( open + 1, at + 4 - open - 1 );
+            if ( named == ".lua" || named.find( '\n' ) != std::string::npos )
+                continue; // an extension test, not a file name
+
+            ++checked;
+            EXPECT_TRUE( std::filesystem::exists( root + scriptsRoot + named ) )
+                 << it->path().filename().string() << " names the script '" << named
+                 << "', and no such file exists under " << scriptsRoot
+                 << ". A slot pointing at a script that is not there is created silently and only "
+                    "reports itself on Play.";
+        }
+    }
+
+    EXPECT_GT( checked, 0u ) << "no .lua file name was found in the editor's sources, which cannot be "
+                                "true while the New Project template attaches one - the scan is broken, "
+                                "not the tree";
 }
 
 int main( int argc, char** argv )

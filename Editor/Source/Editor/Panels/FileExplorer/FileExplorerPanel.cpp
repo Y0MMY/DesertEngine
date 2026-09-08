@@ -725,21 +725,23 @@ namespace Desert::Editor
         m_Directories.erase( directory->AssetPath );
     }
 
+    // Unreadable, or the platform's own junk. A path that cannot be STAT'd is not hidden — it is a
+    // browser row we know nothing about, and treating it as visible is the honest answer.
+    //
+    // The error is taken through the std::error_code overload rather than a catch. A try/catch stood
+    // here whose entire handler was a commented-out LOG_ERROR, so a failed status() was swallowed with
+    // no diagnostic reachable even in principle: the one line that would have said something had been
+    // turned into text (§1.4). The error_code form cannot be silent by accident, because the failure is
+    // a value this function has to read.
     bool IsHidden( const std::filesystem::path& filePath )
     {
-        try
-        {
-            std::filesystem::file_status status = std::filesystem::status( filePath );
-            std::string                  name   = filePath.stem().string();
-            return ( status.permissions() & std::filesystem::perms::owner_read ) == std::filesystem::perms::none ||
-                   name == ".DS_Store";
-        }
-        catch ( const std::filesystem::filesystem_error& ex )
-        {
-            // LOG_ERROR( "Error accessing file: %s", ex.what() );
-        }
+        std::error_code                    ec;
+        const std::filesystem::file_status status = std::filesystem::status( filePath, ec );
+        if ( ec )
+            return false;
 
-        return false; // Return false by default if any error occurs
+        return ( status.permissions() & std::filesystem::perms::owner_read ) == std::filesystem::perms::none ||
+               filePath.stem().string() == ".DS_Store";
     }
 
     std::string FileExplorerPanel::ProcessDirectory( const std::string&    directoryPath,
@@ -749,17 +751,22 @@ namespace Desert::Editor
         if ( directory && directory->Opened )
             return directory->AssetPath;
 
-        std::string absolutePath = directoryPath; // Simplified - replace with actual path resolution
-        auto        stdPath      = std::filesystem::path( absolutePath );
+        // The path AS THE CALLER SPELLED IT is the node's identity: it is the key in m_Directories, the
+        // string the navigation history stores, and what every child is built from. Three lines here
+        // said otherwise — an `absolutePath` alias annotated "replace with actual path resolution", the
+        // same note on the assignment below, and a standing marker about pooling the strings — and they
+        // described an intention nobody has held for as long as the file has existed. A note that
+        // promises a different design is read as one, and this panel's real remainder is not string
+        // storage: it is that the whole model is DISK-shaped, which is what its row in
+        // Tests/Common/ContentScanners records with the measurement behind it.
+        const std::filesystem::path stdPath( directoryPath );
 
         std::shared_ptr<DirectoryInformation> directoryInfo =
              directory ? directory
                        : std::make_shared<DirectoryInformation>( directoryPath,
                                                                  !std::filesystem::is_directory( stdPath ) );
-        directoryInfo->Parent = parent;
-
-        // TODO: create paths at max size and use free list
-        directoryInfo->AssetPath = directoryPath; // Simplified
+        directoryInfo->Parent    = parent;
+        directoryInfo->AssetPath = directoryPath;
 
         std::string extension = stdPath.extension().string();
         if ( !extension.empty() && extension[0] == '.' )
@@ -772,16 +779,14 @@ namespace Desert::Editor
             for ( auto& entry : std::filesystem::directory_iterator( stdPath ) )
             {
                 if ( !m_ShowHiddenFiles && IsHidden( entry.path() ) )
-                {
                     continue;
-                }
 
-                if ( directoryInfo->AssetPath.find( "//Assets/Cache" ) != std::string::npos )
-                {
-                    directoryInfo->Hidden = true;
-                    continue;
-                }
-
+                // A branch that hid a cache folder used to stand here, testing AssetPath for a substring
+                // beginning with a DOUBLE separator. Every path in this map comes from generic_string()
+                // of a directory entry, which never produces one, so the condition could not be true —
+                // and the folder it wanted to hide does not exist under any assets root in this project
+                // either. Dead on both counts, and it also set Hidden on the PARENT while skipping a
+                // CHILD, so had it ever fired it would have hidden the wrong node.
                 if ( entry.is_directory() )
                     directoryInfo->Leaf = false;
 
@@ -2445,16 +2450,6 @@ namespace Desert::Editor
             ChangeDirectory( m_BaseProjectDir );
         else
             ChangeDirectory( m_CurrentDir );
-    }
-
-    void FileExplorerPanel::CreateThumbnailPath( DirectoryInformation* directoryInfo, std::string& assetPath,
-                                                 std::string& AbsolutePath )
-    {
-        std::string assetPath1    = directoryInfo->AssetPath;
-        std::string thumbnailPath = assetPath1 + "_thumbnail.png";
-
-        assetPath    = thumbnailPath; // Simplified path conversion
-        AbsolutePath = thumbnailPath; // Simplified path conversion
     }
 
     void FileExplorerPanel::DrawPreviewPane()
