@@ -52,6 +52,11 @@ namespace Desert::Editor
         size_t      m_LastCookUnwritten = 0;
         std::string m_LastMessage; // guarded by the m_Building/m_HasResult handshake
         std::string m_LastPackageDir;
+        // Where the release's patch baseline was recorded, or empty when this build produced none
+        // (every Rebuild Content.dpak — a dev archive is not a release). Shown because it is the one
+        // artifact of a package that has to be KEPT: the next update is built by comparing against it,
+        // and it cannot be recreated once this version is gone.
+        std::string m_LastManifestPath;
 
         // Startup-scene picker: the .desce scenes found under the project (relative to the project
         // dir), scanned lazily on first render and via the Rescan button.

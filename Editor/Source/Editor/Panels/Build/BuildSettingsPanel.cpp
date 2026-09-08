@@ -202,6 +202,7 @@ namespace Desert::Editor
                      m_LastCookUnwritten = result.CookUnwritten;
                      m_LastMessage       = result.Message;
                      m_LastPackageDir    = result.PackageDir;
+                     m_LastManifestPath  = result.ManifestPath;
                      m_HasResult.store( true );
                      m_Building.store( false );
                  } );
@@ -227,6 +228,7 @@ namespace Desert::Editor
                      m_LastCookUnwritten = result.CookUnwritten;
                      m_LastMessage       = result.Message;
                      m_LastPackageDir    = result.PackageDir;
+                     m_LastManifestPath  = result.ManifestPath;
                      m_HasResult.store( true );
                      m_Building.store( false );
                  } );
@@ -254,6 +256,16 @@ namespace Desert::Editor
             if ( m_LastSuccess && !m_LastComplete )
                 ImGui::TextColored( colour, "INCOMPLETE: %zu asset(s) not cooked, %zu artifact(s) not written",
                                     m_LastCookFailures, m_LastCookUnwritten );
+            // The patch baseline, said out loud rather than left for somebody to find in the output
+            // directory. It is the one product of a package that must be KEPT — the next update is
+            // built by diffing against it, and once this release is gone nothing can record it again —
+            // so the moment to tell whoever built the game is the moment it is written.
+            // `Text` rather than `TextWrapped`: this whole block runs inside the PushTextWrapPos above,
+            // so the two wrap identically and the panel keeps one spelling for one thing.
+            if ( m_LastSuccess && !m_LastManifestPath.empty() )
+                ImGui::Text( "Patch baseline recorded: %s  (keep it — the next update is built against "
+                             "this file)",
+                             m_LastManifestPath.c_str() );
             ImGui::PopTextWrapPos();
             // REVEAL IS macOS-ONLY ON PURPOSE, and this is a decision rather than an omission.
             //

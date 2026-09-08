@@ -116,4 +116,33 @@ namespace Common::Utils
     };
 
     ContentDiff CompareManifests( const ContentManifest& from, const ContentManifest& to );
+
+    // What building a patch produced. `Written` is a SEPARATE fact from success, and the separation is
+    // the point: "the two versions are identical, so there is nothing to ship" and "a patch archive is
+    // waiting at `outPatch`" are two different outcomes that both mean the operation worked, and a
+    // caller that cannot tell them apart uploads a file that is not there. It used to be exactly that —
+    // one `return 0` for both — which is DC §1.4's shape at the step where a release is published.
+    struct PatchBuild
+    {
+        ContentDiff Diff;
+        bool        Written = false; // false ONLY when Diff.Empty(); no archive was created
+    };
+
+    // The overlay archive that turns the release `baseManifestFile` describes into the release
+    // `newerPak` is: every key `newerPak` added or changed, carried whole, plus the keys the base had
+    // and `newerPak` does not, recorded as deletions (PakFile.hpp, kDeletedEntriesKey). Mount it AFTER
+    // the base and the base becomes the newer release.
+    //
+    // WHY THIS IS A LIBRARY FUNCTION RATHER THAN PakTool's OWN LOOP. It is the consumer of the manifest
+    // a release records, so it is the half a test has to be able to run in order to prove the recording
+    // is worth anything — and PakTool's copy was inside `main()`'s process, reachable only by spawning a
+    // binary a test cannot depend on having been built. PakTool now calls this and prints what it says.
+    //
+    // A MISSING OR UNREADABLE BASE MANIFEST IS A REFUSAL, never an empty base. Treating an absent
+    // manifest as "the previous release contained nothing" produces a patch that is a copy of the whole
+    // new release and reports success, which is the worst available answer: it is enormous, it is wrong,
+    // and nothing about it says so.
+    Common::ResultStr<PatchBuild> BuildPatchPak( const std::filesystem::path& baseManifestFile,
+                                                 const std::filesystem::path& newerPak,
+                                                 const std::filesystem::path& outPatch );
 } // namespace Common::Utils

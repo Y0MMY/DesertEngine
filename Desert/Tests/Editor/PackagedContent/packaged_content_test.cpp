@@ -28,7 +28,9 @@
 
 #include <Common/Core/AssetHandle.hpp>
 #include <Common/Core/Constants.hpp>
+#include <Common/Utilities/ContentManifest.hpp>
 #include <Common/Utilities/FileSystem.hpp>
+#include <Common/Utilities/PakFile.hpp>
 #include <Common/Utilities/VFS.hpp>
 
 // The Runtime's own startup discovery — the other end of the relation П5 closes.
@@ -36,6 +38,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -504,8 +507,11 @@ TEST( PackagedContent, AnAssetTheCookCannotBakeMakesThePackageIncompleteAndSaysH
     const auto result = Desert::Editor::BuildContentPak();
 
     // A PACKAGE STILL EXISTS, and that is deliberate rather than a compromise: a project may ship content
-    // that is already broken — this repository does, on purpose, so the engine's own refusal path stays
-    // reachable — and the packager's job is to say what it shipped, not to declare the project invalid.
+    // that is already broken, and the packager's job is to say what it shipped, not to declare the
+    // project invalid. (This used to add "this repository does, on purpose" and point at a broken shader
+    // in Editor/Resources/Shaders. Г20 moved that fixture into a test tree — it was compiled at every
+    // editor start — so the claim is no longer true of this repository and the fixture above, a `.ttf`
+    // this suite writes itself, is what the argument now rests on.)
     EXPECT_TRUE( result.Success ) << result.Message;
 
     // ...but it is NOT complete, and it says how many, in a number rather than in prose.
@@ -1040,6 +1046,221 @@ TEST( PackagedContent, TheArchiveSitsBesideThePlayerBinaryInWhicheverLayoutTheHo
     const PlayerStartup started = StartTheGameLikeThePlayerDoes( exe );
     ASSERT_EQ( started.MountExit, Desert::Player::kContentOk ) << started.MountMessage;
     EXPECT_TRUE( started.Opened ) << "the bundled game does not start from its own directory";
+}
+
+// ── A RELEASE RECORDS WHAT IT HANDED OUT, OR IT CAN NEVER BE UPDATED (П7) ─────────────────────────
+//
+// THE DEFECT, and it is П5's shape one step further down the same pipeline: a mechanism with a reader
+// and no writer. `Runtime/Source/PackagedContent.cpp` mounts every `Patch*.dpak` it finds beside the
+// base archive — the consumer has been there since П3 — while `PackageGame()` wrote no manifest at all,
+// so `PakTool patch` had no "before" side for any archive this repository can actually ship.
+//
+// WHY IT COULD NOT BE ADDED LATER, which is what makes it a delivery defect rather than a missing
+// feature: a manifest is a record of an archive's own bytes, so it can only be taken while that archive
+// exists. A release packaged without one cannot be patched EVER — not by rebuilding, because the
+// rebuild is a different archive, and not from the shipped folder, because the folder is the thing the
+// patch has to be diffed against, not a description of it.
+//
+// THESE TESTS HOLD BOTH ENDS AT ONCE, which is possible here and nowhere else: this suite compiles the
+// packager AND the player's own discovery (see premake5.lua), and `BuildPatchPak` is the same function
+// `PakTool patch` runs. So the whole cycle is one process — package, record, diff, patch, mount, read —
+// with no mirror of any step anywhere in it.
+namespace
+{
+    // One release of the currently open project, in the plain layout every host has.
+    Desert::Editor::PackageResult PackageInto( const fs::path& outDir )
+    {
+        Desert::Editor::PackageOptions options;
+        options.OutputDir    = outDir.string();
+        options.Config       = "Release";
+        options.MacAppBundle = false;
+        return Desert::Editor::PackageGame( options );
+    }
+} // namespace
+
+TEST( PackagedContent, APackagedReleaseRecordsAManifestOfTheArchiveItActuallyShipped )
+{
+    EnvironmentGuard guard;
+
+    const Desert::Editor::TargetPlatformInfo& host = Desert::Editor::HostPlatformInfo();
+
+    const fs::path base = fs::temp_directory_path() / "desert_pkg_manifest";
+    fs::remove_all( base );
+    const fs::path proj = WriteProjectToPackage( base, host.RuntimeBinary );
+
+    SetEnv( "HOME", base.string() );
+    fs::current_path( proj );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( proj / "T.deproj" ).string() ) );
+
+    Desert::Editor::PackageOptions options;
+    options.OutputDir    = ( base / "out" ).string();
+    options.Config       = "Release";
+    options.MacAppBundle = false;
+
+    const auto result = Desert::Editor::PackageGame( options );
+    ASSERT_TRUE( result.Success ) << result.Message;
+
+    // The path comes back as a FIELD. A release script has to be able to pick the file up; a sentence
+    // inside `Message` is not something anything can act on (I12's lesson, in the direction it did not
+    // reach).
+    ASSERT_FALSE( result.ManifestPath.empty() )
+         << "the package reports no manifest, so nothing can find the baseline the next update needs";
+    const fs::path manifestFile = result.ManifestPath;
+    ASSERT_TRUE( fs::exists( manifestFile ) ) << manifestFile.string() << " was reported and not written";
+
+    const fs::path root = fs::path( result.PackageDir );
+
+    // OUTSIDE the package. The product is a binary and one archive (П5); a publisher's record inside the
+    // folder a player copies around is one more file an installer can lose and one more thing that reads
+    // as content.
+    // Compared as PATH COMPONENTS, not as a string prefix: `out/T.manifest` starts with `out/T`
+    // character for character while sitting entirely outside it, and a string test here would have
+    // reported the file inside the package when it is beside it.
+    const fs::path relToPackage = manifestFile.lexically_normal().lexically_relative( root.lexically_normal() );
+    EXPECT_TRUE( !relToPackage.empty() && *relToPackage.begin() == ".." )
+         << "the release manifest was written INSIDE the package (" << manifestFile.string()
+         << "). It is the publisher's record, not the player's: the package is still a binary and one "
+            "archive.";
+
+    // ...and it describes THE ARCHIVE, not the trees that went into it. A manifest of the sources would
+    // describe a release that does not exist — different by the raw-mesh filter, by the cook, and by the
+    // descriptor the packager puts in — and the first symptom would be a patch re-shipping files nobody
+    // touched.
+    const auto text = Common::Utils::FileSystem::ReadFileContent( manifestFile );
+    ASSERT_TRUE( text.IsSuccess() ) << text.GetError();
+    auto parsed = Common::Utils::ContentManifest::Parse( text.GetValue() );
+    ASSERT_TRUE( parsed.IsSuccess() ) << "the recorded manifest does not parse: " << parsed.GetError();
+
+    const Common::Utils::PakReader packed( root / "Content.dpak" );
+    ASSERT_TRUE( packed.IsOpen() ) << packed.OpenError();
+    const auto fromArchive = Common::Utils::ContentManifest::FromPak( packed );
+
+    EXPECT_TRUE( Common::Utils::CompareManifests( parsed.GetValue(), fromArchive ).Empty() )
+         << "the recorded manifest and the archive beside it disagree — " << parsed.GetValue().Count()
+         << " entries recorded against " << fromArchive.Count()
+         << " in the pak. A baseline that does not describe the shipped archive produces a patch that "
+            "does not apply to it.";
+    EXPECT_GT( fromArchive.Count(), 0u ) << "the archive is empty, so the comparison above proved nothing";
+
+    // The descriptor is content of the archive and therefore of the manifest: a patch that changed the
+    // startup scene and could not carry the new descriptor would be a patch that cannot move a release.
+    EXPECT_NE( parsed.GetValue().Find( Desert::Project::kPackagedDescriptorName ), nullptr )
+         << "the manifest does not record the descriptor, so no patch can ever replace it";
+}
+
+TEST( PackagedContent, AnUpdateBuiltAgainstTheRecordedManifestReachesThePlayerAsNewBytes )
+{
+    EnvironmentGuard guard;
+
+    const Desert::Editor::TargetPlatformInfo& host = Desert::Editor::HostPlatformInfo();
+
+    const fs::path base = fs::temp_directory_path() / "desert_pkg_patchcycle";
+    fs::remove_all( base );
+    const fs::path proj = WriteProjectToPackage( base, host.RuntimeBinary );
+
+    SetEnv( "HOME", base.string() );
+    fs::current_path( proj );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( proj / "T.deproj" ).string() ) );
+
+    // ---- release 1: what the player installs, and the record of it the publisher keeps.
+    Desert::Editor::PackageOptions v1;
+    v1.OutputDir    = ( base / "out1" ).string();
+    v1.Config       = "Release";
+    v1.MacAppBundle = false;
+
+    const auto first = Desert::Editor::PackageGame( v1 );
+    ASSERT_TRUE( first.Success ) << first.Message;
+    const fs::path installed = fs::path( first.PackageDir );
+    const fs::path baseline  = first.ManifestPath;
+    ASSERT_TRUE( fs::exists( baseline ) ) << "release 1 recorded no baseline";
+
+    // ---- release 2: one scene edited, packaged into a directory of its own. The publisher has the new
+    // archive and the OLD MANIFEST, and nothing else — which is the whole economy of П3: no old archive
+    // is kept anywhere.
+    WriteFile( proj / "GameAssets" / "Scenes" / "level.desce", "scene-body-v2" );
+    fs::current_path( proj );
+    const auto next = PackageInto( base / "out2" );
+    ASSERT_TRUE( next.Success ) << next.Message;
+    const fs::path second = next.PackageDir;
+
+    // ---- the update, built by the same function `PakTool patch` runs. It is dropped into the INSTALLED
+    // release's directory under the name the player's own discovery looks for.
+    const auto built =
+         Common::Utils::BuildPatchPak( baseline, second / "Content.dpak", installed / "Patch001.dpak" );
+    ASSERT_TRUE( built.IsSuccess() ) << built.GetError();
+    ASSERT_TRUE( built.GetValue().Written )
+         << "two releases with a changed scene produced no patch at all — the baseline is not describing "
+            "release 1";
+
+    const std::string sceneKey = std::string( Desert::Editor::kPackagedAssetsRoot ) + "/Scenes/level.desce";
+    EXPECT_NE( std::find( built.GetValue().Diff.Changed.begin(), built.GetValue().Diff.Changed.end(), sceneKey ),
+               built.GetValue().Diff.Changed.end() )
+         << "the patch does not carry the one file that changed (" << sceneKey << ")";
+
+    // ---- the acceptance: the INSTALLED release, started the way a player starts it, reads the new bytes.
+    const fs::path exe = installed / host.RuntimeBinary;
+    fs::current_path( installed );
+    const PlayerStartup started = StartTheGameLikeThePlayerDoes( exe );
+    ASSERT_EQ( started.MountExit, Desert::Player::kContentOk ) << started.MountMessage;
+    ASSERT_TRUE( started.Opened ) << "the patched installation no longer contains a game";
+
+    const std::string scene = Desert::Project::ProjectContext::DefaultScenePath();
+    ASSERT_FALSE( scene.empty() );
+    DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( scene ), "scene-body-v2" );
+}
+
+// THE NEGATIVE CONTROL, and it is the half that decides whether any of the above means anything: a
+// patch built with no baseline must REFUSE. The alternative is not a small error — an absent manifest
+// read as "the previous release was empty" produces a patch that is a whole copy of the new release and
+// reports success, which is DC §1.4 at the step where a release is published: a failed result wearing
+// the shape of a good one. Quieter than a refusal, and far more expensive.
+TEST( PackagedContent, APatchWithNoBaselineIsRefusedByNameAndWritesNothing )
+{
+    EnvironmentGuard guard;
+
+    const Desert::Editor::TargetPlatformInfo& host = Desert::Editor::HostPlatformInfo();
+
+    const fs::path base = fs::temp_directory_path() / "desert_pkg_nobaseline";
+    fs::remove_all( base );
+    const fs::path proj = WriteProjectToPackage( base, host.RuntimeBinary );
+
+    SetEnv( "HOME", base.string() );
+    fs::current_path( proj );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( proj / "T.deproj" ).string() ) );
+
+    const auto shipped = PackageInto( base / "out" );
+    ASSERT_TRUE( shipped.Success ) << shipped.Message;
+    const fs::path release = shipped.PackageDir;
+
+    const fs::path missing = base / "never_recorded.manifest";
+    const fs::path out     = base / "Patch001.dpak";
+
+    const auto refused = Common::Utils::BuildPatchPak( missing, release / "Content.dpak", out );
+    ASSERT_FALSE( refused.IsSuccess() )
+         << "a patch was built with no baseline. Whatever it contains, it is not an update: with no "
+            "\"before\" side every entry reads as added, so this is the whole release wearing a patch's "
+            "name.";
+    EXPECT_NE( refused.GetError().find( missing.filename().string() ), std::string::npos )
+         << "the refusal does not name the file that is missing: " << refused.GetError();
+    EXPECT_FALSE( fs::exists( out ) ) << "the refusal still left an archive at " << out.string();
+
+    // A file that exists and is not a manifest is the same refusal, not a silently empty base — the
+    // truncated-download case, which otherwise reads as "the previous release contained nothing".
+    const fs::path garbage = base / "garbage.manifest";
+    WriteFile( garbage, "this is not a manifest\n" );
+    const auto rejected = Common::Utils::BuildPatchPak( garbage, release / "Content.dpak", out );
+    EXPECT_FALSE( rejected.IsSuccess() ) << "a manifest that does not parse was accepted as a baseline";
+    EXPECT_FALSE( fs::exists( out ) ) << "the refusal still left an archive at " << out.string();
+
+    // ...and the OTHER outcome that is not a failure: nothing changed. It comes back SUCCESSFUL with
+    // `Written == false` and no file, so "there is nothing to ship" and "the patch is at this path" are
+    // two answers rather than one answer and an empty file.
+    const auto unchanged = Common::Utils::BuildPatchPak( shipped.ManifestPath, release / "Content.dpak", out );
+    ASSERT_TRUE( unchanged.IsSuccess() ) << unchanged.GetError();
+    EXPECT_FALSE( unchanged.GetValue().Written )
+         << "a release patched against its own baseline produced an archive; an empty patch is a file a "
+            "publisher can ship believing it fixes something";
+    EXPECT_FALSE( fs::exists( out ) );
 }
 
 // The rebasing rule on its own, without building anything — the half of the descriptor that a package

@@ -120,6 +120,10 @@ namespace
          { "m_LastMessage", nullptr, "the finished job's message, displayed and nothing else." },
          { "m_LastPackageDir", nullptr,
            "where the finished job wrote, so Reveal in Finder has somewhere to open." },
+         { "m_LastManifestPath", nullptr,
+           "where PackageGame recorded this release's patch baseline (П7), displayed so whoever built "
+           "the game knows there is a file to keep. Empty for Build pak only — a dev archive is not a "
+           "release. Not a choice anybody makes." },
          { "m_Scenes", nullptr,
            "the CANDIDATE list for the startup-scene combo. The chosen value is not held here at all: it "
            "goes straight into the .deproj through ProjectContext::SetDefaultScene, where "
