@@ -13,6 +13,14 @@ namespace Desert::Editor
     // macOS reports as "damaged", which is the least diagnosable failure in the whole packager.
     inline constexpr const char* kBundlePlayerBinary = "Runtime-bin";
 
+    // The launcher script's name inside a .app, which is also what its Info.plist declares as
+    // CFBundleExecutable. Two independent literals until now, in two different std::ostringstreams
+    // twenty lines apart, and their disagreement is the same "damaged application" with no further
+    // explanation — the relation above, in the other direction. Not `host.LauncherName`: that is
+    // `run.sh`, the name a person double-clicks in a plain folder, and a bundle's executable must be
+    // extensionless.
+    inline constexpr const char* kBundleLauncherName = "Runtime";
+
     // EVERY FIELD HERE IS READ BY PackageGame, AND THAT IS CHECKED — Desert/Tests/Editor/
     // BuildSettingsConsumers asserts the relation in both directions: no option the Build Settings panel
     // offers that the packager ignores, and no option the packager honours that nothing can set. It was

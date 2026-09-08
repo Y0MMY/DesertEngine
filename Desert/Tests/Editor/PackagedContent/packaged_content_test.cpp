@@ -1016,10 +1016,25 @@ TEST( PackagedContent, TheArchiveSitsBesideThePlayerBinaryInWhicheverLayoutTheHo
          << "the archive is not beside the player binary (" << exe.parent_path().string() << ")";
 
     if ( host.SupportsAppBundle )
+    {
         EXPECT_FALSE( fs::exists( root / "Contents" / "Resources" ) )
              << "Contents/Resources is still produced. Nothing on macOS requires it, and holding the "
                 "payload there is exactly what made the launcher hand the descriptor over on the command "
                 "line - a second place the player has to be told about.";
+
+        // The plist and the disk must agree about which file macOS starts. They were two independent
+        // literals; when they disagree macOS says "damaged application" and nothing else, which is the
+        // least diagnosable failure this packager can produce.
+        const auto plist = Common::Utils::FileSystem::ReadFileContent( root / "Contents" / "Info.plist" );
+        ASSERT_TRUE( plist.IsSuccess() ) << plist.GetError();
+        EXPECT_NE( plist.GetValue().find( std::string( "<key>CFBundleExecutable</key><string>" ) +
+                                          Desert::Editor::kBundleLauncherName + "</string>" ),
+                   std::string::npos )
+             << "Info.plist does not declare " << Desert::Editor::kBundleLauncherName
+             << " as the bundle executable";
+        EXPECT_TRUE( fs::exists( root / "Contents" / "MacOS" / Desert::Editor::kBundleLauncherName ) )
+             << "the file Info.plist names as the bundle executable is not in Contents/MacOS";
+    }
 
     fs::current_path( exe.parent_path() );
     const PlayerStartup started = StartTheGameLikeThePlayerDoes( exe );

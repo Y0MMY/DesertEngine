@@ -325,7 +325,7 @@ namespace Desert::Editor
                 // engine_log.txt lands — the player finds its content from its executable path.
                 << "cd \"$DIR\"\n"
                 << "exec \"$DIR/" << kBundlePlayerBinary << "\" \"$@\"\n";
-            const fs::path launcher = gameDir / "Runtime";
+            const fs::path launcher = gameDir / kBundleLauncherName;
             // This script IS the bundle's CFBundleExecutable — without it macOS reports the app as
             // damaged, which is the least diagnosable failure in this whole function.
             if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic( launcher, run.str() );
@@ -340,7 +340,7 @@ namespace Desert::Editor
                      "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
                   << "<plist version=\"1.0\"><dict>\n"
                   << "  <key>CFBundleName</key><string>" << projectName << "</string>\n"
-                  << "  <key>CFBundleExecutable</key><string>Runtime</string>\n"
+                  << "  <key>CFBundleExecutable</key><string>" << kBundleLauncherName << "</string>\n"
                   << "  <key>CFBundleIdentifier</key><string>com.desertengine." << safeName << "</string>\n"
                   << "  <key>CFBundlePackageType</key><string>APPL</string>\n"
                   << "  <key>CFBundleShortVersionString</key><string>1.0</string>\n"
