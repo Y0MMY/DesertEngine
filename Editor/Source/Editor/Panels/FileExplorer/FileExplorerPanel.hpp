@@ -28,6 +28,7 @@ namespace Desert::Editor
     }
     class ThumbnailCache;
     class AssetThumbnailRenderer;
+    class ThumbnailSweeper;
 }
 
 namespace Desert::Core
@@ -53,7 +54,20 @@ namespace Desert::Editor
         ShaderGraph,
         Project,
         Ini,
-        Font
+        Font,
+
+        /// The four cloud formats — `.dclayout`, `.dcnv`, `.dcmv`, `.decloudtype`.
+        ///
+        /// ONE TYPE FOR FOUR EXTENSIONS, and the alternative was four. They share a colour, an icon, a
+        /// filter entry and — the reason that decides it — a THUMBNAIL PRODUCER: all four are painted
+        /// from their own bytes by Editor/Widgets/CloudThumbnail.hpp, so every branch that would
+        /// distinguish them here would immediately re-join. What tells them apart is the document each
+        /// one opens, and that is the subject-editor registry's question, not this enum's.
+        ///
+        /// THEY WERE `Unknown` UNTIL M11, which is why the owner could not pick a cloud by looking: an
+        /// unknown type gets the generic document glyph, so four different assets drew one identical
+        /// grey square and the browser's own type filter could not name them.
+        Cloud
     };
 
     struct DirectoryInformation
@@ -293,6 +307,20 @@ namespace Desert::Editor
         const SubjectEditorRegistry*             m_SubjectEditors = nullptr;
         std::unique_ptr<UI::UIHelper>   m_UIHelper;
         std::unique_ptr<ThumbnailCache>          m_Thumbnails;
+
+        // ── THE PICTURES MAKE THEMSELVES ──────────────────────────────────────────────────────────────
+        //
+        // Walks this panel's root on a worker and queues a thumbnail for everything the browser can show
+        // and has no usable picture of — see Editor/Widgets/ThumbnailSweep.hpp for the three triggers it
+        // answers and for its relation to AssetPreloader's walk.
+        //
+        // OWNED BY THIS PANEL, and the reason is that the sweep's authority on "what this project
+        // contains" is THIS PANEL'S ROOT: it pictures what the Content Browser can show, so the browser
+        // is the thing that knows what to sweep. It is driven from OnPreUpdate rather than from the
+        // render, so a collapsed, hidden or closed Assets window does not stop the previews arriving —
+        // which is the whole point of a background sweep and the same reasoning PollCloudAssetBake gives
+        // next door.
+        std::unique_ptr<ThumbnailSweeper>        m_Sweeper;
         std::weak_ptr<::Desert::Core::Scene>     m_ViewportScene; // for "Capture Thumbnail from viewport"
         std::unordered_set<std::string>          m_FailedThumbs;  // assets that failed to load -> show icon, no retry spam
 
@@ -313,6 +341,9 @@ namespace Desert::Editor
         bool DrawRenderedMaterialThumbnail( DirectoryInformation* entry, const ImVec2& size );
         // Same, for a mesh entry (the mesh auto-framed by its bounds).
         bool DrawRenderedMeshThumbnail( DirectoryInformation* entry, const ImVec2& size );
+        // Same, for a file whose picture is PAINTED from its own bytes rather than rendered — the four
+        // cloud formats. It asks for no handle and no renderer; see Editor/Widgets/CloudThumbnail.hpp.
+        bool DrawPaintedThumbnail( DirectoryInformation* entry, const ImVec2& size );
 
         // Bottom preview strip for the currently selected file: thumbnail (texture/material/mesh) or a
         // text excerpt (scripts, .demat/.deprefab/.desce JSON), plus name/type/size.

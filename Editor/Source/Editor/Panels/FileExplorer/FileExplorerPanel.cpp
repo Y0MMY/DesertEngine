@@ -22,6 +22,8 @@
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Editor/Widgets/ThumbnailFreshness.hpp>
 #include <Editor/Widgets/ThumbnailService.hpp>
+#include <Editor/Widgets/ThumbnailSubject.hpp>
+#include <Editor/Widgets/ThumbnailSweep.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/MaterialAsset.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
@@ -120,7 +122,7 @@ namespace Desert::Editor
          { FileType::Script, "Script" },   { FileType::Shader, "Shader" },     { FileType::Texture, "Texture" },
          { FileType::Font, "Font" },       { FileType::Cubemap, "Cubemap" },   { FileType::Model, "Model" },
          { FileType::Audio, "Audio" },     { FileType::Material, "Material" },
-         { FileType::ShaderGraph, "Shader Graph" },
+         { FileType::ShaderGraph, "Shader Graph" }, { FileType::Cloud, "Cloud" },
     };
 
     static const std::unordered_map<std::string, FileType> s_FileTypes = {
@@ -138,6 +140,13 @@ namespace Desert::Editor
          // Engine-native extensions (see Common::Constants::Extensions).
          { "demat", FileType::Material }, { "desce", FileType::Scene }, { "demesh", FileType::Model },
          { "dgraph", FileType::ShaderGraph },
+         // The four cloud formats. Typed here for the first time in M11 — they used to fall through to
+         // FileType::Unknown, which is why they had one grey glyph between them, no colour, no entry in
+         // the type filter and no thumbnail. THIS MAP IS THE CENSUS'S SUBJECT: every key in it must have
+         // a row in Editor/Widgets/ThumbnailFormats.hpp saying who makes its picture or why nobody does,
+         // and Desert/Tests/Editor/ThumbnailFormats reads this literal to check it.
+         { "dclayout", FileType::Cloud }, { "dcnv", FileType::Cloud }, { "dcmv", FileType::Cloud },
+         { "decloudtype", FileType::Cloud },
     };
 
     static const std::unordered_map<FileType, ImVec4> s_TypeColors = {
@@ -151,6 +160,7 @@ namespace Desert::Editor
          { FileType::Model, { 0.18f, 0.82f, 0.76f, 1.00f } },
          { FileType::Audio, { 0.20f, 0.80f, 0.50f, 1.00f } },
          { FileType::ShaderGraph, { 0.55f, 0.35f, 0.85f, 1.00f } },
+         { FileType::Cloud, { 0.62f, 0.78f, 0.95f, 1.00f } },
     };
 
     static const std::unordered_map<FileType, const char*> s_FileTypesToIcon = {
@@ -165,6 +175,9 @@ namespace Desert::Editor
          { FileType::Model, ICON_MDI_VECTOR_POLYGON },
          { FileType::Audio, ICON_MDI_MICROPHONE },
          { FileType::ShaderGraph, ICON_MDI_GRAPH },
+         // The same glyph the cloud-type document registers itself with (EditorLayer's subject-editor
+         // registration), so the browser tile and the window it opens are recognisably the same thing.
+         { FileType::Cloud, ICON_MDI_WEATHER_CLOUDY },
     };
 
     FileExplorerPanel::FileExplorerPanel( const std::filesystem::path&         rootPath,
@@ -184,6 +197,7 @@ namespace Desert::Editor
         m_UIHelper = std::make_unique<UI::UIHelper>();
         m_UIHelper->Init();
         m_Thumbnails = std::make_unique<ThumbnailCache>();
+        m_Sweeper    = std::make_unique<ThumbnailSweeper>();
         ThumbnailCache::PurgeOldVersions(); // drop stale-renderer thumbnails so they regenerate cleanly
 
         LoadFavorites(); // pinned folders, persisted in ~/.desertengine/asset_favorites.txt
@@ -280,6 +294,14 @@ namespace Desert::Editor
         // finished must be collected on the frame it finished, whatever the browser is looking at. A
         // future nobody polls is a thread whose result is thrown away at shutdown.
         PollCloudAssetBake();
+
+        // THE BACKGROUND SWEEP, ahead of the throttle below and unconditional. It has a period of its
+        // own (ThumbnailSweeper::kFramesBetweenScans) and paces itself; putting it behind this panel's
+        // directory-poll throttle would make one background rate depend on another for no reason, and
+        // putting it after the `!m_CurrentDir` return would stop the whole project's previews the moment
+        // the browser had no directory selected.
+        if ( m_Sweeper )
+            m_Sweeper->Tick( m_AssetManager, m_BasePath );
 
         // Throttle to ~every 30 frames (~0.5s @60fps) — directory_iterator is cheap but not free.
         if ( ++m_PollCounter < 30 )
@@ -1106,6 +1128,7 @@ namespace Desert::Editor
                         { "Models", static_cast<int>( FileType::Model ) },
                         { "Shader Graphs", static_cast<int>( FileType::ShaderGraph ) },
                         { "Audio", static_cast<int>( FileType::Audio ) },
+                        { "Clouds", static_cast<int>( FileType::Cloud ) },
                     };
                     const char* currentFilter = "All Types";
                     for ( const auto& f : kTypeFilters )
@@ -1495,8 +1518,18 @@ namespace Desert::Editor
             {
                 if ( entry.Type == FileType::Texture )
                     img = m_Thumbnails->Get( assetPath );
-                else if ( entry.Type == FileType::Material || entry.Type == FileType::Model )
+                else if ( entry.Type == FileType::Material || entry.Type == FileType::Cloud )
                     img = m_Thumbnails->Get( ThumbnailCache::DiskPath( assetPath ) );
+                else if ( entry.Type == FileType::Model )
+                {
+                    // THE COOKED KEY, not the source one. This branch used to share the material's line,
+                    // so it looked up the picture under `DiskPath(<source>.fbx)` — a name nothing has
+                    // written since M10 moved a mesh's thumbnail onto its cooked `.stmesh`. The ghost has
+                    // been silently falling back to the type icon for every mesh ever since, which is
+                    // exactly the kind of "it still works, just worse" a re-read site decays into.
+                    img = m_Thumbnails->Get(
+                         ThumbnailCache::DiskPath( CookPaths::CookedMesh( assetPath, ".stmesh" ).generic_string() ) );
+                }
             }
 
             constexpr float previewSize = 48.0f;
@@ -1566,29 +1599,22 @@ namespace Desert::Editor
             }
         }
 
-        // Resolve material -> handle (load + register so the offscreen render can use it; mirrors the
-        // component deserializer's create-if-missing logic for cold start).
+        // Resolve material -> handle (load + register so the offscreen render can use it). Through
+        // Editor/Widgets/ThumbnailSubject.hpp, which is the SAME resolution the background sweep uses —
+        // the two used to be one copy each, and "which file is photographed" is exactly the question this
+        // subsystem has already answered twice and differently once.
+        const auto subject = ThumbnailSubject::ResolveMaterial( *m_AssetManager, entry->AssetPath );
+        if ( !subject )
+            return false;
+
         auto a = m_AssetManager->FindByPath<Assets::SurfaceMaterialAsset>( entry->AssetPath );
         if ( !a )
-        {
-            a = m_AssetManager->CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High,
-                                                                       entry->AssetPath );
-            if ( a && !a->IsReadyForUse() )
-                a->Load();
-        }
-        if ( !a )
             return false;
-        if ( !Runtime::ResourceRegistry::GetMaterialService()->Get( a->GetMetadata().Handle ) )
-            Runtime::ResourceRegistry::GetMaterialService()->Register( a );
 
         // Queue through the editor-wide service: it owns the one renderer, deduplicates against what other
         // panels already asked for, skips anything already on disk and never retries an asset that failed.
-        {
-            // Cutout/foliage materials (a grass-card atlas) wrap and garble on a sphere -> preview on a flat
-            // camera-facing card instead.
-            const bool flat = a->Data().GetFloat( "AlphaCutoff" ) > 0.0f;
-            ThumbnailService::Get().RequestMaterial( a->GetMetadata().Handle, entry->AssetPath, flat );
-        }
+        ThumbnailService::Get().RequestMaterial( subject.GetValue().Handle, entry->AssetPath,
+                                                 subject.GetValue().Flat );
 
         // Until the PNG exists, show the albedo colour as a placeholder swatch.
         const glm::vec3 albedo =
@@ -1643,61 +1669,55 @@ namespace Desert::Editor
             }
         }
 
-        // Meshes only load from the COOKED form (StaticMeshAsset::Load reads cooked JSON, not source FBX), so
-        // map the browsed source file -> its cooked .stmesh (shared CookPaths::CookedMesh). If it isn't cooked
-        // yet, fall back to the icon (don't try to parse the raw source -> it can't).
-        const std::filesystem::path cooked = cookedStr;
-
-        // The `ec ||` that used to lead this condition carried the error code from the THUMBNAIL's modtime
-        // read above, so a thumbnail whose stamp could not be read blacklisted the MESH as "not cooked" —
-        // permanently, for the session. Two unrelated facts sharing one variable; the stat now lives inside
-        // ThumbnailFreshness::Observe and this asks only its own question.
-        std::error_code ec;
-        if ( !std::filesystem::exists( cooked, ec ) )
-        {
-            m_FailedThumbs.insert( entry->AssetPath ); // not cooked -> icon
-            return false;
-        }
-
-        // The preloader already registers cooked meshes; otherwise create + load + register the cooked asset.
-        auto a = m_AssetManager->FindByPath<Assets::MeshAsset>( cookedStr );
-        if ( !a )
-        {
-            auto created =
-                 m_AssetManager->CreateAsset<Assets::StaticMeshAsset>( Assets::AssetPriority::High, cookedStr );
-            if ( created )
-            {
-                // Register parses before it builds (MeshService.hpp), so the `created->Load()` that used to
-                // follow this line ran one step too late: `CreateAsset` can hand back the preloader's
-                // unparsed shell, and the mesh built from it was cached empty before the load happened.
-                if ( const auto registered = Runtime::ResourceRegistry::GetMeshService()->Register( created );
-                     !registered )
-                {
-                    LOG_ERROR( "[Thumbnails] cooked mesh '{}' could not be built: {}", cookedStr,
-                               registered.GetError() );
-                }
-                a = created;
-            }
-        }
-        // Missing / failed to load / empty geometry (e.g. a skinned mesh whose static buffer is empty) ->
-        // blacklist + icon, so we don't retry the (logging) load every frame.
-        const auto* runtimeMesh =
-             a ? Runtime::ResourceRegistry::GetMeshService()->Get( a->GetMetadata().Handle ) : nullptr;
-        if ( !runtimeMesh || runtimeMesh->GetSubmeshes().empty() )
+        // Cook lookup, build and the three refusals now live in Editor/Widgets/ThumbnailSubject.hpp, so
+        // this tile and the background sweep resolve a mesh the same way. Every one of those refusals is
+        // permanent for the session here — an uncooked source, a cooked file that will not build, a mesh
+        // with no drawable submeshes — so the blacklist keeps the (logging) retry from happening once per
+        // frame, exactly as it did when the code was in this function.
+        const auto subject = ThumbnailSubject::ResolveMesh( *m_AssetManager, entry->AssetPath );
+        if ( !subject )
         {
             m_FailedThumbs.insert( entry->AssetPath );
             return false;
         }
 
-        {
-            // Show the mesh with its linked (sidecar) material if it has one.
-            // The sidecar is still resolved from the SOURCE — that is where an artist's .demat sits beside
-            // the .fbx, and it is a different question from which file gets photographed.
-            const auto mat = MeshMaterial::ResolveSidecar( *m_AssetManager, entry->AssetPath );
-            ThumbnailService::Get().RequestMesh( a->GetMetadata().Handle, cookedStr, mat );
-        }
+        ThumbnailService::Get().RequestMesh( subject.GetValue().Handle, subject.GetValue().CookedPath,
+                                             subject.GetValue().Material );
 
         // No swatch for meshes — fall back to the type icon until the PNG is ready.
+        return false;
+    }
+
+    bool FileExplorerPanel::DrawPaintedThumbnail( DirectoryInformation* entry, const ImVec2& size )
+    {
+        if ( !m_UIHelper || !m_Thumbnails )
+            return false;
+
+        // NO ASSET MANAGER IN THIS FUNCTION, and that is the shape of the whole cloud path rather than an
+        // oversight: the picture is computed from the file's own bytes, so nothing has to be created,
+        // loaded or registered before it can be drawn. It is also why this tile keeps working in a
+        // project whose asset layer has not finished starting.
+        const std::string pngPath = ThumbnailCache::DiskPath( entry->AssetPath );
+
+        const bool haveFresh =
+             ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( pngPath, entry->AssetPath ) ) ==
+             ThumbnailFreshness::Verdict::Show;
+        if ( !haveFresh )
+            m_Thumbnails->Invalidate( pngPath );
+
+        if ( haveFresh )
+        {
+            if ( auto img = m_Thumbnails->Get( pngPath ) )
+            {
+                m_UIHelper->ImageButton( "##thumb", img, size );
+                return true;
+            }
+        }
+
+        ThumbnailService::Get().RequestPainted( entry->AssetPath );
+
+        // The type icon until the PNG lands — no placeholder swatch, because unlike a material there is
+        // no single colour that says anything true about a cloud volume.
         return false;
     }
 
@@ -2172,7 +2192,9 @@ namespace Desert::Editor
                    ( entry->Type == FileType::Material &&
                      DrawRenderedMaterialThumbnail( entry, ImVec2( thumb, thumb ) ) ) ||
                    ( entry->Type == FileType::Model &&
-                     DrawRenderedMeshThumbnail( entry, ImVec2( thumb, thumb ) ) ) );
+                     DrawRenderedMeshThumbnail( entry, ImVec2( thumb, thumb ) ) ) ||
+                   ( entry->Type == FileType::Cloud &&
+                     DrawPaintedThumbnail( entry, ImVec2( thumb, thumb ) ) ) );
             if ( !drewThumb )
             {
                 const ImVec4 col = entry->IsFile ? entry->FileTypeColour : ImVec4( 0.95f, 0.82f, 0.42f, 1.0f );
@@ -2425,6 +2447,8 @@ namespace Desert::Editor
             drewThumb = DrawRenderedMaterialThumbnail( entry, thumbSize );
         else if ( entry->Type == FileType::Model )
             drewThumb = DrawRenderedMeshThumbnail( entry, thumbSize );
+        else if ( entry->Type == FileType::Cloud )
+            drewThumb = DrawPaintedThumbnail( entry, thumbSize );
         if ( !drewThumb )
         {
             ImGui::PushStyleColor( ImGuiCol_ChildBg, ImVec4( 0.12f, 0.12f, 0.14f, 1.0f ) );

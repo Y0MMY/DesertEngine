@@ -2,11 +2,15 @@
 
 #include <Editor/Widgets/AssetThumbnailRenderer.hpp>
 
+#include <Common/Core/ResultStr.hpp>
+
 #include <filesystem>
+#include <future>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace Desert::Editor
 {
@@ -23,6 +27,18 @@ namespace Desert::Editor
      * asset browser had never happened to show. A material could sit there as a coloured square forever.
      *
      * This service is the single owner. Panels REQUEST and read; EditorLayer ticks it once per frame.
+     *
+     * IT OWNS TWO QUEUES AND ONLY ONE OF THEM COSTS A RENDERER SLOT. A material and a mesh are
+     * PHOTOGRAPHED — an offscreen scene, a camera, one of six slots, ~370 ms. The four cloud formats are
+     * PAINTED from their own bytes on a JobSystem worker (Editor/Widgets/CloudThumbnail.hpp), which needs
+     * no device at all. Which of the two a format uses is not decided here and not decided at the call
+     * site either: it is a column of Editor/Widgets/ThumbnailFormats.hpp, the census that also makes a
+     * format with NO producer a red test rather than a silent grey icon.
+     *
+     * NOBODY HAS TO PRESS ANYTHING. Requests arrive from the panels that draw a tile, and — for every
+     * asset in the project, whether or not a panel has ever walked past it — from the background sweep
+     * (Editor/Widgets/ThumbnailSweep.hpp), which is what makes a cold cache fill itself after a scene is
+     * opened and makes a file dropped into the content directory acquire a picture on its own.
      *
      * Requests are deduplicated across panels and across frames:
      *   - a PNG on disk that is still a picture OF its asset is never re-rendered (that is the persistent
@@ -71,6 +87,27 @@ namespace Desert::Editor
                                  const Assets::AssetHandle& material = Assets::AssetHandle(
                                       static_cast<uint64_t>( 0 ) ) );
 
+        /**
+         * @brief Queue a picture that is PAINTED ON THE CPU from the file's own bytes — the four cloud
+         *        formats (Editor/Widgets/CloudThumbnail.hpp).
+         *
+         * A SECOND QUEUE, AND IT IS NOT SYMMETRY FOR ITS OWN SAKE. The two queues differ in the only
+         * thing this class rations: a capture costs one of six renderer slots and drains at roughly one
+         * asset per two seconds; a paint costs a file read and a fill on a JobSystem worker, claims no
+         * slot at all, and cannot be refused by PreviewSlotBudget because it never asks. Putting them in
+         * ONE queue would make every cloud asset wait behind whatever mesh happened to be in front of it
+         * — and, worse, would make a project with six windows open (where the renderer is refused) stop
+         * producing cloud thumbnails for a reason that has nothing to do with them.
+         *
+         * The two queues share the freshness gate, the identity keys and the failure set, because those
+         * are questions about the ASSET rather than about who draws it. What is NOT shared is the
+         * renderer, and that is the whole distinction.
+         *
+         * Takes no handle: the painter opens the file. See CloudThumbnail::Write for why that is what
+         * makes it safe on a worker.
+         */
+        std::string RequestPainted( const std::string& assetPath );
+
         // Drive the capture state machine. Called ONCE per frame by EditorLayer — not by panels, so a
         // hidden or closed panel neither starves nor double-ticks it.
         void Tick();
@@ -112,7 +149,8 @@ namespace Desert::Editor
 
         [[nodiscard]] bool HasWork() const
         {
-            return !m_Queue.empty() || ( m_Renderer && m_Renderer->HasPending() );
+            return !m_Queue.empty() || ( m_Renderer && m_Renderer->HasPending() ) || !m_PaintQueue.empty() ||
+                   m_PaintInFlight.valid();
         }
 
     private:
@@ -154,6 +192,11 @@ namespace Desert::Editor
          */
         bool AcquireRenderer();
 
+        /// Dispatch and collect the CPU-painted queue. Split from Tick() so the two queues' state
+        /// machines cannot come to share an early return — the renderer's `HasPending`/`AcquireRenderer`
+        /// guards are about a device, and every one of them would silently stall the paint queue too.
+        void TickPainted();
+
         // Created lazily — a session may never preview — and RELEASED again once the queue has been idle
         // for a while, because it owns a full SceneRenderer and therefore one of the six renderer slots
         // (Engine/Core/RendererSlotPool.hpp). Holding it for the rest of the session after one thumbnail
@@ -183,6 +226,30 @@ namespace Desert::Editor
         // looked identical in a log — and the second is what M8 was reported as.
         int m_Captured = 0;
         int m_Skipped  = 0; // queued, then found already fresh before it was dispatched
+
+        // ── THE SLOT-FREE HALF ────────────────────────────────────────────────────────────────────────
+        //
+        // Requests whose picture is computed from the file's own bytes. They run on the JobSystem — NOT
+        // on a std::thread and NOT on a bare std::async, which is the rule Г9 enforced for the cloud bake
+        // and for the same two reasons: work outside the pool is invisible to the profiler and obeys no
+        // shared budget. `JobSystem::Async` returns a future, and this holds exactly one at a time.
+        //
+        // ONE AT A TIME, deliberately, even though the work is thread-safe and the pool has cores to
+        // spare. A paint reads a whole container — 8 MiB for a `.dcnv` — so a project with two hundred of
+        // them dispatched at once is 1.6 GB of transient buffers and a saturated disk queue, to produce
+        // pictures for tiles nobody is looking at yet. The sweep is background work; its throughput has
+        // never been the scarce thing.
+        struct PaintRequest
+        {
+            std::string Identity;
+            std::string Source;
+            std::string Png;
+        };
+        std::vector<PaintRequest>              m_PaintQueue;
+        std::future<Common::BoolResultStr>     m_PaintInFlight;
+        std::string                            m_PaintInFlightIdentity;
+        std::string                            m_PaintInFlightSource;
+        int                                    m_Painted = 0; ///< reported with m_Captured when the queue drains
 
         static std::optional<std::filesystem::file_time_type> PngStamp( const std::string& png );
     };
