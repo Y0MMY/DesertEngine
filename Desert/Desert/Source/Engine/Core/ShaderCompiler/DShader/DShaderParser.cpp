@@ -900,12 +900,18 @@ namespace Desert::Core::Preprocess
         //   PushConstant ...    -> layout(push_constant) uniform ...          (block name + instance kept)
         //
         // AUTO NUMBERS (drop the parentheses): `In T x;` / `Out T x;` / `Uniform Name {}` / `Buffer Name {}`
-        // / `ReadBuffer`/`WriteBuffer` with NO (n) auto-allocate the lowest free slot, in declaration order,
-        // per STAGE. Three independent spaces: `in` locations, `out` locations, and descriptor bindings; auto
-        // slots skip any EXPLICIT numbers already used in the stage so the two can be mixed. Caveat (per-stage,
-        // by design): a resource SHARED across stages (e.g. the camera UB from an include) or one a C++ site
-        // binds by a fixed number must keep its EXPLICIT (n) so every stage / the host agree — auto can't
-        // coordinate across stages.
+        // / `ReadBuffer`/`WriteBuffer` with NO (n) auto-allocate the lowest free slot, in declaration order.
+        // Three independent spaces: `in` locations, `out` locations, and descriptor bindings; auto slots skip
+        // any EXPLICIT number already present so the two can be mixed.
+        //
+        // THE SCOPE IS ONE CALL OF THIS FUNCTION, WHICH IS NARROWER THAN A STAGE — this paragraph said "per
+        // STAGE" until 2026-09-08 and the code has never done that. AssembleStage translates the DSL `Include`
+        // block and the stage body in TWO separate calls, and ShaderIncluder hands every `#include`d `.glslh`
+        // its own call as well. So each of those texts starts counting from zero, and two auto declarations in
+        // two of them collide. Nothing in the tree does it today (no shipped shader uses an `Include` block and
+        // no `.glslh` declares an auto form), which is why it has never been seen — but the guarantee the old
+        // wording offered was not one this function can make. Anything SHARED — a resource an include declares,
+        // one a second stage also names, or one a C++ site binds by a fixed number — must keep its EXPLICIT (n).
         //
         // Storage-image format qualifiers (`layout(binding=n, rgba32f) uniform imageCube`) and tessellation
         // layout (`layout(vertices=n) out`, `layout(quads,...) in`) are inherently GLSL-structural and stay
