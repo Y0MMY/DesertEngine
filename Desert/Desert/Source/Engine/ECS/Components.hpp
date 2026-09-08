@@ -1814,9 +1814,20 @@ namespace Desert::ECS
         // rooted spelling does not survive packaging: a packaged game remaps ASSETS_PATH to
         // <package>/Assets/, so the stored string named a directory that does not exist there. Measured
         // on a mounted archive by I8: the stored spelling gave Exists=0 while the same file addressed
-        // through the scripts root gave Exists=1. A script was the ONLY kind of content that referred to
-        // itself this way; every other reference in a scene is an AssetHandle hashed from a root-tagged
-        // relative path and was already immune.
+        // through the scripts root gave Exists=1. Every reference in a scene that goes through
+        // MakeAssetResolver is an AssetHandle hashed from a root-tagged relative path and was already
+        // immune; this was the only one that did not.
+        //
+        // NOT the only rooted STRING in a scene, and the difference is worth knowing before someone
+        // reads this as "the class is now closed". `TextComponent.FontPath` and `UIImage.Icon` also
+        // store a path and re-hash it at load (FontService::RegisterFont / IconService::RegisterIcon,
+        // both through AssetHandle::FromCookedPath). Those are safe for every value the repository ships
+        // — measured: all 5 FontPath and all 8 Icon values name the ENGINE trees Resources/Fonts and
+        // Resources/Icons, which the packager stores under their own dev-time relative paths and which
+        // SetProjectRoot never remaps. A .ttf or .svg dropped in from the PROJECT'S OWN assets tree —
+        // which both scan roots allow (Runtime/Services/ServiceScanRoots.hpp) — would take exactly the
+        // route this field just left. Unmeasured end to end and out of I9's scope; named here so it is
+        // found rather than re-derived.
         //
         // WHY A KEY AND NOT A HANDLE, which is the other way this could have been fixed. An AssetHandle
         // IS the FNV-1a of exactly this string, so the hash carries no location the key does not — what
