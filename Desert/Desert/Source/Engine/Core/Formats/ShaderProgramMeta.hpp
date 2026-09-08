@@ -37,6 +37,43 @@ namespace Desert::Core::Formats
         Slider    // scalar/vector with a range
     };
 
+    // WHEN AN EDIT TO THIS PARAMETER REACHES THE PICTURE. It is the one fact about a parameter that an
+    // artist cannot discover by looking at the control, and it is the fact the cloud material's window was
+    // hiding: about half of that material's values are inputs to a CPU BAKE of a 256x32x256 volume over
+    // several thousand cloud bodies, so moving one of them re-runs that bake — measured between 3.3 s and
+    // 14.1 s on this machine — and the sky goes on showing the PREVIOUS volume until the new one lands.
+    // The other half are read per sample by the march and answer in the frame that is drawn next.
+    //
+    // Drawn side by side with no mark the two are indistinguishable, and the owner reported the layer as
+    // "not updating" twice before anybody named the difference. It belongs to the PARAMETER, so it lives in
+    // the schema beside the parameter's range and category rather than in a table elsewhere that would have
+    // to be kept level with the shader by hand.
+    //
+    // NOT the same axis as ShaderStage (vertex/fragment/compute): that says which program stage compiles
+    // the code, this says which side of the CPU/GPU boundary consumes the VALUE.
+    enum class ShaderParamTiming : uint8_t
+    {
+        Unspecified = 0, // the shader made no claim; the editor shows none rather than inventing one
+        Immediate,       // read by the shader per frame — an edit is on screen the next frame
+        Rebake,          // an input to a CPU precomputation — an edit re-runs it and costs seconds
+    };
+
+    // The enum's own spelling, for the DSL, the editor and diagnostics. No `default:`, so a value added
+    // above is a -Wswitch warning here rather than a row that reads "2".
+    constexpr const char* ShaderParamTimingName( ShaderParamTiming timing )
+    {
+        switch ( timing )
+        {
+            case ShaderParamTiming::Unspecified:
+                return "Unspecified";
+            case ShaderParamTiming::Immediate:
+                return "Immediate";
+            case ShaderParamTiming::Rebake:
+                return "Rebake";
+        }
+        return "Unspecified";
+    }
+
     struct ShaderParam
     {
         std::string       Name;                                  // UB field / sampler name (the binding key)
@@ -46,6 +83,11 @@ namespace Desert::Core::Formats
         ShaderValueType   Type   = ShaderValueType::Float;       // numeric storage type
         ShaderParamWidget Widget = ShaderParamWidget::Auto;
         bool              IsTexture = false;                     // sampler param (uses DefaultTexture)
+
+        // When an edit here reaches the picture — see ShaderParamTiming. Unspecified is the shipped state
+        // of every shader that has not been asked the question; the editor draws no claim for it, which is
+        // different from claiming "immediate".
+        ShaderParamTiming Timing = ShaderParamTiming::Unspecified;
 
         // Non-texture ASSET reference (e.g. "CloudTypeAsset", "CloudLayoutAsset"). Empty for ordinary
         // params. Such a parameter is CPU-side only: it never becomes a GLSL declaration, so the parser

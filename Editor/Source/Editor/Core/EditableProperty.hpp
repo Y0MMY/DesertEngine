@@ -89,5 +89,13 @@ namespace Desert::Editor
         /// Why not. NEVER empty while Settable is false — a refusal with nothing said is the shape this
         /// whole channel is built to make impossible.
         std::string NotSettableReason;
+
+        /// WHEN A WRITE TO THIS PROPERTY REACHES THE PICTURE: "Immediate", "Rebake", or empty when the
+        /// schema makes no claim. Reported because the channel's whole contract is that a reply is released
+        /// only after a frame that shows the command's effect — and for a `Rebake` property that frame is
+        /// SECONDS away, because a CPU precomputation has to be re-run first (the cloud volume: 3.3 to 14.1
+        /// seconds, task O8). A client that does not know which kind it just wrote reads the unchanged
+        /// frame as a failed write, which is exactly the conclusion the owner reached by hand.
+        std::string Timing;
     };
 } // namespace Desert::Editor

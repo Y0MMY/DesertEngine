@@ -975,6 +975,24 @@ namespace Desert::Editor
     // yesterday, and "the settings are gone" is the complaint that produces — the panel would be hiding its
     // own content to look tidy. ImGui remembers a header a person closed, per window, which is the editor's
     // existing convention and not a sixth place settings are stored (K8/K9/K10).
+    // WHAT THIS GROUP'S EDITS COST TO SEE, appended to whatever the heading already said.
+    //
+    // IT IS THE ONE FACT ABOUT A CLOUD PARAMETER THAT CANNOT BE READ OFF THE CONTROL. Twenty of that
+    // material's thirty-four values are inputs to a CPU bake of a 256x32x256 volume, so moving one of them
+    // costs SECONDS during which the sky goes on showing the previous volume, while the other fourteen
+    // answer in the frame that is drawn next. Drawn with no mark the two are indistinguishable, and the
+    // owner reported the layer as "not updating" twice before anybody named the difference (task O8).
+    //
+    // FOLDED FROM THE MEMBERS by MaterialEdit::FoldGroupTiming and never from the group's NAME — a category
+    // called "Weather" in some other shader owes this window nothing. A group whose members disagree says so
+    // and defers to its rows rather than claiming an average, and a group nobody classified says NOTHING,
+    // which is the honest answer and not the same as claiming "immediate".
+    static std::string WithTimingSuffix( const std::string& heading, MaterialEdit::GroupTiming timing )
+    {
+        const char* phrase = MaterialEdit::GroupTimingPhrase( timing );
+        return *phrase == '\0' ? heading : heading + "  \xE2\x80\x94  " + phrase;
+    }
+
     static bool DrawParameterGroupHeader( const MaterialEdit::ParameterGroup& group )
     {
         if ( group.Kind == MaterialEdit::ParameterGroupKind::Inputs )
@@ -983,8 +1001,10 @@ namespace Desert::Editor
             // without opening each file. Unnumbered on purpose: the numbers belong to the shader author's
             // own stages, and this group is not one of them, it is every asset reference the schema
             // declares, pulled to the front.
-            const std::string label = std::string( MaterialEdit::kInputsGroupName ) + " (" +
-                                      std::to_string( group.Params.size() ) + ")##param_group_inputs";
+            const std::string label = WithTimingSuffix( std::string( MaterialEdit::kInputsGroupName ) + " (" +
+                                                             std::to_string( group.Params.size() ) + ")",
+                                                        group.Timing ) +
+                                      "##param_group_inputs";
             const bool open = ImGui::CollapsingHeader( label.c_str(), ImGuiTreeNodeFlags_DefaultOpen );
             if ( ImGui::IsItemHovered() )
             {
@@ -1002,8 +1022,8 @@ namespace Desert::Editor
             // them. Drawn under a heading that names the situation instead of being folded into the group
             // above — which would put a parameter under a title that does not describe it — or left in an
             // unnamed block, which reads as a rendering accident.
-            const bool open =
-                 ImGui::CollapsingHeader( "Uncategorised##param_group_none", ImGuiTreeNodeFlags_DefaultOpen );
+            const std::string label = WithTimingSuffix( "Uncategorised", group.Timing ) + "##param_group_none";
+            const bool        open  = ImGui::CollapsingHeader( label.c_str(), ImGuiTreeNodeFlags_DefaultOpen );
             if ( ImGui::IsItemHovered() )
             {
                 ImGui::SetTooltip( "These parameters declare no Category in the shader's Properties block, "
@@ -1013,10 +1033,12 @@ namespace Desert::Editor
             return open;
         }
 
-        char label[192];
-        std::snprintf( label, sizeof( label ), "%02zu \xC2\xB7 %s##param_group_%s", *group.Ordinal,
-                       group.Category.c_str(), group.Category.c_str() );
-        return ImGui::CollapsingHeader( label, ImGuiTreeNodeFlags_DefaultOpen );
+        char ordinal[8];
+        std::snprintf( ordinal, sizeof( ordinal ), "%02zu", *group.Ordinal );
+        const std::string label =
+             WithTimingSuffix( std::string( ordinal ) + " \xC2\xB7 " + group.Category, group.Timing ) +
+             "##param_group_" + group.Category;
+        return ImGui::CollapsingHeader( label.c_str(), ImGuiTreeNodeFlags_DefaultOpen );
     }
 
     bool MaterialEditorPanel::DrawParameters( Assets::SurfaceMaterialAsset& asset,
@@ -1134,11 +1156,24 @@ namespace Desert::Editor
             // The schema's own Tooltip attribute, on the LABEL: the cloud material carries the calibrated
             // tooltips its component fields used to, and a parameter whose meaning the panel cannot show
             // is a parameter the artist reads the shader file to use.
-            if ( !p.Tooltip.empty() && ImGui::IsItemHovered() )
+            //
+            // AND THE ROW'S OWN TIMING UNDER IT. The heading carries the group's answer, but a group whose
+            // members disagree cannot speak for them — and a person reading ONE control should not have to
+            // scroll up to learn whether moving it costs a frame or fourteen seconds. Drawn only when the
+            // schema states one: an unclassified parameter gets no sentence rather than a guessed one.
+            const char* timingPhrase = MaterialEdit::ParamTimingPhrase( p.Timing );
+            if ( ( !p.Tooltip.empty() || *timingPhrase != '\0' ) && ImGui::IsItemHovered() )
             {
                 ImGui::BeginTooltip();
                 ImGui::PushTextWrapPos( ImGui::GetFontSize() * 30.0f );
-                ImGui::TextUnformatted( p.Tooltip.c_str() );
+                if ( !p.Tooltip.empty() )
+                    ImGui::TextUnformatted( p.Tooltip.c_str() );
+                if ( *timingPhrase != '\0' )
+                {
+                    if ( !p.Tooltip.empty() )
+                        ImGui::Spacing();
+                    ImGui::TextDisabled( "%s", timingPhrase );
+                }
                 ImGui::PopTextWrapPos();
                 ImGui::EndTooltip();
             }

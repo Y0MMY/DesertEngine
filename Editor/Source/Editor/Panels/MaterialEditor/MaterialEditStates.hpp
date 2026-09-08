@@ -517,6 +517,20 @@ namespace Desert::Editor::MaterialEdit
         Uncategorised,
     };
 
+    /// WHEN A GROUP'S EDITS REACH THE PICTURE, as one value for the whole heading.
+    ///
+    /// DERIVED FROM THE MEMBERS AND NEVER FROM THE GROUP'S NAME. "Weather is a bake stage" is true of the
+    /// cloud material and is a fact about its parameters, not about the word — a category called Weather in
+    /// some other shader owes this window nothing. @ref Mixed is a real answer and not a failure: it means
+    /// the heading cannot speak for its rows and each row has to, which is what the panel then draws.
+    enum class GroupTiming : uint8_t
+    {
+        Unstated,  ///< no member of this group declares a timing — the window claims nothing
+        Immediate, ///< every member that declares one says Immediate
+        Rebake,    ///< every member that declares one says Rebake
+        Mixed,     ///< members disagree; the heading defers to the rows
+    };
+
     /// ONE GROUP of the parameter table: a `Category` the shader author wrote, and the params carrying it.
     struct ParameterGroup
     {
@@ -537,7 +551,72 @@ namespace Desert::Editor::MaterialEdit
         /// ("00 · Cloud Types"). ABSENT for Inputs and for the uncategorised group, neither of which is a
         /// stage of anyone's order and neither of which may take a place in it.
         std::optional<std::size_t> Ordinal;
+
+        /// What this group's edits cost to see — see GroupTiming. Folded from the members here rather than
+        /// at the drawing site, so the window and any census of it read one answer.
+        GroupTiming Timing = GroupTiming::Unstated;
     };
+
+    /// The sentence the window puts beside a heading, and the channel puts on a row. ONE WORDING, because
+    /// the panel and the property census both say it and two spellings of one guarantee is how a promise
+    /// starts drifting from what the code does. Empty for Unstated: a window that says nothing is honest,
+    /// and a window that says "immediate" about a parameter nobody classified is not.
+    [[nodiscard]] constexpr const char* GroupTimingPhrase( GroupTiming timing ) noexcept
+    {
+        switch ( timing )
+        {
+            case GroupTiming::Unstated:
+                return "";
+            case GroupTiming::Immediate:
+                return "on screen next frame";
+            case GroupTiming::Rebake:
+                return "rebuilds the volume - seconds";
+            case GroupTiming::Mixed:
+                return "mixed - see each row";
+        }
+        return "";
+    }
+
+    /// The same sentence for ONE parameter. Longer than the heading's, because a row's tooltip is where a
+    /// person goes when the heading was not enough.
+    [[nodiscard]] constexpr const char*
+    ParamTimingPhrase( ::Desert::Core::Formats::ShaderParamTiming timing ) noexcept
+    {
+        switch ( timing )
+        {
+            case ::Desert::Core::Formats::ShaderParamTiming::Unspecified:
+                return "";
+            case ::Desert::Core::Formats::ShaderParamTiming::Immediate:
+                return "This one is read while the frame is drawn: the picture moves with the slider.";
+            case ::Desert::Core::Formats::ShaderParamTiming::Rebake:
+                return "This one is an input to a precomputation on the CPU. Moving it starts that work "
+                       "again and the sky keeps showing the PREVIOUS result until it lands - seconds, not "
+                       "a frame. Nothing is broken while you wait.";
+        }
+        return "";
+    }
+
+    /// Fold the members' timings into the group's — the definition GroupTiming's own note gives.
+    [[nodiscard]] inline GroupTiming FoldGroupTiming( const ::Desert::Core::Formats::ShaderProgramMeta& schema,
+                                                      const ParameterGroup&                             group )
+    {
+        using PT = ::Desert::Core::Formats::ShaderParamTiming;
+
+        GroupTiming folded = GroupTiming::Unstated;
+        for ( const std::size_t index : group.Params )
+        {
+            const PT timing = schema.Params[index].Timing;
+            if ( timing == PT::Unspecified )
+                continue; // a param that makes no claim cannot make the group's claim false either
+
+            const GroupTiming asGroup = timing == PT::Rebake ? GroupTiming::Rebake : GroupTiming::Immediate;
+            if ( folded == GroupTiming::Unstated )
+                folded = asGroup;
+            else if ( folded != asGroup )
+                return GroupTiming::Mixed;
+        }
+        return folded;
+    }
 
     /// THE PARAMETER TABLE'S GROUPS, in the order the shader file declares them.
     ///
@@ -649,6 +728,7 @@ namespace Desert::Editor::MaterialEdit
         {
             if ( group.Kind == ParameterGroupKind::Authored )
                 group.Ordinal = ordinal++;
+            group.Timing = FoldGroupTiming( schema, group );
         }
 
         return groups;
@@ -706,6 +786,12 @@ namespace Desert::Editor::MaterialEdit
 
                 entry.NotSettableReason = UnsettableReason( p, isInstance );
                 entry.Settable          = entry.NotSettableReason.empty();
+
+                // WHEN A WRITE HERE BECOMES VISIBLE. Taken from the schema's own attribute, so the channel
+                // and the window answer the same question from the same place; empty when the shader makes
+                // no claim, which is a fact about the shader rather than a gap here.
+                if ( p.Timing != ::Desert::Core::Formats::ShaderParamTiming::Unspecified )
+                    entry.Timing = ::Desert::Core::Formats::ShaderParamTimingName( p.Timing );
 
                 if ( !p.IsTexture && !p.IsAssetRef() )
                 {

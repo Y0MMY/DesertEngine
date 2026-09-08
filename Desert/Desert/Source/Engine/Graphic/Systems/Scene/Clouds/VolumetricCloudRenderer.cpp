@@ -1,6 +1,7 @@
 #include "VolumetricCloudRenderer.hpp"
 
 #include <Engine/Core/Camera.hpp>
+#include <Engine/Graphic/Clouds/CloudMaterialBake.hpp>
 #include <Engine/Graphic/FallbackTextures.hpp>
 #include <Engine/Graphic/RenderGraphSort.hpp>
 #include <Engine/Graphic/RenderPhase.hpp>
@@ -201,113 +202,30 @@ namespace Desert::Graphic::System
     {
         Assets::CloudProceduralFieldParams params;
 
-        params.RegionSizeKm = std::max( m_Data.RegionSize, 1.0f ) / kCloudWorldUnitsPerKm;
+        // EVERYTHING THE BAKE TAKES FROM THE MATERIAL IS APPLIED BY ONE FREE FUNCTION, and the reason it is
+        // not written out here is the census that stands on it. Graphic::ApplyCloudMaterialToBakeParams is
+        // callable with no ResourceRegistry, so Desert/Tests/Engine/CloudMaterialTiming can perturb one
+        // material field at a time and ask Assets::CloudProceduralParamsEqual — this renderer's OWN rebake
+        // decision, unchanged — whether the volume has to be built again. That is what makes the schema's
+        // `Timing(Rebake)` a checked fact rather than a comment: while this code lived inside a renderer
+        // method, nothing could measure which knob cost 14 seconds and which cost none, and the owner
+        // reported the layer as "not updating" twice.
+        CloudBakeLayerInputs layerInputs;
+        layerInputs.RegionSize = m_Data.RegionSize;
+        // THIS VIEW'S BAKE BUDGET. It is a property of the VIEW rather than of the layer's look — a preview
+        // and a viewport of the same scene legitimately want different answers — which is why it travels
+        // through the component beside Max Steps rather than through the material.
+        layerInputs.VolumeResolution = m_Data.VolumeResolution;
+        layerInputs.MaxSteps         = m_Data.MaxSteps;
+        layerInputs.WindDirection    = m_Data.WindDirection;
 
-        // THIS VIEW'S BAKE BUDGET, and it is clamped to the component's own Range for the reason the four
-        // placement numbers below state: a scene file is a text file and an out-of-range number in one must
-        // produce a sky rather than a refusal. It is a property of the VIEW rather than of the layer's look
-        // — a preview and a viewport of the same scene legitimately want different answers — which is why
-        // it travels through the component beside Max Steps rather than through the material.
-        params.VolumeSideVoxels = static_cast<uint32_t>(
-             std::clamp( m_Data.VolumeResolution, static_cast<int32_t>( Assets::kCloudProceduralVolumeSideMin ),
-                         static_cast<int32_t>( Assets::kCloudProceduralVolumeSide ) ) );
+        ApplyCloudMaterialToBakeParams( m_Material, layerInputs, shapes, speciesCount, params );
 
-        // THE SHELL, TAKEN FROM THE SPECIES AND NOT FROM THE COMPONENT, because that is where the packer
-        // takes it from too: the layer's geometry is the UNION of its types' altitude ranges (decision
-        // D-13's envelope), and a volume spread over a different shell than the one the march intersects
-        // would put every cloud at the wrong altitude — the "sky was a ceiling" defect in a new costume.
-        const CloudEnvelopeKm envelope = CloudTypeSetEnvelopeKm( shapes, speciesCount );
-
-        params.LayerBottomKm    = std::max( envelope.BottomKm, 0.0f );
-        params.LayerThicknessKm = std::max( envelope.TopKm - params.LayerBottomKm, 0.001f );
-
-        params.Coverage         = std::clamp( m_Material.Coverage, 0.0f, 1.0f );
-        params.CoverageContrast = std::max( m_Material.CoverageContrast, 0.01f );
-        params.Seed             = static_cast<uint32_t>( m_Material.Seed );
-
-        // THE FOUR PLACEMENT NUMBERS PASS THROUGH UNCHANGED, and the clamps here are the component's own
-        // ranges rather than second opinions: a scene file is a text file and an out-of-range number in
-        // one must produce a sky rather than a refusal. Assets::ValidateCloudProceduralParams refuses
-        // anything outside them by name, so a clamp that disagreed with a range would turn an artist's
-        // typo into a layer that never bakes.
-        params.PlacementDensity     = std::clamp( m_Material.PlacementDensity, 0.25f, 8.0f );
-        params.PlacementScatter     = std::clamp( m_Material.PlacementScatter, 0.0f, 4.0f );
-        params.PlacementSizeVariety = std::clamp( m_Material.PlacementSizeVariety, 0.0f, 1.0f );
-        params.PatchStrength        = std::clamp( m_Material.PatchStrength, 0.0f, 1.0f );
-
-        // THE PATCH IS THE ONE THAT CAN REFUSE, because it is half of a RELATION — a modulation finer than
-        // three cells decides cells one at a time and reads as a checkerboard. Floored against the
-        // lattice HERE rather than left to fail validation, for the same reason: the layer has to draw a
-        // sky for whatever the file says. An artist who wants finer patches gets them by shrinking the
-        // weather tile, which is what the tooltip names.
-        params.PatchTileKm = std::max( m_Material.PatchTileSize, 1.0f ) / kCloudWorldUnitsPerKm;
-
-        // THE BLEND RADIUS AND THE PROFILE DEPTH ARE DERIVED FROM THE LATTICE rather than exposed, and
-        // that is a decision with a number behind it. The join inflates its own surface by
-        // `BlendRadius * ln(sum of weights in range)`, so with hundreds of overlapping lumps a generous
-        // radius does not soften a crease, it floods the sky — at a 3 km cell and 24 lumps in range, a
-        // radius of a fifth of the cell would dilate every body by 1.9 km. Two per cent of the cell keeps
-        // that dilation under 200 m while still fusing lobes that already overlap, which is where the
-        // fusion comes from. An artist who wants softer clouds has Detail Strength, which is the knob that
-        // means it.
-        // ONE STATEMENT OF "four cells to a tile", shared with the Cloud Layout panel, which measures a
-        // painting's strokes against the cell and must not compute the ratio a second time.
-        const float latticeKm = ECS::CloudLayerLatticeKm( m_Material.WeatherTileSize );
-
-        params.BlendRadiusKm  = std::max( 0.02f * latticeKm, 1e-3f );
-        params.ProfileDepthKm = std::max( 0.12f * latticeKm, 1e-3f );
-
-        // THE MARCH'S OWN SEARCH STEP, handed in rather than assumed by the generator. It is one half of
-        // the relation this programme has been bitten by twice — what the field places against what the
-        // ray can find — and taking it from the component's Max Steps is what makes an artist who lowers
-        // that number get coarser lumps rather than speckle.
-        params.ResolvableChordKm =
-             CloudFinestResolvableChordKm( static_cast<float>( std::clamp( m_Data.MaxSteps, 8, 512 ) ) );
-
-        const glm::vec3 wind = m_Data.WindDirection;
-        params.WindAxis      = glm::vec2( wind.x, wind.z );
-
-        params.Species.reserve( speciesCount );
-        for ( uint32_t slot = 0; slot < speciesCount; ++slot )
-        {
-            Assets::CloudProceduralSpecies species;
-            species.Shape = shapes[slot];
-            // A TYPE STATES HOW MUCH COARSER OR FINER THAN THE LAYER IT IS, which is what Placement Scale
-            // has always meant, and the layer's own tile is the pair Max View Distance is calibrated
-            // against (CALIBRATION.md §4). Four cells to a tile, which is the ratio the component's own
-            // tooltip has stated since T1: "12 km -> 3 km cells, a cumulus field".
-            species.CellKm     = latticeKm * std::max( shapes[slot].PlacementScale, 1e-3f );
-            species.Anisotropy = std::max( shapes[slot].PlacementAnisotropy, 1e-3f );
-            params.Species.push_back( species );
-        }
-
-        // THE PATCH AGAINST THE LATTICE, floored after the species are known because the CELL is what the
-        // relation is against and a type's Placement Scale and Anisotropy both move it. Three cells is the
-        // bound Assets::ValidateCloudProceduralParams refuses below: a modulation whose period is near a
-        // cell's decides cells one at a time, which is a checkerboard and not a weather system.
-        for ( const Assets::CloudProceduralSpecies& species : params.Species )
-        {
-            const glm::vec2 extent = Assets::CloudProceduralCellExtentKm( params, species );
-            params.PatchTileKm     = std::max( params.PatchTileKm, 3.0f * std::max( extent.x, extent.y ) );
-        }
-
-        // THE PAINTED LAYOUT. Resolved through the service exactly as the cloud types above are, so the
-        // renderer never learns how to read a file and three viewports resolve one asset once.
+        // THE PAINTED LAYOUT'S TWO SOURCES. Resolved through the service exactly as the cloud types above
+        // are, so the renderer never learns how to read a file and three viewports resolve one asset once.
+        // The numbers that POSITION a painting were applied by the call above; only the handles need a
+        // service, which is precisely why they are the two lines that stayed here.
         //
-        // THE CLAMPS ARE THE COMPONENT'S OWN RANGES rather than second opinions, for the reason the four
-        // placement numbers state above them: a scene file is a text file, an out-of-range number in one
-        // must produce a sky rather than a refusal, and Assets::ValidateCloudLayoutPlacement refuses
-        // anything outside them by name — so a clamp that disagreed with a range would turn a typo into a
-        // layer that never bakes.
-        params.LayoutPlacement.RepeatsPerRegion =
-             static_cast<uint32_t>( std::clamp( m_Material.LayoutRepeats, 1, 16 ) );
-        params.LayoutPlacement.QuarterTurns =
-             static_cast<uint32_t>( std::clamp( m_Material.LayoutRotation, 0, 3 ) );
-        params.LayoutPlacement.OffsetKm =
-             glm::vec2( m_Material.LayoutOffset.x, m_Material.LayoutOffset.y ) / kCloudWorldUnitsPerKm;
-        params.LayoutPlacement.PatternStrength = std::clamp( m_Material.LayoutPatternStrength, 0.0f, 1.0f );
-        params.LayoutPlacement.MaskStrength    = std::clamp( m_Material.LayoutMaskStrength, 0.0f, 1.0f );
-
         // TWO SLOTS, RESOLVED INDEPENDENTLY — Unreal's `Layout_CloudGlobalPattern` and
         // `Layout_GlobalCloudMask` are two texture parameters and since O-4 so are ours. Pointing both at
         // one `.dclayout` is the ordinary case and the service returns the same shared object twice.
