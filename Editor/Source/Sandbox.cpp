@@ -10,7 +10,7 @@ namespace Desert
 
     void Sandbox::OnCreate()
     {
-        PushLayer( new Editor::EditorLayer( this, "" ) );
+        PushLayer( std::make_unique<Editor::EditorLayer>( this, "" ) );
     }
 
     void Sandbox::OnDestroy()

@@ -106,8 +106,7 @@ namespace Desert::Tests::PointerCensus
     // is one line plus the rows it brings.
     inline std::vector<const char*> ScannedTrees()
     {
-        return { "Desert/Desert/Source/Engine/Graphic", "Desert/Desert/Source/Engine/ShaderResources",
-                 "Desert/Desert/Source/Engine/Assets", "Editor/Source" };
+        return { "Desert/Desert/Source", "Desert/Common/Source", "Editor/Source", "Runtime/Source" };
     }
 
     inline std::vector<fs::path> ScannedSources( const std::string& root )

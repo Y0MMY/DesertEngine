@@ -102,10 +102,17 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
 
     // MEASURED, not estimated, and measured with THIS scanner. Run over the whole tree by widening
     // ScannedTrees() (Desert/Desert/Source, Desert/Common/Source, Editor/Source, Runtime/Source) it
-    // reports 787 members: 327 raw, 315 shared, 111 unique, 34 weak. Stages 1 and 2 are the 652 below —
-    // Graphic + ShaderResources + Assets, where the cost of a lifetime mistake is a use-after-free of a
-    // device object or of a loaded asset, plus Editor/Source, where it is a panel outliving the scene or
-    // the renderer slot it draws.
+    // THE WHOLE TREE IS NOW THE SCOPE — Desert/Desert/Source, Desert/Common/Source, Editor/Source and
+    // Runtime/Source — so there is no longer an unscanned half in which a raw pointer can appear without
+    // owing an answer. 783 members, and the three stages that got here are still visible in the register's
+    // section headers because the ARGUMENTS differ by tree: in Graphic the form answers about half the
+    // rows by itself, in the editor almost every row is a construction order, and in the engine core
+    // almost every row is a back-pointer closed by containment.
+    //
+    // The number fell from 787 to 783 across the three stages, and both moves were the fixes rather than
+    // the scan: eight raw members became co-owned handles (A8-3), a dead class, a dead accessor, a
+    // write-only set of panel pointers, a stack-address drag target and LayerStack's un-owned layer
+    // vector all went away, and MaterialSlotBinding brought two new ones in.
     //
     // THIS NUMBER HAS MOVED TWICE AND BOTH MOVES WERE THE CENSUS BEING WRONG, not the tree changing.
     // Neither is written off, because a census whose number drifts without an account is a census nobody
@@ -131,11 +138,11 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   It was found the only way a blind spot ever is: A8-3 converted eight raw members to co-owned
     //   handles and the total FELL by five instead of holding. The alias list is now derived from the
     //   tree (see DeclaredAliases), not typed.
-    EXPECT_EQ( CountOf( Form::Raw ), 267 );
-    EXPECT_EQ( CountOf( Form::Shared ), 266 );
-    EXPECT_EQ( CountOf( Form::Unique ), 90 );
-    EXPECT_EQ( CountOf( Form::Weak ), 29 );
-    EXPECT_EQ( (int)Members().size(), 652 )
+    EXPECT_EQ( CountOf( Form::Raw ), 322 );
+    EXPECT_EQ( CountOf( Form::Shared ), 317 );
+    EXPECT_EQ( CountOf( Form::Unique ), 110 );
+    EXPECT_EQ( CountOf( Form::Weak ), 34 );
+    EXPECT_EQ( (int)Members().size(), 783 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }
@@ -211,7 +218,7 @@ TEST( PointerOwnership, EveryRowCarriesAnArgument )
 
 TEST( PointerOwnership, MaterialPropertyStorageIsAddressStable )
 {
-    // 46 of the 267 rows rest on ONE argument: a material's cached `Texture2DProperty*` cannot dangle
+    // 46 of the 322 rows rest on ONE argument: a material's cached `Texture2DProperty*` cannot dangle
     // because the property lives in the material's own executor. That argument has three legs and all
     // three are facts about the source, so all three are checked here rather than believed.
     ASSERT_FALSE( RepoRoot().empty() );
@@ -335,7 +342,7 @@ TEST( PointerOwnership, NoRawPointerMemberIsDeletedByItsHolder )
 TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
 {
     // THE AUDIT'S LARGEST SINGLE RESULT IS A REFUSAL, and it is recorded here so the next person does
-    // not re-derive it. 266 of the 652 members in these trees are `shared_ptr`, and for the GPU
+    // not re-derive it. 317 of the 783 members in these trees are `shared_ptr`, and for the GPU
     // resources that is the CORRECT form rather than a habit: an Image2D is held at once by the
     // framebuffer that allocated it, by the descriptor sets that sample it and by the deletion queue
     // that outlives both, and no two of those have an ordered death. Converting them to `unique_ptr`
@@ -346,7 +353,7 @@ TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
     // `shared_ptr` here is a false impression of shared ownership, and the register's job is to make
     // the true owner findable instead of mass-replacing them for uniformity -- churn that would hide
     // the seven real findings in a diff of two hundred files.
-    EXPECT_EQ( CountOf( Form::Shared ), 266 );
+    EXPECT_EQ( CountOf( Form::Shared ), 317 );
     EXPECT_GT( CountOf( Form::Shared ), CountOf( Form::Unique ) + CountOf( Form::Weak ) );
 }
 

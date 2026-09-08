@@ -48,7 +48,7 @@ namespace Desert::Player
 
         void OnCreate() override
         {
-            PushLayer( new RuntimeLayer( s_SceneOverride, this ) );
+            PushLayer( std::make_unique<RuntimeLayer>( s_SceneOverride, this ) );
         }
 
         void OnDestroy() override

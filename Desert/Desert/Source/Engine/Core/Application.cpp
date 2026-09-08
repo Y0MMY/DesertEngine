@@ -121,29 +121,23 @@ namespace Desert::Engine
         LOG_ERROR( "[Application] layer '{}' failed in {}: {}", layer->GetName(), stage, error );
     }
 
-    void Application::PushLayer( Common::Layer* layer )
+    void Application::PushLayer( std::unique_ptr<Common::Layer> layer )
     {
-        m_LayerStack.PushLayer( layer );
+        // Borrowed back out of the stack, which now owns it: attaching must not need a second claim.
+        Common::Layer* pushed = m_LayerStack.PushLayer( std::move( layer ) );
+        if ( !pushed )
+            return;
 
-        const auto attached = layer->OnAttach();
+        const auto attached = pushed->OnAttach();
         if ( !attached.IsSuccess() )
         {
             // A layer that did not attach has no resources, and the loop below is about to call OnUpdate
             // on it sixty times a second. Refusing to start is the only answer that does not turn a
             // startup failure into a stream of consequences with a nonzero exit code nowhere in sight —
             // Close's own comment already says why exit 0 on a failed run is the worse error.
-            LOG_ERROR( "[Application] layer '{}' failed to attach: {}", layer->GetName(), attached.GetError() );
+            LOG_ERROR( "[Application] layer '{}' failed to attach: {}", pushed->GetName(), attached.GetError() );
             Close( 1 );
         }
-    }
-
-    void Application::PopLayer( Common::Layer* layer )
-    {
-        m_LayerStack.PopLayer( layer );
-
-        const auto detached = layer->OnDetach();
-        if ( !detached.IsSuccess() )
-            ReportLayerFailure( "OnDetach", layer, detached.GetError() );
     }
 
     bool Application::EndRunOnDeviceLoss( const char* stage )
@@ -245,21 +239,21 @@ namespace Desert::Engine
             }
 
             // 4. Update layers (Scene rendering to offscreen buffers)
-            for ( Common::Layer* layer : m_LayerStack )
+            for ( const auto& layer : m_LayerStack )
             {
                 const auto updated = layer->OnUpdate( Common::Timestep( timestep ) );
                 if ( !updated.IsSuccess() )
-                    ReportLayerFailure( "OnUpdate", layer, updated.GetError() );
+                    ReportLayerFailure( "OnUpdate", layer.get(), updated.GetError() );
             }
 
             // 5. UI Rendering
             {
                 DESERT_PROFILE_SCOPE( "ImGui Render" );
-                for ( Common::Layer* layer : m_LayerStack )
+                for ( const auto& layer : m_LayerStack )
                 {
                     const auto rendered = layer->OnImGuiRender();
                     if ( !rendered.IsSuccess() )
-                        ReportLayerFailure( "OnImGuiRender", layer, rendered.GetError() );
+                        ReportLayerFailure( "OnImGuiRender", layer.get(), rendered.GetError() );
                 }
             }
 
@@ -285,7 +279,7 @@ namespace Desert::Engine
             // answered it, gets its instant here. Default is a no-op (Common::Layer::OnFramePresented).
             {
                 DESERT_PROFILE_SCOPE( "OnFramePresented" );
-                for ( Common::Layer* layer : m_LayerStack )
+                for ( const auto& layer : m_LayerStack )
                     layer->OnFramePresented();
             }
         }
@@ -296,7 +290,7 @@ namespace Desert::Engine
         // an unclean exit and the recovery prompt reappeared on every launch.
         for ( auto it = m_LayerStack.end(); it != m_LayerStack.begin(); )
         {
-            Common::Layer* layer    = *--it;
+            Common::Layer* layer    = ( *--it ).get();
             const auto     detached = layer->OnDetach();
             if ( !detached.IsSuccess() )
                 ReportLayerFailure( "OnDetach", layer, detached.GetError() );
