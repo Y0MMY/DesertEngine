@@ -178,7 +178,6 @@ namespace Desert::Graphic
             m_Accounting.RecordBytes( bytes );
         }
 
-
         [[nodiscard]] virtual unsigned int GetSize() const = 0;
 
         [[nodiscard]] virtual Common::BoolResultStr RT_Invalidate() = 0;

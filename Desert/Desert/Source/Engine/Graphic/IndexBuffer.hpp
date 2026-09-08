@@ -38,7 +38,6 @@ namespace Desert::Graphic
             m_Accounting.RecordBytes( bytes );
         }
 
-
         virtual unsigned int GetSize() const  = 0;
         virtual unsigned int GetCount() const = 0;
 

@@ -149,7 +149,10 @@ namespace Desert::Graphic::API::Vulkan
     // --- VulkanImage2D ---
 
     VulkanImage2D::VulkanImage2D( const Core::Formats::Image2DSpecification& spec ) : m_Specification( spec ) {}
-    VulkanImage2D::~VulkanImage2D() { Release(); }
+    VulkanImage2D::~VulkanImage2D()
+    {
+        Release();
+    }
     Common::BoolResultStr VulkanImage2D::Invalidate() { return RT_Invalidate(); }
     Common::BoolResultStr VulkanImage2D::RT_Invalidate() { Release(); return CreateResource(); }
 
@@ -575,7 +578,10 @@ namespace Desert::Graphic::API::Vulkan
     // --- VulkanImageCube ---
 
     VulkanImageCube::VulkanImageCube( const Core::Formats::ImageCubeSpecification& spec ) : m_Specification( spec ) {}
-    VulkanImageCube::~VulkanImageCube() { Release(); }
+    VulkanImageCube::~VulkanImageCube()
+    {
+        Release();
+    }
     Common::BoolResultStr VulkanImageCube::Invalidate() { return RT_Invalidate(); }
     Common::BoolResultStr VulkanImageCube::RT_Invalidate() { Release(); return CreateResource(); }
 

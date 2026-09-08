@@ -1075,10 +1075,9 @@ namespace Desert::Graphic
         if ( !device )
             return false;
         return device->IsFormatSupported( Core::Formats::ImageFormat::RGBA32F,
-                                          static_cast<Engine::FormatUsage>(
-                                               Engine::FormatUsage_Sampled |
-                                               Engine::FormatUsage_ColorAttachment |
-                                               Engine::FormatUsage_Blendable ) );
+                                          static_cast<Engine::FormatUsage>( Engine::FormatUsage_Sampled |
+                                                                            Engine::FormatUsage_ColorAttachment |
+                                                                            Engine::FormatUsage_Blendable ) );
     }
 
     // Both Ensure* helpers below are LAZY on purpose: every PreviewViewport owns a SceneRenderer, so
