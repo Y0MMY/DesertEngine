@@ -156,6 +156,14 @@ namespace Desert::Editor::CloudThumbnail
             std::vector<unsigned char> out  = Backdrop();
             const uint32_t             half = kSide / 2u;
 
+            // A PEDESTAL, so the mask has somewhere to go in BOTH directions. The mask is signed about
+            // 128 — above it adds cloud, below it removes — and a picture drawn from zero can only show
+            // the adding half, because the removing half clamps at black and disappears.
+            constexpr float kPedestal = 40.0f;
+
+            float lowest  = 255.0f;
+            float highest = 0.0f;
+
             for ( uint32_t slot = 0; slot < Assets::kCloudLayoutChannels; ++slot )
             {
                 const uint32_t offsetX = ( slot % 2u ) * half;
@@ -178,12 +186,40 @@ namespace Desert::Editor::CloudThumbnail
                             const float mask =
                                  BoxSample( layout.Mask.data(), res, res, 1u, 0u, x, y, half, half );
                             value *= std::clamp( mask / 128.0f, 0.0f, 2.0f );
+
+                            // AND THE MASK IS ADDED ON TOP OF ITS OWN MULTIPLICATION, which looks like two
+                            // effects of one field and is one effect plus one honesty. The multiplication
+                            // is what the BAKE does. The addition is what stops the mask vanishing from
+                            // the picture: two shipped layouts (O4_MaskNeutral, O4_MaskAddRemove) carry a
+                            // pattern of all zeros and put everything they say into the mask, so a picture
+                            // that only multiplied showed a black square for a file with content in it —
+                            // the "middle link drops a property" shape, with an authored field as the
+                            // property.
+                            value += ( mask - 128.0f ) * 0.35f;
                         }
+
+                        value += kPedestal;
+                        lowest  = std::min( lowest, value );
+                        highest = std::max( highest, value );
 
                         PutPixel( out, offsetX + x, offsetY + y, value * kTint[slot][0],
                                   value * kTint[slot][1], value * kTint[slot][2] );
                     }
                 }
+            }
+
+            // A LAYOUT THAT SAYS NOTHING HAS NO PICTURE, and it must SAY so rather than hand back a flat
+            // square. A uniform tile is indistinguishable from a producer that failed, and — worse — the
+            // freshness rule would then call that flat square a good picture of the asset for ever. The
+            // browser's answer for a refused file is the cloud type icon, which is a true statement about
+            // a layout that places nothing and modifies nothing.
+            if ( highest - lowest < 1.0f )
+            {
+                return Common::MakeFormattedError<std::vector<unsigned char>>(
+                     "this layout is uniform: all four pattern channels and the mask hold one value "
+                     "each ({:.1f} everywhere), so its picture would be a single flat colour — which "
+                     "cannot be told apart from a thumbnail that failed to render",
+                     lowest );
             }
 
             // A one-pixel cross between the quadrants, so four dark slots still read as four slots rather
@@ -361,13 +397,25 @@ namespace Desert::Editor::CloudThumbnail
 
             const float edgeFraction = std::clamp( shape.EdgeTopFraction, 0.0f, 1.0f );
 
+            // THE SHADING IS NOT DECORATION, and the first version of this function proved it: two flat
+            // fills produced a square with TWO colours in it for five of the nine shipped types, because
+            // the taller CORE silhouette covers the shorter EDGE one at every height — the inner shape
+            // was drawn and then painted over completely. A flat silhouette is also, at 64 px, a black
+            // blob: the very thing this whole task replaces.
+            //
+            // So each layer is shaded by two quantities the profile already carries: HEIGHT up its own
+            // band (a cloud is lit from above) and DISTANCE from the axis (a round body falls off towards
+            // its flanks). The dim layer is the core's full extent and the bright one is the flank's
+            // shorter body drawn inside it, so both are visible and the picture reads as a lit shape
+            // rather than as a chart. Desert/Tests/Editor/ThumbnailFormats asserts the square is not a
+            // flat fill, which is the assertion that caught the first version.
             struct Layer
             {
                 float TopFraction;
-                float R, G, B;
+                float Floor; ///< brightness at the base of this layer's flank
+                float Range; ///< how much brighter its lit top and centre get
             };
-            const Layer layers[2] = { { edgeFraction, 96.0f, 108.0f, 128.0f },
-                                      { 1.0f, 236.0f, 240.0f, 248.0f } };
+            const Layer layers[2] = { { 1.0f, 70.0f, 105.0f }, { edgeFraction, 120.0f, 130.0f } };
 
             for ( const Layer& layer : layers )
             {
@@ -390,7 +438,16 @@ namespace Desert::Editor::CloudThumbnail
                     const uint32_t to   = static_cast<uint32_t>(
                          std::min( static_cast<float>( kSide ), centreX + halfWidth ) );
                     for ( uint32_t x = from; x < to; ++x )
-                        PutPixel( out, x, y, layer.R, layer.G, layer.B );
+                    {
+                        const float across =
+                             std::clamp( ( static_cast<float>( x ) - centreX ) / halfWidth, -1.0f, 1.0f );
+                        const float body  = 1.0f - across * across; // 1 on the axis, 0 at the flank
+                        const float lit   = 0.45f * up + 0.55f * body;
+                        const float value = layer.Floor + layer.Range * lit;
+
+                        // Slightly cooler in the shadowed lower flanks, as a cloud is against the sky.
+                        PutPixel( out, x, y, value, value * 1.01f, value * 1.06f );
+                    }
                 }
             }
             return Common::MakeSuccess( std::move( out ) );

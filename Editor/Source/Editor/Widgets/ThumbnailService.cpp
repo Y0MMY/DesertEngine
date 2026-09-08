@@ -81,7 +81,7 @@ namespace Desert::Editor
         // would let one panel's Invalidate leave another panel's entry standing — which is a queue slot
         // that never drains and a thumbnail that never refreshes.
         const std::string identity = ThumbnailKey::Identity( assetPath );
-        const std::string png      = ThumbnailCache::DiskPath( assetPath );
+        const std::string png      = ThumbnailKey::DiskPath( assetPath );
         if ( ShouldQueue( identity, png, assetPath ) )
         {
             m_Queue.push_back( { Kind::Material, material, Assets::AssetHandle( static_cast<uint64_t>( 0 ) ),
@@ -95,7 +95,7 @@ namespace Desert::Editor
                                                const Assets::AssetHandle& material )
     {
         const std::string identity = ThumbnailKey::Identity( assetPath );
-        const std::string png      = ThumbnailCache::DiskPath( assetPath );
+        const std::string png      = ThumbnailKey::DiskPath( assetPath );
         if ( ShouldQueue( identity, png, assetPath ) )
         {
             m_Queue.push_back( { Kind::Mesh, mesh, material, identity, assetPath, png, false } );
@@ -111,7 +111,7 @@ namespace Desert::Editor
         // freshness rule is about whether the file is a picture OF the asset, and that question does not
         // depend on who drew it.
         const std::string identity = ThumbnailKey::Identity( assetPath );
-        const std::string png      = ThumbnailCache::DiskPath( assetPath );
+        const std::string png      = ThumbnailKey::DiskPath( assetPath );
         if ( ShouldQueue( identity, png, assetPath ) )
         {
             m_PaintQueue.push_back( { identity, assetPath, png } );

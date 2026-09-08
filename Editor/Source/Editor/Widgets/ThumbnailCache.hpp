@@ -62,20 +62,17 @@ namespace Desert::Editor
          */
         static void ReleaseAll();
 
-        // --- Shared rendered-thumbnail disk-cache layout (used by every panel that shows previews) ---------
-        // Rendered material/mesh thumbnails live in a VERSIONED folder. The per-asset staleness check
-        // (Editor/Widgets/ThumbnailFreshness.hpp) only compares the source asset's modtime, so it can't
-        // notice when the thumbnail RENDERER improves — bump CacheVersion() to invalidate every old
-        // thumbnail at once, and call PurgeOldVersions() once at startup to delete the stale folders/files
-        // so they regenerate cleanly with the current renderer.
-        static int CacheVersion();
-
-        // The versioned PNG path for an asset. `assetPath` may be ANY spelling of the asset's location:
-        // the file name comes from the asset's project-relative identity (Editor/Widgets/ThumbnailKey.hpp),
-        // so every panel that names the same asset lands on the same file, and the same project opened
-        // from a different directory keeps its cache instead of re-rendering the whole content tree.
-        static std::string DiskPath( const std::string& assetPath );
-
+        // --- Shared rendered-thumbnail disk-cache layout ---------------------------------------------
+        //
+        // WHERE A THUMBNAIL LIVES IS NOT DECIDED HERE ANY MORE. `CacheVersion()` and `DiskPath()` moved
+        // to Editor/Widgets/ThumbnailKey.hpp in M11, next to the rule that names the file, because this
+        // translation unit includes Engine/Graphic/Image.hpp and so cannot be linked without a renderer —
+        // and the background sweep, which decides what has no picture, must be drivable by a test. Ask
+        // ThumbnailKey::DiskPath. There is no forwarder here: two names for one answer is how two answers
+        // start.
+        //
+        // What is left below genuinely needs the device or the disk: decoding a PNG into an Image2D, and
+        // deleting the folders of superseded cache versions so they regenerate cleanly.
         static void PurgeOldVersions(); // drop everything except the current version
 
     private:

@@ -20,6 +20,7 @@
 #include <Editor/Import/MeshMaterial.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Editor/Widgets/ThumbnailKey.hpp>
 #include <Editor/Widgets/ThumbnailFreshness.hpp>
 #include <Editor/Widgets/ThumbnailService.hpp>
 #include <Editor/Widgets/ThumbnailSubject.hpp>
@@ -1519,7 +1520,7 @@ namespace Desert::Editor
                 if ( entry.Type == FileType::Texture )
                     img = m_Thumbnails->Get( assetPath );
                 else if ( entry.Type == FileType::Material || entry.Type == FileType::Cloud )
-                    img = m_Thumbnails->Get( ThumbnailCache::DiskPath( assetPath ) );
+                    img = m_Thumbnails->Get( ThumbnailKey::DiskPath( assetPath ) );
                 else if ( entry.Type == FileType::Model )
                 {
                     // THE COOKED KEY, not the source one. This branch used to share the material's line,
@@ -1528,7 +1529,7 @@ namespace Desert::Editor
                     // been silently falling back to the type icon for every mesh ever since, which is
                     // exactly the kind of "it still works, just worse" a re-read site decays into.
                     img = m_Thumbnails->Get(
-                         ThumbnailCache::DiskPath( CookPaths::CookedMesh( assetPath, ".stmesh" ).generic_string() ) );
+                         ThumbnailKey::DiskPath( CookPaths::CookedMesh( assetPath, ".stmesh" ).generic_string() ) );
                 }
             }
 
@@ -1575,7 +1576,7 @@ namespace Desert::Editor
             return false;
 
         // Cache PNG path: <versioned thumbnail dir>/<sanitized source path>.png (persists across restarts).
-        const std::string pngPath = ThumbnailCache::DiskPath( entry->AssetPath );
+        const std::string pngPath = ThumbnailKey::DiskPath( entry->AssetPath );
 
         // Stale if the material was edited after the cached thumbnail was written (regenerate then).
         // Through Editor/Widgets/ThumbnailFreshness.hpp, which is the same rule ThumbnailService::ShouldQueue
@@ -1653,7 +1654,7 @@ namespace Desert::Editor
         // -> icon" stays where it was, below, because that one IS a filesystem question.
         const std::string cookedStr = CookPaths::CookedMesh( entry->AssetPath, ".stmesh" ).generic_string();
 
-        const std::string pngPath = ThumbnailCache::DiskPath( cookedStr );
+        const std::string pngPath = ThumbnailKey::DiskPath( cookedStr );
 
         // Same shared rule as the material grid above (Editor/Widgets/ThumbnailFreshness.hpp).
         const bool haveFresh = ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( pngPath, cookedStr ) ) ==
@@ -1697,7 +1698,7 @@ namespace Desert::Editor
         // oversight: the picture is computed from the file's own bytes, so nothing has to be created,
         // loaded or registered before it can be drawn. It is also why this tile keeps working in a
         // project whose asset layer has not finished starting.
-        const std::string pngPath = ThumbnailCache::DiskPath( entry->AssetPath );
+        const std::string pngPath = ThumbnailKey::DiskPath( entry->AssetPath );
 
         const bool haveFresh =
              ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( pngPath, entry->AssetPath ) ) ==
@@ -2148,7 +2149,7 @@ namespace Desert::Editor
                     out[( ( y * kOut + x ) * 4 ) + c] = src[( ( sy * W + sx ) * 4 ) + c];
             }
 
-        const std::string png = ThumbnailCache::DiskPath( assetPath ); // same key the grid reads
+        const std::string png = ThumbnailKey::DiskPath( assetPath ); // same key the grid reads
         std::error_code   ec;
         std::filesystem::create_directories( std::filesystem::path( png ).parent_path(), ec );
         stbi_flip_vertically_on_write( 0 ); // viewport readback is already upright (same as the offscreen path)

@@ -94,7 +94,7 @@ namespace Desert::Editor
         /// ThumbnailSubject::Mesh::CookedPath for why that side wins.
         std::string Subject;
 
-        /// Where the picture goes: `ThumbnailCache::DiskPath( Subject )`.
+        /// Where the picture goes: `ThumbnailKey::DiskPath( Subject )`.
         std::string Png;
 
         ThumbnailFormats::Producer By = ThumbnailFormats::Producer::None;
