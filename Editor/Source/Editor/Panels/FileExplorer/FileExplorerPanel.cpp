@@ -1607,12 +1607,31 @@ namespace Desert::Editor
         if ( m_FailedThumbs.count( entry->AssetPath ) ) // failed to load before -> icon, no per-frame retry
             return false;
 
-        const std::string pngPath = ThumbnailCache::DiskPath( entry->AssetPath );
+        // ONE PICTURE, ONE KEY, AND THE KEY IS THE FILE THAT IS ACTUALLY PHOTOGRAPHED.
+        //
+        // This grid used to file a mesh's thumbnail under its SOURCE (`assets:Meshes/x.fbx`) while the
+        // Details 3D Model row files it under the COOKED form (`cooked:Meshes/x.stmesh`) — because a scene
+        // holds the cooked handle and nothing else. Same mesh, same render, two cache files: a mesh both
+        // browsed and placed in a scene was photographed TWICE, at 370 ms and ~200 KB a time, and neither
+        // capture could ever satisfy the other panel.
+        //
+        // Cooked is the side that had to win, and not merely because the Details row cannot reach the
+        // source. Freshness is a comparison against the recipe, and the recipe for this picture is the
+        // .stmesh — StaticMeshAsset::Load reads cooked JSON and never opens the FBX. Judging against the
+        // source asked whether a file the capture never reads had changed: re-cooking an unchanged FBX left
+        // a stale picture called fresh, and touching an FBX without re-cooking threw away a picture that
+        // still matched the geometry exactly.
+        //
+        // The mapping is a pure path computation (CookPaths::CookedMesh — fs::relative, no stat), so
+        // hoisting it above the freshness check costs nothing; the `exists()` gate that decides "not cooked
+        // -> icon" stays where it was, below, because that one IS a filesystem question.
+        const std::string cookedStr = CookPaths::CookedMesh( entry->AssetPath, ".stmesh" ).generic_string();
+
+        const std::string pngPath = ThumbnailCache::DiskPath( cookedStr );
 
         // Same shared rule as the material grid above (Editor/Widgets/ThumbnailFreshness.hpp).
-        const bool haveFresh =
-             ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( pngPath, entry->AssetPath ) ) ==
-             ThumbnailFreshness::Verdict::Show;
+        const bool haveFresh = ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( pngPath, cookedStr ) ) ==
+                               ThumbnailFreshness::Verdict::Show;
         if ( !haveFresh )
             m_Thumbnails->Invalidate( pngPath );
         if ( haveFresh )
@@ -1627,8 +1646,7 @@ namespace Desert::Editor
         // Meshes only load from the COOKED form (StaticMeshAsset::Load reads cooked JSON, not source FBX), so
         // map the browsed source file -> its cooked .stmesh (shared CookPaths::CookedMesh). If it isn't cooked
         // yet, fall back to the icon (don't try to parse the raw source -> it can't).
-        const std::filesystem::path cooked    = CookPaths::CookedMesh( entry->AssetPath, ".stmesh" );
-        const std::string           cookedStr = cooked.generic_string();
+        const std::filesystem::path cooked = cookedStr;
 
         // The `ec ||` that used to lead this condition carried the error code from the THUMBNAIL's modtime
         // read above, so a thumbnail whose stamp could not be read blacklisted the MESH as "not cooked" —
@@ -1666,8 +1684,10 @@ namespace Desert::Editor
 
         {
             // Show the mesh with its linked (sidecar) material if it has one.
+            // The sidecar is still resolved from the SOURCE — that is where an artist's .demat sits beside
+            // the .fbx, and it is a different question from which file gets photographed.
             const auto mat = MeshMaterial::ResolveSidecar( *m_AssetManager, entry->AssetPath );
-            ThumbnailService::Get().RequestMesh( a->GetMetadata().Handle, entry->AssetPath, mat );
+            ThumbnailService::Get().RequestMesh( a->GetMetadata().Handle, cookedStr, mat );
         }
 
         // No swatch for meshes — fall back to the type icon until the PNG is ready.

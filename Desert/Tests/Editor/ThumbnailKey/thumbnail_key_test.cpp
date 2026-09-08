@@ -34,6 +34,7 @@
 
 #include <gtest/gtest.h>
 
+#include <Editor/Import/CookPaths.hpp>
 #include <Editor/Widgets/ThumbnailKey.hpp>
 
 #include <Common/Core/AssetHandle.hpp>
@@ -214,6 +215,56 @@ namespace
                  static_cast<std::uint64_t>( Common::AssetHandle::FromCookedPath( absolute ) );
             EXPECT_NE( TK::FileName( absolute.string() ).find( std::to_string( handle ) ), std::string::npos );
         }
+    }
+
+    // ─── The two derivations of a mesh's key must land on the same file ───────────────────────────────
+
+    // THREE PANELS, TWO WAYS OF GETTING THERE, ONE PICTURE.
+    //
+    // The Details 3D Model row keys a mesh thumbnail on the REGISTERED asset's path, because a scene holds
+    // a cooked handle and can reach nothing else: `mesh->GetMetadata().Filepath`, a `.stmesh` under the
+    // cooked tree. The asset browser and the Collections grid start from a SOURCE the user is looking at —
+    // an `.fbx` — and reach the same picture through `CookPaths::CookedMesh`. Two derivations, and until
+    // 2026-09-08 they produced two different cache files for one mesh: the same 370 ms render, stored
+    // twice under two names, neither able to satisfy the other panel.
+    //
+    // They are unified on the cooked side, and this is the assertion that keeps them there. It is worth a
+    // test rather than a click precisely because both halves keep working when they disagree — each panel
+    // shows a picture, so the only symptom is a second capture nobody counts. That is this project's most
+    // repeated defect shape stated as a relation: assert that the two ends AGREE, not that each end runs.
+    //
+    // It fails if CookedMesh's root ladder changes, if the cooked extension changes on one side only, or
+    // if any panel goes back to keying a mesh on its source.
+    TEST_F( ThumbnailKeyTest, TheBrowsersCookedMappingAndTheScenesRegisteredPathGiveOneKey )
+    {
+        // What the browser holds: the source the user clicked.
+        const fs::path source = UnderAssets( "Meshes/Rock.fbx" );
+
+        // What the browser derives from it, and what it now asks the thumbnail service for.
+        const fs::path viaCookPaths = Desert::Editor::CookPaths::CookedMesh( source, ".stmesh" );
+
+        // What the Details row holds instead: the registered cooked asset's own recorded path. Spelled
+        // independently here rather than reused from the line above, or the test would compare a value
+        // with itself and pass over any divergence at all.
+        const fs::path viaRegistry =
+             ( Common::Constants::Path::MESH_PATH_COOKED / "Rock.stmesh" ).lexically_normal();
+
+        EXPECT_EQ( TK::Identity( viaCookPaths.string() ), TK::Identity( viaRegistry.string() ) )
+             << "the browser's cooked mapping and the scene's registered path no longer name one asset:\n"
+             << "  browser  -> " << viaCookPaths.string() << "\n"
+             << "  registry -> " << viaRegistry.string()
+             << "\nEach panel still draws a thumbnail, so nothing looks broken — the mesh is simply "
+                "photographed twice, at ~370 ms and ~200 KB per copy, and invalidating one leaves the "
+                "other standing.";
+
+        EXPECT_EQ( TK::FileName( viaCookPaths.string() ), TK::FileName( viaRegistry.string() ) )
+             << "same identity, different cache file name — the key and the file name have come apart.";
+
+        // And the identity really is the cooked one, not the source's: keying on the source is the state
+        // this change left behind, and it must not be reachable by accident again.
+        EXPECT_NE( TK::Identity( viaCookPaths.string() ), TK::Identity( source.string() ) )
+             << "the cooked mesh and its source .fbx now share one identity, so the freshness rule can no "
+                "longer tell which file it is comparing the picture against.";
     }
 
     // An asset genuinely outside the project has no project-relative identity, and StableKeyForPath says so

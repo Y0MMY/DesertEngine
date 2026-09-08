@@ -12,6 +12,7 @@
 #include <Editor/Core/AssetReferences.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Widgets/ThumbnailFreshness.hpp>
+#include <Editor/Import/CookPaths.hpp>
 #include <Editor/Import/MeshDnD.hpp>
 #include <Editor/Import/MeshMaterial.hpp>
 #include <Editor/Import/ImportManager.hpp>
@@ -605,15 +606,25 @@ namespace Desert::Editor
 
     void CollectionsPanel::DrawCard( const CollectionItem& item, float cardW, float imgH )
     {
-        const ImVec2      img( cardW, imgH );
-        const std::string pngPath = ThumbnailCache::DiskPath( item.MeshPath );
+        const ImVec2 img( cardW, imgH );
+
+        // KEYED ON THE COOKED MESH, like the asset browser's grid and the Details 3D Model row. See
+        // FileExplorerPanel::DrawRenderedMeshThumbnail for the argument in full: the .stmesh is the file
+        // the capture actually reads, so it is both the only key every panel can compute and the only
+        // recipe a freshness comparison can honestly be made against. Filing this card's picture under
+        // item.MeshPath — a source .fbx — bought a second copy of the same render under a second name.
+        //
+        // A card whose mesh has never been cooked still shows a PNG it has from a previous session:
+        // ThumbnailFreshness::Judge treats unreadable stamps as no evidence of staleness, deliberately.
+        const std::string cookedStr = CookPaths::CookedMesh( item.MeshPath, ".stmesh" ).generic_string();
+        const std::string pngPath   = ThumbnailCache::DiskPath( cookedStr );
 
         // Rendered preview already on disk, and still a picture OF this mesh? Show it. The freshness half
         // is not decoration: asking only whether the file exists is what let a mesh edited after its
         // capture keep showing the old shape, and — because ThumbnailService used to ask the same
         // impoverished question — never get a new one (Editor/Widgets/ThumbnailFreshness.hpp).
         if ( m_UIHelper && m_Thumbs &&
-             ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( pngPath, item.MeshPath ) ) ==
+             ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( pngPath, cookedStr ) ) ==
                   ThumbnailFreshness::Verdict::Show )
         {
             if ( auto image = m_Thumbs->Get( pngPath ) )
@@ -638,8 +649,10 @@ namespace Desert::Editor
 
         if ( static_cast<uint64_t>( handle ) != 0 )
         {
-            ThumbnailService::Get().RequestMesh(
-                 handle, item.MeshPath, MeshMaterial::ResolveSidecar( *m_AssetManager, item.MeshPath ) );
+            // Photographed under the cooked name; the sidecar material is still looked up beside the
+            // SOURCE, which is where an artist puts it and a different question entirely.
+            ThumbnailService::Get().RequestMesh( handle, cookedStr,
+                                                 MeshMaterial::ResolveSidecar( *m_AssetManager, item.MeshPath ) );
         }
 
         ImGui::Button( ICON_MDI_CUBE_OUTLINE, img );
