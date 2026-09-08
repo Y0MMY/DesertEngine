@@ -15,6 +15,9 @@
 #include "Editor/Core/DocumentWell.hpp"
 #include "Editor/Core/PanelRegistry.hpp"
 #include "Editor/RenderSystems/RenderRigistry.hpp"
+#include "Editor/Widgets/WindowChrome.hpp"
+
+#include <optional>
 
 #include <filesystem>
 #include <unordered_map>
@@ -187,7 +190,9 @@ namespace Desert::Editor
         // Builds a walkable greybox house (walls + doorway + roof, static colliders) parented under one root.
         void BuildHouse( const glm::vec3& origin );
 
-        void DrawEngineStats();
+        /// @p rightMargin is how much of the bar's right-hand end is already spoken for — the window
+        /// buttons — so the stats right-align against them instead of underneath them.
+        void DrawEngineStats( float rightMargin );
         void DrawProfilerWindow();
         /// The profiler's CPU+GPU table as log lines — the panel's button and --gpu-profile share it.
         void DumpProfilerToLog();
@@ -406,6 +411,16 @@ namespace Desert::Editor
 
     private:
         const Engine::Application* m_Application;
+
+        // The window frame the OS no longer draws, because the editor asked for a window without one
+        // (Sandbox.hpp: ApplicationInfo::Decorated). Held as an optional rather than a value because it
+        // binds a reference to the Application's window, which does not exist at construction time — and
+        // it stays EMPTY when the window is decorated, which is what keeps "the editor draws the frame"
+        // and "the OS draws the frame" one code path with one condition instead of two builds.
+        std::optional<UI::WindowChrome> m_WindowChrome;
+        // The last title pushed to the window is NOT stored here: Window::GetTitle owns it, and
+        // SyncWindowTitle compares against that. See Window.hpp.
+        void SyncWindowTitle();
 
         std::shared_ptr<Assets::AssetManager>        m_AssetManager;
         std::unique_ptr<Assets::AssetPreloader>      m_AssetPreloader;

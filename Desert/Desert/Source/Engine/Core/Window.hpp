@@ -20,11 +20,17 @@ namespace Desert
         std::string Title  = "Sandbox";
         uint32_t    Width  = 1600;
         uint32_t    Height = 900;
-        // A `Decorated` FLAG STOOD HERE and Г12 removed it, together with six Window methods that made
-        // up the other half of the same unbuilt thing — see the note on the interface below. It had
-        // ZERO readers: the only `glfwWindowHint( GLFW_DECORATED, ... )` calls in the tree live inside
-        // each platform's FULLSCREEN branch and decide borderless-over-the-monitor, which is a different
-        // question and does not consult this field.
+        // FALSE = THE APPLICATION DRAWS ITS OWN TITLE BAR and the OS draws no frame at all. The editor
+        // asks for false (it has drawn a menu bar carrying the project, the level and the window's
+        // commands for a long time, with the system bar still stacked above it — two title bars, one
+        // window); the packaged Runtime leaves it true, because a game has nothing to draw there.
+        //
+        // Г12 deleted this field because it had ZERO readers — the only `glfwWindowHint( GLFW_DECORATED )`
+        // calls in the tree live inside each platform's fullscreen branch and answer a different question
+        // (borderless OVER the monitor). У9 gave it the reader: both platforms' Init() applies it, and
+        // both apply it AFTER glfwCreateWindow rather than through the hint. That is not a style choice
+        // and the reason is measured — see the block above the call in MacOSWindow::Init.
+        bool        Decorated  = true;
         bool        Fullscreen = false;
         // When Fullscreen (borderless): cover the whole monitor (over the taskbar) if true, else fit the
         // monitor work area (taskbar stays visible).
@@ -42,22 +48,53 @@ namespace Desert
 
         using EventCallbackFn = std::function<void( Common::Event& )>;
 
-        // SIX METHODS STOOD HERE — GetTitle, SetTitle, SetWindowSize, Maximize, IsWindowMaximized,
-        // IsWindowMinimized — implemented on BOTH platforms and called from nowhere. Г12 removed them,
-        // and the reason they are worth a paragraph is that they were not six loose ends: together with
-        // the `Decorated` flag above (also unread) they are the platform half of ONE feature nobody
-        // finished — a custom title bar, the kind UE draws instead of the system frame. Somebody laid
-        // the whole platform side, twice, and no caller was ever written.
+        // ===== The window's own frame, for an application that draws its title bar itself ==========
         //
-        // Deleting it is contract §0: unfinished code does not exist in a branch. The intent is not
-        // lost — it is filed as У9, and restoring this side is `git revert` of the commit that removed
-        // it, which is cheaper than the standing cost of keeping it. A pure virtual with no caller is
-        // an instruction to every future implementer to write a body that nothing runs; this one issued
-        // that instruction twelve times, six methods across two platforms.
+        // Г12 deleted six methods from here (GetTitle, SetTitle, SetWindowSize, Maximize,
+        // IsWindowMaximized, IsWindowMinimized): they were implemented on both platforms and called from
+        // nowhere — the platform half of ONE unfinished feature whose other half, the bar, nobody had
+        // written. У9 wrote the bar, so the half comes back; and because a pure virtual with no caller is
+        // an instruction to every future implementer to write a body nothing runs, EVERY declaration below
+        // names the caller that makes it live. If you remove that caller, remove the method with it.
         //
-        // What У9 needs beyond a revert: a reader for `Decorated`, the bar itself, and answers for the
-        // two things a borderless window loses — the system window gestures on Windows, and the
-        // traffic-light buttons plus the fullscreen gesture on macOS.
+        // FIVE of the six are back, not six. `IsWindowMinimized` is not, and its absence is a decision:
+        // У9 found no caller for it. The two candidates were a frame the run loop skips while the window
+        // is iconified — which would stop the control channel answering, since a reply is released on a
+        // PRESENTED frame — and a restore button, which cannot be clicked on a window you cannot see.
+        // Its two implementations also both returned a literal `false`, so what was restored would have
+        // been a stub as well as a dead end.
+
+        // The OS-visible title. With the system frame gone this is the only place the OS shows the
+        // window's name — the Dock, Mission Control, the taskbar and the window switcher all read it —
+        // so the editor composes "engine — project — level" and pushes it whenever the level changes.
+        // GetTitle is what makes THIS the single owner of that string: the pusher compares against it
+        // rather than keeping a second copy of what it last wrote (EditorLayer::SyncWindowTitle).
+        [[nodiscard]] virtual const std::string& GetTitle() const                     = 0;
+        virtual void                             SetTitle( const std::string& title ) = 0;
+
+        // Where the window is and how big it is, in screen coordinates. Called by the title bar's drag and
+        // by the resize borders the editor draws in place of the frame the OS no longer provides
+        // (Editor::UI::WindowChrome).
+        virtual void SetWindowSize( uint32_t width, uint32_t height ) = 0;
+        virtual void SetWindowPos( int x, int y )                     = 0;
+        virtual void GetWindowPos( int& x, int& y ) const             = 0;
+
+        // The title bar's three buttons, and its double-click.
+        virtual void Maximize() = 0;
+        virtual void Restore()  = 0;
+        virtual void Minimize() = 0;
+
+        // ASKED OF THE OS EVERY TIME, never remembered. "Is this window maximized" is a fact with two
+        // possible owners — a flag of ours and the window manager — and the pair goes out of step the
+        // first time anything else maximizes the window. The implementations are one glfwGetWindowAttrib
+        // call each for that reason. Read by the bar to pick between the maximize and restore icons, and
+        // by the double-click to decide which way to toggle.
+        [[nodiscard]] virtual bool IsWindowMaximized() const = 0;
+
+        // Whether the OS draws this window's frame. Read by the editor: the chrome is drawn only when the
+        // application owns the frame, so one build serves both answers and neither is a second code path
+        // nobody exercises.
+        [[nodiscard]] virtual bool IsDecorated() const = 0;
 
         virtual void                      SetVSync( bool enabled ) = 0;
         [[nodiscard]] virtual uint32_t    GetWidth() const         = 0;

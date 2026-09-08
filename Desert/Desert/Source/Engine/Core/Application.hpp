@@ -32,7 +32,12 @@ namespace Desert::Engine
         // Only when starting fullscreen (Width/Height = nullopt): true = cover the taskbar, false = leave
         // the taskbar visible (fit the monitor work area).
         bool FullscreenCoverTaskbar = false;
-        bool VSync                  = true;
+        // false = THIS APPLICATION DRAWS ITS OWN TITLE BAR, and the OS is asked for no frame at all. The
+        // editor sets it (its menu bar already carries the project, the level and the window's commands,
+        // so the system bar above it was a second title bar over the same window); the packaged Runtime
+        // leaves it true, because a game has no menu bar to put there and would lose the close button.
+        bool Decorated = true;
+        bool VSync     = true;
     };
 
     class Application

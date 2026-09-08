@@ -40,18 +40,29 @@ namespace Desert::Platform::Windows
         auto width  = m_Data.Specification.Width;
         auto height = m_Data.Specification.Height;
 
-        GLFWmonitor*       monitor      = glfwGetPrimaryMonitor();
-        const GLFWvidmode* mode         = glfwGetVideoMode( monitor );
-        int                posX         = 0, posY = 0;
-        bool               setPos       = false;
-        const bool         coverTaskbar = m_Data.Specification.Fullscreen && m_Data.Specification.FullscreenCoverTaskbar;
+        // NO MONITOR IS A REAL STATE ON THIS SIDE TOO, and this file did not say so. MacOSWindow::Init has
+        // carried the guard and the explanation since a closed lid produced an empty display list there;
+        // the same two calls stood here unguarded, so a Windows host with every display asleep or detached
+        // (a headless CI runner, an RDP session that has dropped its console) dereferenced null in
+        // glfwGetVideoMode before it reached a single frame. Found while У9 was reading both files to keep
+        // them one shape; the fallback is the authored size, as on macOS, and it says so.
+        GLFWmonitor*       monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode    = monitor ? glfwGetVideoMode( monitor ) : nullptr;
+        if ( !monitor )
+            LOG_ERROR( "No monitor is online: window falls back to {}x{}, fullscreen ignored", width, height );
 
-        if ( m_Data.Specification.Fullscreen )
+        int        posX = 0, posY = 0;
+        bool       setPos       = false;
+        const bool coverTaskbar = m_Data.Specification.Fullscreen && m_Data.Specification.FullscreenCoverTaskbar;
+
+        // Covering the taskbar means the window has no frame whatever the specification says: there is
+        // nowhere on the monitor to put one.
+        const bool wantsFrame = m_Data.Specification.Decorated && !coverTaskbar;
+
+        if ( m_Data.Specification.Fullscreen && monitor && mode )
         {
             if ( coverTaskbar )
             {
-                // Borderless over the whole monitor (no decorations, hides the taskbar).
-                glfwWindowHint( GLFW_DECORATED, GLFW_FALSE );
                 width  = mode->width;
                 height = mode->height;
                 posX   = 0;
@@ -60,14 +71,16 @@ namespace Desert::Platform::Windows
             }
             else
             {
-                // Decorated window MAXIMIZED to the work area: keeps the title bar (minimize/close) and
-                // leaves the taskbar visible. The OS positions/sizes it; we just give a sane restore size.
-                glfwWindowHint( GLFW_DECORATED, GLFW_TRUE );
+                // MAXIMIZED to the work area, leaving the taskbar visible. As on macOS, the size handed to
+                // glfwCreateWindow is the RESTORE size — the hint zooms the window straight afterwards —
+                // and the work area was the wrong answer for it: "restore down" then gave back a window
+                // the size of the screen, which is not a restore. See the longer note in MacOSWindow::Init
+                // for the measurement, including the 28 px overhang the old value produced there.
                 glfwWindowHint( GLFW_MAXIMIZED, GLFW_TRUE );
                 int wx, wy, ww, wh;
                 glfwGetMonitorWorkarea( monitor, &wx, &wy, &ww, &wh );
-                width  = (uint32_t)ww;
-                height = (uint32_t)wh;
+                width  = (uint32_t)( ww * 4 / 5 );
+                height = (uint32_t)( wh * 4 / 5 );
             }
 
             m_Data.Specification.Width  = width;
@@ -77,12 +90,25 @@ namespace Desert::Platform::Windows
         m_GLFWWindow =
              glfwCreateWindow( (int)width, (int)height, m_Data.Specification.Title.c_str(), nullptr, nullptr );
 
+        // Applied after creation rather than through the hint, and the reason is written out in full over
+        // the same call in MacOSWindow::Init — a borderless-at-creation NSWindow loses the resizable style
+        // bit, which makes both Maximize and IsWindowMaximized answer wrongly there. Win32 does not have
+        // that defect (getWindowStyle recomputes the same WS_POPUP either way), but the two files stay one
+        // shape: a platform difference that exists in one of them and not the other is how the pair drifts.
+        if ( !wantsFrame && m_GLFWWindow )
+        {
+            glfwSetWindowAttrib( m_GLFWWindow, GLFW_DECORATED, GLFW_FALSE );
+            if ( m_Data.Specification.Fullscreen && !coverTaskbar )
+                glfwMaximizeWindow( m_GLFWWindow );
+        }
+
         if ( setPos && m_GLFWWindow )
             glfwSetWindowPos( m_GLFWWindow, posX, posY );
 
-        // Maximized open size differs from the restore size -> sync the spec to the real client size so the
-        // swapchain/camera use the correct dimensions.
-        if ( m_Data.Specification.Fullscreen && !coverTaskbar && m_GLFWWindow )
+        // The open size differs from the restore size whenever the window was maximized or undecorated
+        // above -> sync the spec to the real client size so the swapchain/camera use the correct
+        // dimensions.
+        if ( m_GLFWWindow )
         {
             int fw = 0, fh = 0;
             glfwGetWindowSize( m_GLFWWindow, &fw, &fh );
@@ -97,8 +123,13 @@ namespace Desert::Platform::Windows
 
         // EngineContext::GetInstance().m_CurrentWindow = m_GLFWWindow;
 
-        LOG_INFO( "The Window (windows) was created with: Title = {}, Width = {}, Height = {}",
-                  m_Data.Specification.Title.c_str(), m_Data.Specification.Width, m_Data.Specification.Height );
+        // WRITTEN BACK, because IsDecorated() answers out of this field and a caller asking "do I own the
+        // frame?" must get what HAPPENED, not what was requested.
+        m_Data.Specification.Decorated = wantsFrame;
+
+        LOG_INFO( "The Window (windows) was created with: Title = {}, Width = {}, Height = {}, Frame = {}",
+                  m_Data.Specification.Title.c_str(), m_Data.Specification.Width, m_Data.Specification.Height,
+                  wantsFrame ? "system" : "drawn by the application" );
 
         glfwSetWindowUserPointer( m_GLFWWindow, &m_Data );
 
@@ -192,6 +223,70 @@ namespace Desert::Platform::Windows
     WindowsWindow::WindowsWindow( const WindowSpecification& specification )
     {
         m_Data.Specification = specification;
+    }
+
+    // The cache catching up, not a second owner of the size — the reason one frame of staleness matters is
+    // written out over the same function in MacOSWindow.cpp.
+    void WindowsWindow::RefreshCachedSize()
+    {
+        int w = 0, h = 0;
+        glfwGetWindowSize( m_GLFWWindow, &w, &h );
+        if ( w > 0 && h > 0 )
+        {
+            m_Data.Specification.Width  = (uint32_t)w;
+            m_Data.Specification.Height = (uint32_t)h;
+        }
+    }
+
+    void WindowsWindow::SetTitle( const std::string& title )
+    {
+        m_Data.Specification.Title = title;
+        glfwSetWindowTitle( m_GLFWWindow, title.c_str() );
+    }
+
+    // THE OS IS TOLD, not just the cache. The version Г12 deleted assigned Width/Height and stopped there
+    // — a setter that set nothing. The spec fields are a cache of the OS's answer; the resize callback
+    // writes them when the move actually happens.
+    void WindowsWindow::SetWindowSize( uint32_t width, uint32_t height )
+    {
+        glfwSetWindowSize( m_GLFWWindow, (int)width, (int)height );
+    }
+
+    void WindowsWindow::SetWindowPos( int x, int y )
+    {
+        glfwSetWindowPos( m_GLFWWindow, x, y );
+    }
+
+    void WindowsWindow::GetWindowPos( int& x, int& y ) const
+    {
+        glfwGetWindowPos( m_GLFWWindow, &x, &y );
+    }
+
+    // glfwMaximizeWindow, not glfwSetWindowMonitor. The deleted version made the window FULLSCREEN on the
+    // primary monitor and called it "Maximize": it could not be undone by a restore button, it moved the
+    // window to a monitor the user did not pick, and it made IsWindowMaximized (which asked
+    // glfwGetWindowMonitor) report "maximized" for a window that was merely fullscreen — two wrong
+    // answers that agreed with each other.
+    void WindowsWindow::Maximize()
+    {
+        glfwMaximizeWindow( m_GLFWWindow );
+        RefreshCachedSize();
+    }
+
+    void WindowsWindow::Restore()
+    {
+        glfwRestoreWindow( m_GLFWWindow );
+        RefreshCachedSize();
+    }
+
+    void WindowsWindow::Minimize()
+    {
+        glfwIconifyWindow( m_GLFWWindow );
+    }
+
+    bool WindowsWindow::IsWindowMaximized() const
+    {
+        return glfwGetWindowAttrib( m_GLFWWindow, GLFW_MAXIMIZED ) == GLFW_TRUE;
     }
 
     uint32_t WindowsWindow::GetWidth() const

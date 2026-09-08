@@ -52,12 +52,14 @@ namespace Desert::Platform::MacOS
         bool       setPos       = false;
         const bool coverTaskbar = m_Data.Specification.Fullscreen && m_Data.Specification.FullscreenCoverTaskbar;
 
+        // Covering the taskbar means covering the Dock and the menu bar too: that window has no frame
+        // whatever the specification says, because there is nowhere on the monitor to put one.
+        const bool wantsFrame = m_Data.Specification.Decorated && !coverTaskbar;
+
         if ( m_Data.Specification.Fullscreen && monitor && mode )
         {
             if ( coverTaskbar )
             {
-                // Borderless over the whole monitor (no decorations, covers the Dock/menu bar area).
-                glfwWindowHint( GLFW_DECORATED, GLFW_FALSE );
                 width  = mode->width;
                 height = mode->height;
                 posX   = 0;
@@ -66,14 +68,22 @@ namespace Desert::Platform::MacOS
             }
             else
             {
-                // Decorated window MAXIMIZED to the work area: keeps the title bar and leaves the
-                // menu bar/Dock visible. The OS positions/sizes it; we just give a sane restore size.
-                glfwWindowHint( GLFW_DECORATED, GLFW_TRUE );
+                // MAXIMIZED to the work area: leaves the menu bar/Dock visible.
+                //
+                // WHAT IS PASSED TO glfwCreateWindow HERE IS THE RESTORE SIZE, NOT THE OPEN SIZE — the hint
+                // zooms the window immediately, and the rect handed over is the one the OS returns to when
+                // the window is un-maximized. It used to be the whole work area, which made "restore down"
+                // a no-op, and worse once the title bar was dropped: changing the style mask keeps the
+                // FRAME rect and grows the CONTENT rect by the bar's height, so the already-recorded
+                // restore frame came back 28 px taller than the screen. Measured through the control
+                // channel: Window ▸ Restore gave 2056x1317 against a 1289-tall work area, hanging off the
+                // bottom. Four fifths of the work area is a window that is obviously not maximized and
+                // obviously still usable.
                 glfwWindowHint( GLFW_MAXIMIZED, GLFW_TRUE );
                 int wx, wy, ww, wh;
                 glfwGetMonitorWorkarea( monitor, &wx, &wy, &ww, &wh );
-                width  = (uint32_t)ww;
-                height = (uint32_t)wh;
+                width  = (uint32_t)( ww * 4 / 5 );
+                height = (uint32_t)( wh * 4 / 5 );
             }
 
             m_Data.Specification.Width  = width;
@@ -83,12 +93,38 @@ namespace Desert::Platform::MacOS
         m_GLFWWindow =
              glfwCreateWindow( (int)width, (int)height, m_Data.Specification.Title.c_str(), nullptr, nullptr );
 
+        // THE FRAME IS TAKEN OFF AFTER CREATION, NOT ASKED FOR THROUGH THE HINT, AND THE DIFFERENCE IS
+        // MEASURED. `glfwWindowHint( GLFW_DECORATED, GLFW_FALSE )` makes Cocoa build the NSWindow with
+        // NSWindowStyleMaskBorderless and WITHOUT NSWindowStyleMaskResizable (cocoa_window.m only adds
+        // the resizable bit on the decorated branch), and AppKit's -zoom: does nothing to a window that
+        // is not resizable. Probed on this machine against a freshly created 800x600 borderless window:
+        //
+        //   hint  GLFW_DECORATED=FALSE : GLFW_MAXIMIZED reads 1 on the untouched 800x600 window,
+        //                               glfwMaximizeWindow leaves it 800x600, restore is a no-op.
+        //   create decorated, then
+        //   glfwSetWindowAttrib(FALSE) : GLFW_MAXIMIZED reads 0 -> 1 -> 0, and Maximize gives the whole
+        //                               work area, 2056x1289 at 0,40.
+        //
+        // _glfwSetWindowDecoratedCocoa only clears Titled/Closable and sets Borderless, so the resizable
+        // bit the decorated creation put there survives. IsWindowMaximized asks the OS precisely so that
+        // there is one owner of that fact — with the hint, the OS's own answer is the wrong one.
+        if ( !wantsFrame && m_GLFWWindow )
+        {
+            glfwSetWindowAttrib( m_GLFWWindow, GLFW_DECORATED, GLFW_FALSE );
+            // Dropping the title bar grows the CONTENT rect (setStyleMask keeps the frame rect), and a
+            // window that was created maximized is no longer zoomed afterwards. Re-issue it so the
+            // OS's own maximized flag and the window agree from the first frame.
+            if ( m_Data.Specification.Fullscreen && !coverTaskbar )
+                glfwMaximizeWindow( m_GLFWWindow );
+        }
+
         if ( setPos && m_GLFWWindow )
             glfwSetWindowPos( m_GLFWWindow, posX, posY );
 
-        // Maximized open size differs from the restore size -> sync the spec to the real client size so the
-        // swapchain/camera use the correct dimensions.
-        if ( m_Data.Specification.Fullscreen && !coverTaskbar && m_GLFWWindow )
+        // The open size differs from the restore size whenever the window was maximized or undecorated
+        // above -> sync the spec to the real client size so the swapchain/camera use the correct
+        // dimensions.
+        if ( m_GLFWWindow )
         {
             int fw = 0, fh = 0;
             glfwGetWindowSize( m_GLFWWindow, &fw, &fh );
@@ -101,8 +137,14 @@ namespace Desert::Platform::MacOS
 
         glfwWindowHint( GLFW_MAXIMIZED, GLFW_FALSE ); // reset sticky hint
 
-        LOG_INFO( "The Window (macOS) was created with: Title = {}, Width = {}, Height = {}",
-                  m_Data.Specification.Title.c_str(), m_Data.Specification.Width, m_Data.Specification.Height );
+        // WRITTEN BACK, because IsDecorated() answers out of this field and a caller that asks "do I own
+        // the frame?" must get what HAPPENED, not what was requested. A fullscreen-over-the-taskbar
+        // window is frameless whatever the specification said.
+        m_Data.Specification.Decorated = wantsFrame;
+
+        LOG_INFO( "The Window (macOS) was created with: Title = {}, Width = {}, Height = {}, Frame = {}",
+                  m_Data.Specification.Title.c_str(), m_Data.Specification.Width, m_Data.Specification.Height,
+                  wantsFrame ? "system" : "drawn by the application" );
 
         glfwSetWindowUserPointer( m_GLFWWindow, &m_Data );
 
@@ -205,6 +247,75 @@ namespace Desert::Platform::MacOS
     MacOSWindow::MacOSWindow( const WindowSpecification& specification )
     {
         m_Data.Specification = specification;
+    }
+
+    // Width/Height in the specification are a CACHE of the OS's answer, normally refilled by the resize
+    // callback — which fires out of glfwPollEvents, i.e. on the NEXT frame. That is one frame too late for
+    // a caller that maximizes or restores and then immediately asks how big the window now is, and the
+    // title bar's drag does exactly that: it restores a maximized window and places it so the cursor stays
+    // at the same fraction across the bar. Reading the stale maximized width there would drop the window
+    // several hundred pixels away from the pointer. Refilled from the same source the callback uses, so
+    // this is the cache catching up, not a second owner of the size.
+    void MacOSWindow::RefreshCachedSize()
+    {
+        int w = 0, h = 0;
+        glfwGetWindowSize( m_GLFWWindow, &w, &h );
+        if ( w > 0 && h > 0 )
+        {
+            m_Data.Specification.Width  = (uint32_t)w;
+            m_Data.Specification.Height = (uint32_t)h;
+        }
+    }
+
+    void MacOSWindow::SetTitle( const std::string& title )
+    {
+        m_Data.Specification.Title = title;
+        glfwSetWindowTitle( m_GLFWWindow, title.c_str() );
+    }
+
+    // THE OS IS TOLD, not just the cache. The version Г12 deleted assigned Width/Height and stopped
+    // there — a setter that set nothing, and one nobody noticed because nobody called it. The spec fields
+    // are a cache of the OS's answer: the resize callback writes them when the move actually happens.
+    void MacOSWindow::SetWindowSize( uint32_t width, uint32_t height )
+    {
+        glfwSetWindowSize( m_GLFWWindow, (int)width, (int)height );
+    }
+
+    void MacOSWindow::SetWindowPos( int x, int y )
+    {
+        glfwSetWindowPos( m_GLFWWindow, x, y );
+    }
+
+    void MacOSWindow::GetWindowPos( int& x, int& y ) const
+    {
+        glfwGetWindowPos( m_GLFWWindow, &x, &y );
+    }
+
+    // glfwMaximizeWindow, not glfwSetWindowMonitor. The deleted version made the window FULLSCREEN on the
+    // primary monitor and called it "Maximize", which is a different thing with a different exit: it
+    // cannot be restored by a restore button, it moves the window to a monitor the user did not pick, and
+    // it made IsWindowMaximized (which asked glfwGetWindowMonitor) answer "maximized" for a window that
+    // was merely fullscreen. Two wrong answers that agreed with each other.
+    void MacOSWindow::Maximize()
+    {
+        glfwMaximizeWindow( m_GLFWWindow );
+        RefreshCachedSize();
+    }
+
+    void MacOSWindow::Restore()
+    {
+        glfwRestoreWindow( m_GLFWWindow );
+        RefreshCachedSize();
+    }
+
+    void MacOSWindow::Minimize()
+    {
+        glfwIconifyWindow( m_GLFWWindow );
+    }
+
+    bool MacOSWindow::IsWindowMaximized() const
+    {
+        return glfwGetWindowAttrib( m_GLFWWindow, GLFW_MAXIMIZED ) == GLFW_TRUE;
     }
 
     uint32_t MacOSWindow::GetWidth() const
