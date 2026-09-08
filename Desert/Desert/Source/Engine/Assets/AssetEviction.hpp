@@ -212,8 +212,14 @@ namespace Desert::Assets
      * recording begins (`Application::Run`, immediately before `Renderer::BeginFrame`). The two are
      * separate because the request happens while the OLD scene may still be alive — a sweep there would
      * see its assets as reachable and free nothing, which is the failure mode that makes "evict on scene
-     * change" quietly do nothing. By the next frame's start the replaced scene has been destroyed, no
-     * command buffer is open, and the material graveyard's own collector runs a few lines later.
+     * change" quietly do nothing. By the next frame's start the replaced scene has been destroyed and no
+     * command buffer is open, which is also what makes it safe for the sweep itself to collect the
+     * material graveyard before it reads the ledger back (see AssetEviction::Run).
+     *
+     * AND IT IS DEBOUNCED BY TWO QUIET FRAMES, which is not a detail — see the constant in
+     * AssetEvictionServices.cpp for the measurement that put it there. Loading a level raises the request
+     * more than once and on different frames, and a sweep fired on the first of them sees a half-built
+     * world.
      */
     class AssetEvictionSchedule final
     {
