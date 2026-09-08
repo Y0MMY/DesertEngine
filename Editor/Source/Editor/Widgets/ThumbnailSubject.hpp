@@ -1,13 +1,17 @@
 #pragma once
 
+#include <Engine/Core/Formats/ShaderProgramMeta.hpp>
+
 #include <Common/Core/AssetHandle.hpp>
 #include <Common/Core/ResultStr.hpp>
 
+#include <optional>
 #include <string>
 
 namespace Desert::Assets
 {
     class AssetManager;
+    class SurfaceMaterialAsset;
 }
 
 namespace Desert::Editor::ThumbnailSubject
@@ -40,15 +44,83 @@ namespace Desert::Editor::ThumbnailSubject
      * MAIN THREAD ONLY. Every function here touches the AssetManager and the runtime services.
      */
 
+    /**
+     * @brief WHAT THE CAPTURE DRAWS, chosen from the material's own shader DOMAIN.
+     *
+     * It is not a preference and it is not the extension's business: `.demat` is one file type and the
+     * mesh path executes exactly one domain (`Core::Formats::kMeshPathDomain`). Handing it any other is
+     * refused by name at `MeshRenderer::DrawGenericMeshes`, one frame after the queue has already
+     * committed — so the question has to be asked HERE, where the answer is still actionable.
+     */
+    enum class Preview
+    {
+        /// The material on a sphere. Surface domain, the ordinary case.
+        Sphere,
+
+        /// The material on a camera-facing card. Surface domain and a CUTOUT: a foliage atlas wraps and
+        /// garbles on a ball, which is a picture of the sphere rather than of the leaf.
+        Card,
+
+        /// The SKY this material authors, seen from the ground — Volume domain. A cloud material describes
+        /// a medium, not a surface: its weather cells are kilometres across and its profile is base and
+        /// top in kilometres, none of which means anything on a one-metre ball.
+        SkyDome
+    };
+
+    /**
+     * @brief The picture a DOMAIN gets, before any material has been looked at. Nullopt = no producer
+     *        draws it, and the caller must refuse rather than pick something.
+     *
+     * PURE, AND THAT IS THE POINT OF IT BEING SEPARATE. Deciding this inside PreviewRouteFor would put
+     * the routing behind a ShaderService, an AssetManager and a Vulkan device — reachable only by
+     * launching the editor. Here it is three lines a suite can call, and
+     * `Desert/Tests/Editor/ThumbnailFormats` asserts the RELATION that matters: this routing and the draw
+     * paths' own predicates must agree about which domains can be photographed at all.
+     *
+     * @p cutout picks the card over the ball inside the mesh path.
+     *
+     * FULLY QUALIFIED, and it is not decoration: a `Desert::Editor::Core` namespace also exists
+     * (ViewportMode, FoliagePaint), so an unqualified `Core::Formats` resolves THERE and fails to compile
+     * in every translation unit that has seen it — which is most of the editor's panels, and NOT this
+     * header's own .cpp, so the mistake builds until a panel is recompiled. The same trap
+     * AssetThumbnailRenderer.hpp names over `::Desert::Core::Scene`.
+     */
+    [[nodiscard]] constexpr std::optional<Preview> PreviewForDomain( ::Desert::Core::Formats::ShaderDomain domain,
+                                                                     bool                                  cutout )
+    {
+        // THE DRAW PATHS' OWN PREDICATES, never `IsUserAssignable()` — that is their union, and asking a
+        // union is exactly the mistake ShaderProgramMeta.hpp warns about above it.
+        if ( ::Desert::Core::Formats::DrawnByMeshPath( domain ) )
+            return cutout ? Preview::Card : Preview::Sphere;
+        if ( ::Desert::Core::Formats::DrawnByVolumePath( domain ) )
+            return Preview::SkyDome;
+        return std::nullopt;
+    }
+
     /// A material ready to be captured.
     struct Material
     {
         Common::AssetHandle Handle{ static_cast<uint64_t>( 0 ) };
 
-        /// Preview on a camera-facing card instead of a sphere. True for a cutout material — a foliage
-        /// atlas wraps and garbles on a ball, which is a picture of the sphere rather than of the leaf.
-        bool Flat = false;
+        Preview How = Preview::Sphere;
     };
+
+    /**
+     * @brief The ONE place that decides how a material is photographed, from a LOADED material asset.
+     *
+     * Separate from ResolveMaterial because two panels already hold the asset and only wanted this
+     * answer — and each had written its own half of it (`AlphaCutoff > 0` copied twice, the domain asked
+     * nowhere). A rule with three copies is a rule that will have three behaviours.
+     *
+     * REFUSES, WITH THE DOMAIN NAMED, for a domain no producer draws: Skybox, Terrain, PostProcess and
+     * Unspecified all reach the mesh path today, get refused there, and leave a photograph of an empty
+     * sphere on disk that the freshness rule then calls a current picture for ever.
+     *
+     * @p asset MUST be loaded. An unparsed shell states no ShaderName, and MaterialData::EffectiveShaderName
+     * then answers "StaticMeshPBR" — a real name, a Surface domain and a completely wrong answer. That is
+     * exactly how the Volume-domain refusal reached the log: the sweep asked a shell.
+     */
+    [[nodiscard]] Common::ResultStr<Preview> PreviewRouteFor( const Assets::SurfaceMaterialAsset& asset );
 
     /// A mesh ready to be captured.
     struct Mesh

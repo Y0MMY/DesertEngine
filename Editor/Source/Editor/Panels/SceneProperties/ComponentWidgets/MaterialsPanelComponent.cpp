@@ -13,6 +13,7 @@
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Editor/Widgets/ThumbnailFreshness.hpp>
 #include <Editor/Widgets/ThumbnailService.hpp>
+#include <Editor/Widgets/ThumbnailSubject.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
@@ -461,10 +462,13 @@ namespace Desert::Editor
             path = asset->GetMetadata().Filepath.generic_string();
 
             std::error_code ec;
-            // Cutout/foliage materials garble on a sphere -> flat card, same rule the browser uses.
-            const bool        flat = asset->Data().GetFloat( "AlphaCutoff" ) > 0.0f;
-            const std::string png  = ThumbnailService::Get().RequestMaterial( asset->GetMetadata().Handle,
-                                                                              path, flat );
+            // HOW it is photographed comes from the ONE place that decides — the material's shader domain,
+            // plus the cutout rule this file used to hold its own copy of. A refusal (a domain no producer
+            // draws) leaves `png` empty, and the swatch below is then the true statement about it.
+            const auto        route = ThumbnailSubject::PreviewRouteFor( *asset );
+            const std::string png   = route ? ThumbnailService::Get().RequestMaterial( asset->GetMetadata().Handle,
+                                                                                       path, route.GetValue() )
+                                            : std::string();
 
             // THE SAME RULE THE SERVICE APPLIES, out of the same header, and that is the point. This used
             // to be a hand-written copy of the margin comparison while ThumbnailService::ShouldQueue asked

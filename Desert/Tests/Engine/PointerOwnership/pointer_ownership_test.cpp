@@ -153,11 +153,21 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   (string literals in an `inline constexpr std::array`), and again the value is that a raw pointer
     //   could not be ADDED without someone being asked. Note the shape of the thing it caught: a table
     //   written to make an exception explainable, which would itself have been an unexplained pointer.
+    //   786 -> 788, and this pair is the ordinary kind: two co-owned CAMERAS on
+    //   Editor::AssetThumbnailRenderer (М12), for the sky-dome capture of a Volume-domain material.
+    //   Q1 — who is OBLIGED to destroy them: nobody alone, which is why both are shared. `m_DomeCamera`
+    //   is handed to Core::Scene::PinActiveCamera, which stores it as the scene's active AND main camera,
+    //   so the scene co-owns it for as long as it renders through it; `m_ObjectCamera` is the camera
+    //   Scene::Init made and the scene already owns — this member is a second owner precisely so the
+    //   object capture can be given it back BY NAME after a dome capture pinned the other one, which
+    //   asking the scene again cannot do. Q2 — can the observed die before the observer: no, and that is
+    //   the point of the form rather than a guarantee anything else provides. A raw pointer to either
+    //   would be a pointer into an object the scene may replace on its next play-state change.
     EXPECT_EQ( CountOf( Form::Raw ), 325 );
-    EXPECT_EQ( CountOf( Form::Shared ), 317 );
+    EXPECT_EQ( CountOf( Form::Shared ), 319 );
     EXPECT_EQ( CountOf( Form::Unique ), 110 );
     EXPECT_EQ( CountOf( Form::Weak ), 34 );
-    EXPECT_EQ( (int)Members().size(), 786 )
+    EXPECT_EQ( (int)Members().size(), 788 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }
@@ -368,7 +378,12 @@ TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
     // `shared_ptr` here is a false impression of shared ownership, and the register's job is to make
     // the true owner findable instead of mass-replacing them for uniformity -- churn that would hide
     // the seven real findings in a diff of two hundred files.
-    EXPECT_EQ( CountOf( Form::Shared ), 317 );
+    //
+    // 319 SINCE М12: the two cameras AssetThumbnailRenderer co-owns with the scene it renders through.
+    // The account is at the population census above, which is the one place a number here is explained;
+    // this assertion exists because "shared is the majority" is a claim about the TREE, and the second
+    // line is what makes it a relation rather than a constant somebody keeps bumping.
+    EXPECT_EQ( CountOf( Form::Shared ), 319 );
     EXPECT_GT( CountOf( Form::Shared ), CountOf( Form::Unique ) + CountOf( Form::Weak ) );
 }
 

@@ -1652,7 +1652,7 @@ namespace Desert::Editor
         // Queue through the editor-wide service: it owns the one renderer, deduplicates against what other
         // panels already asked for, skips anything already on disk and never retries an asset that failed.
         ThumbnailService::Get().RequestMaterial( subject.GetValue().Handle, entry->AssetPath,
-                                                 subject.GetValue().Flat );
+                                                 subject.GetValue().How );
 
         // Until the PNG exists, show the albedo colour as a placeholder swatch.
         const glm::vec3 albedo =

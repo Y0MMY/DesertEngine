@@ -27,6 +27,7 @@
 
 #include <Editor/Widgets/CloudThumbnail.hpp>
 #include <Editor/Widgets/ThumbnailFormats.hpp>
+#include <Editor/Widgets/ThumbnailSubject.hpp>
 
 #include <gtest/gtest.h>
 
@@ -415,6 +416,71 @@ TEST( ThumbnailFormats, ExtensionOfReadsTheFileAndNotItsFolder )
             "format";
     EXPECT_EQ( TF::ExtensionOf( "README" ), "" );
     EXPECT_EQ( TF::ExtensionOf( "" ), "" );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// THE SECOND CENSUS, ONE LEVEL DOWN: `.demat` is ONE extension and SIX domains
+//
+// The table above answers "which FILE TYPES have a producer". It cannot answer the question that put
+// three refusals in this repository's startup log, because a material's domain is a property of its
+// CONTENT: one `.demat` row, and the mesh path executes exactly one of the six domains it may name.
+// Handing it any other is refused by name at MeshRenderer::DrawGenericMeshes — a frame after the
+// thumbnail queue has already committed, with the empty frame still written to disk and filed as the
+// picture of the material.
+//
+// So the routing is asserted as a RELATION rather than as a list: ThumbnailSubject::PreviewForDomain
+// produces a picture for exactly the domains whose own draw-path predicate says they can be drawn. Both
+// directions fail, which is the half that matters — a seventh domain, or a producer added for one of the
+// four that have none, must move BOTH sides or this goes red.
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    // Every enumerator, spelled out because the enum carries no count and a range-for over an enum is not
+    // a thing. ShaderDomainName's switch has no default, so a domain ADDED to the enum is a -Wswitch
+    // warning in the engine; this array is the second place that has to grow, and the assertion below
+    // fails until it does.
+    constexpr std::array kAllDomains = {
+         Desert::Core::Formats::ShaderDomain::Unspecified, Desert::Core::Formats::ShaderDomain::Surface,
+         Desert::Core::Formats::ShaderDomain::Terrain,     Desert::Core::Formats::ShaderDomain::Skybox,
+         Desert::Core::Formats::ShaderDomain::PostProcess, Desert::Core::Formats::ShaderDomain::Volume,
+    };
+} // namespace
+
+TEST( ThumbnailMaterialDomains, APictureExistsForExactlyTheDomainsADrawPathCanExecute )
+{
+    namespace TS = Desert::Editor::ThumbnailSubject;
+    namespace F  = Desert::Core::Formats;
+
+    for ( const F::ShaderDomain domain : kAllDomains )
+    {
+        const bool drawable = F::DrawnByMeshPath( domain ) || F::DrawnByVolumePath( domain );
+        EXPECT_EQ( TS::PreviewForDomain( domain, false ).has_value(), drawable )
+             << "domain " << F::ShaderDomainName( domain )
+             << ": the thumbnail router and the draw paths disagree about whether this can be drawn at "
+                "all. Either a capture is queued that MeshRenderer will refuse (and its empty frame "
+                "written to disk as the material's picture), or a material that CAN be photographed is "
+                "being skipped.";
+    }
+}
+
+TEST( ThumbnailMaterialDomains, EachDrawableDomainGetsThePictureItsOwnPathProduces )
+{
+    namespace TS = Desert::Editor::ThumbnailSubject;
+    namespace F  = Desert::Core::Formats;
+
+    // The mesh path: a ball, or the camera-facing card a cutout needs. The cutout choice is INSIDE the
+    // mesh path and nowhere else — a medium has no alpha-tested silhouette to flatten.
+    EXPECT_EQ( TS::PreviewForDomain( F::kMeshPathDomain, false ), TS::Preview::Sphere );
+    EXPECT_EQ( TS::PreviewForDomain( F::kMeshPathDomain, true ), TS::Preview::Card );
+
+    // The volume path: the sky the material authors. The cutout flag must not reach it.
+    EXPECT_EQ( TS::PreviewForDomain( F::kVolumePathDomain, false ), TS::Preview::SkyDome );
+    EXPECT_EQ( TS::PreviewForDomain( F::kVolumePathDomain, true ), TS::Preview::SkyDome );
+
+    // The terrain path has its own renderer and no thumbnail producer. Named here rather than left to the
+    // loop above so that adding one is a deliberate edit of this line.
+    EXPECT_FALSE( TS::PreviewForDomain( F::kTerrainPathDomain, false ).has_value() );
 }
 
 int main( int argc, char** argv )

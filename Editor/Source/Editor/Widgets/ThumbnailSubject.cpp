@@ -15,6 +15,49 @@
 
 namespace Desert::Editor::ThumbnailSubject
 {
+    Common::ResultStr<Preview> PreviewRouteFor( const Assets::SurfaceMaterialAsset& asset )
+    {
+        // ── CAN THE PREVIEW'S DRAW PATH EXECUTE THIS MATERIAL AT ALL? ─────────────────────────────────
+        //
+        // The domain is the material's, through its shader. Without the shader service there is no domain
+        // to read, and answering "Sphere" anyway is what a missing service used to mean here — a default
+        // dressed as a decision. It is refused instead, and the sweep prints the reason once.
+        auto* shaders = Runtime::ResourceRegistry::GetShaderService();
+        if ( shaders == nullptr )
+            return Common::MakeFormattedError<Preview>( "there is no shader service, so no domain to ask" );
+
+        const std::string shaderName = asset.Data().EffectiveShaderName();
+        const auto        shader     = shaders->GetByName( shaderName );
+        if ( !shader )
+        {
+            return Common::MakeFormattedError<Preview>(
+                 "its shader '{}' is not registered, so the domain that decides how to photograph it "
+                 "cannot be read",
+                 shaderName );
+        }
+
+        const Core::Formats::ShaderDomain domain = shader->GetProgramMeta().Domain;
+
+        // A cutout material garbles on a sphere: the atlas wraps and the picture becomes one of the ball.
+        // THE ONE STATEMENT OF THAT RULE — it used to be copied into the browser tile, the Details slot
+        // and the static-mesh row, three files deciding one thing.
+        const bool cutout = asset.Data().GetFloat( "AlphaCutoff" ) > 0.0f;
+        if ( const auto how = PreviewForDomain( domain, cutout ) )
+            return Common::MakeSuccess( *how );
+
+        // Skybox, Terrain, PostProcess, Unspecified. NAMED RATHER THAN DROPPED: until now these reached
+        // the mesh path, were refused there by MeshRenderer at LOG_ERROR one frame after the queue had
+        // committed, and the empty frame was still written to disk and filed as the picture of the
+        // material. A black square the freshness rule then calls correct for ever.
+        return Common::MakeFormattedError<Preview>(
+             "its shader '{}' declares Domain {}, and no thumbnail producer draws that domain — the mesh "
+             "path executes only {} and the dome only {}. Photographing it would write an empty frame and "
+             "file it as the picture of this material",
+             shaderName, Core::Formats::ShaderDomainName( domain ),
+             Core::Formats::ShaderDomainName( Core::Formats::kMeshPathDomain ),
+             Core::Formats::ShaderDomainName( Core::Formats::kVolumePathDomain ) );
+    }
+
     Common::ResultStr<Material> ResolveMaterial( Assets::AssetManager& manager, const std::string& assetPath )
     {
         // Mirrors the component deserializer's create-if-missing logic, which is what a cold start needs:
@@ -22,51 +65,32 @@ namespace Desert::Editor::ThumbnailSubject
         // dropped in — or one that lives outside that root — is not in the manager yet.
         auto asset = manager.FindByPath<Assets::SurfaceMaterialAsset>( assetPath );
         if ( !asset )
-        {
             asset = manager.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, assetPath );
-            if ( asset && !asset->IsReadyForUse() )
-                asset->Load();
-        }
         if ( !asset )
         {
             return Common::MakeFormattedError<Material>( "'{}' is not a material the asset manager will accept",
                                                          assetPath );
         }
 
-        // ── CAN THE PREVIEW'S DRAW PATH EXECUTE THIS MATERIAL AT ALL? ─────────────────────────────────
+        // PARSED BEFORE IT IS ASKED ANYTHING, ON BOTH ROUTES, AND THAT MOVE IS THE WHOLE DEFECT. The Load
+        // used to sit inside the create branch above, so a material the PRELOADER had already registered
+        // never got one — and `AssetPreloader::PreloadCookedAssetsAndMaterials` registers every `.demat`
+        // under MATERIAL_PATH with `loadAfterCreate=false`, i.e. as an unparsed shell. A shell states no
+        // ShaderName, `MaterialData::EffectiveShaderName()` answers "StaticMeshPBR", and every question
+        // below was then answered about a material that does not exist.
         //
-        // FOUND BY THE SWEEP, AND ONLY REACHABLE BECAUSE OF IT. A thumbnail is a MESH draw — the material
-        // on a sphere or on a card — so it is the mesh path, and the mesh path draws exactly
-        // `Core::Formats::kMeshPathDomain`. It refuses anything else BY NAME, at LOG_ERROR, once per
-        // attempt (MeshRenderer::DrawGenericMeshes).
-        //
-        // While a thumbnail existed only for materials somebody browsed to, that never fired: nobody
-        // opens the folder holding `CloudRaymarch.demat`. The background sweep photographs every material
-        // in the project, so on its first run against this repository it produced three of those errors —
-        // Volume, Skybox and Terrain — and then wrote each refusal's empty frame to disk AS THE PICTURE OF
-        // THE MATERIAL. A black square that the freshness rule would call correct for ever.
-        //
-        // Refused here instead, with the domain named, so the browser falls back to the albedo swatch (a
-        // true statement about the material) and the sweep skips it once rather than photographing
-        // nothing. The predicate is the draw path's OWN — never `IsUserAssignable()`, which is the union
-        // of three paths and is exactly the mistake ShaderProgramMeta.hpp warns about above it.
-        if ( auto* shaders = Runtime::ResourceRegistry::GetShaderService() )
-        {
-            const std::string shaderName = asset->Data().EffectiveShaderName();
-            if ( const auto shader = shaders->GetByName( shaderName ) )
-            {
-                const Core::Formats::ShaderDomain domain = shader->GetProgramMeta().Domain;
-                if ( !Core::Formats::DrawnByMeshPath( domain ) )
-                {
-                    return Common::MakeFormattedError<Material>(
-                         "'{}' uses the shader '{}', whose domain is {} — the thumbnail is a MESH draw and "
-                         "the mesh path executes only {}. Photographing it would write an empty frame and "
-                         "file it as the picture of this material",
-                         assetPath, shaderName, Core::Formats::ShaderDomainName( domain ),
-                         Core::Formats::ShaderDomainName( Core::Formats::kMeshPathDomain ) );
-                }
-            }
-        }
+        // MEASURED, because this is what it cost: on a clean start of this repository the sweep resolved
+        // 52 cloud materials as Surface-domain, queued them as mesh draws, and the capture — running
+        // seconds later, against an asset something else had parsed in the meantime — reached
+        // MeshRenderer with the REAL shader. Three domain refusals in the log (Volume, Skybox, Terrain),
+        // and an empty frame written to disk as each material's picture. The check was not missing; it was
+        // reading a default.
+        if ( !asset->IsReadyForUse() )
+            asset->Load();
+
+        auto route = PreviewRouteFor( *asset );
+        if ( !route )
+            return Common::MakeFormattedError<Material>( "'{}': {}", assetPath, route.GetError() );
 
         // Was `if ( !GetMaterialService()->Get( h ) ) Register( a )`. `Get` BUILDS the runtime material on a
         // miss, so the question and the answer were the same call — and the sweep asks it about every
@@ -76,7 +100,7 @@ namespace Desert::Editor::ThumbnailSubject
 
         Material out;
         out.Handle = asset->GetMetadata().Handle;
-        out.Flat   = asset->Data().GetFloat( "AlphaCutoff" ) > 0.0f;
+        out.How    = route.GetValue();
         return Common::MakeSuccess( out );
     }
 

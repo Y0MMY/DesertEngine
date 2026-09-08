@@ -15,6 +15,7 @@
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Editor/Widgets/ThumbnailFreshness.hpp>
 #include <Editor/Widgets/ThumbnailService.hpp>
+#include <Editor/Widgets/ThumbnailSubject.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <filesystem>
 #include <system_error>
@@ -200,10 +201,14 @@ namespace Desert::Editor
                           staticMesh.MaterialSlots.front() ) )
                 {
                     source = mat->GetMetadata().Filepath.generic_string();
-                    // Cutout/foliage materials garble on a sphere -> flat card, the same rule the browser
-                    // and the material slot next door apply.
-                    const bool flat = mat->Data().GetFloat( "AlphaCutoff" ) > 0.0f;
-                    png = ThumbnailService::Get().RequestMaterial( mat->GetMetadata().Handle, source, flat );
+                    // WHICH PICTURE, from the one place that decides — this file used to hold its own
+                    // copy of the cutout rule and to ask nothing at all about the domain. A refusal leaves
+                    // `png` empty, which this row already reads as "no rendered thumbnail".
+                    if ( const auto route = ThumbnailSubject::PreviewRouteFor( *mat ) )
+                    {
+                        png = ThumbnailService::Get().RequestMaterial( mat->GetMetadata().Handle, source,
+                                                                       route.GetValue() );
+                    }
                 }
             }
 
