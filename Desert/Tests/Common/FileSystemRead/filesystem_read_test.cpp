@@ -27,6 +27,8 @@
 #include <filesystem>
 #include <fstream>
 
+#include "../../TestSupport/result_assert.hpp"
+
 namespace fs = std::filesystem;
 
 namespace
@@ -188,7 +190,7 @@ TEST( FileSystemRead, ListFilesRecursiveMergesDiskAndPakAndTheLooseFileWins )
     ASSERT_NE( a, listed.end() );
     // The loose spelling survived the dedup, so a later read of the listed path gets the LOOSE bytes
     // (disk-first VFS override) — the relation the debugging workflow relies on.
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( *a ).GetValue(), "loose-a" );
+    DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( *a ), "loose-a" );
 
     Common::Utils::VFS::Unmount();
 }
@@ -216,7 +218,7 @@ TEST( FileSystemRead, ListFilesRecursiveResolvesARelativeRootThroughThePak )
     const auto listed = Common::Utils::FileSystem::ListFilesRecursive( "Resources/Fonts/" );
     ASSERT_EQ( listed.size(), 1u );
     EXPECT_EQ( listed[0].filename(), "fake.ttf" );
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( listed[0] ).GetValue(), "packed-font" );
+    DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( listed[0] ), "packed-font" );
 
     Common::Utils::VFS::Unmount();
 }

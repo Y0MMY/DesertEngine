@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <fstream>
 
+#include "../../TestSupport/result_assert.hpp"
+
 namespace fs = std::filesystem;
 
 namespace
@@ -79,7 +81,7 @@ TEST( Pak, VfsMountResolvesAbsolutePathsAndFileSystemFallsBack )
 
     EXPECT_TRUE( Common::Utils::VFS::Exists( virtualPath ) );
     EXPECT_TRUE( Common::Utils::FileSystem::Exists( virtualPath ) );                 // VFS-aware
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( virtualPath ).GetValue(), // read via pak
+    DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( virtualPath ), // read via pak
                "{\"scene\":true}" );
     EXPECT_EQ( Common::Utils::FileSystem::GetFileSize( virtualPath ), 14u );
 
@@ -94,7 +96,7 @@ TEST( Pak, VfsMountResolvesAbsolutePathsAndFileSystemFallsBack )
     ASSERT_EQ( listed.size(), 1u );
     std::error_code cec;
     EXPECT_EQ( fs::weakly_canonical( listed[0], cec ), fs::weakly_canonical( virtualPath, cec ) );
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( listed[0] ).GetValue(), "{\"scene\":true}" );
+    DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( listed[0] ), "{\"scene\":true}" );
 
     // LOOSE FILE OVERRIDE: a real file with the same path wins over the pak entry.
     fs::create_directories( virtualPath.parent_path() );
@@ -102,7 +104,7 @@ TEST( Pak, VfsMountResolvesAbsolutePathsAndFileSystemFallsBack )
         std::ofstream out( virtualPath );
         out << "loose";
     }
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( virtualPath ).GetValue(), "loose" );
+    DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( virtualPath ), "loose" );
 
     Common::Utils::VFS::Unmount();
     EXPECT_FALSE( Common::Utils::VFS::Exists( virtualPath ) );
@@ -366,7 +368,9 @@ TEST( Pak, ADamagedDeletionListIsAnOpenFailureWithAReason )
     // Flip one byte of the deletion list's blob. The header, the index and every span stay perfectly
     // valid — only the content hash disagrees, which is exactly the shape a truncated or tampered
     // download leaves behind.
-    const std::string before = Common::Utils::FileSystem::ReadFileContent( dir / "Patch_001.dpak" ).GetValue();
+    const auto beforeRead = Common::Utils::FileSystem::ReadFileContent( dir / "Patch_001.dpak" );
+    ASSERT_TRUE( beforeRead.IsSuccess() ) << "the patch pak did not read back: " << beforeRead.GetError();
+    const std::string before = beforeRead.GetValue();
     const size_t      at     = before.find( "Assets/b.txt" );
     ASSERT_NE( at, std::string::npos );
     std::string after = before;

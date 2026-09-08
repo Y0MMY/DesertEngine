@@ -232,10 +232,9 @@ TEST( ResultUnwrapCensus, RefQualifiedRule )
                 }
                 if ( !Contains( tail, "&" ) )
                 {
-                    findings.push_back(
-                         { header.filename().string(), LineOf( raw, at ),
-                           name + " is not ref-qualified, so it can unwrap a TEMPORARY: `Foo()." + name +
-                                "()` has no variable anyone could have checked" } );
+                    findings.push_back( { header.filename().string(), LineOf( raw, at ),
+                                          name + " is not ref-qualified, so it can unwrap a TEMPORARY: `Foo()." +
+                                               name + "()` has no variable anyone could have checked" } );
                 }
                 else if ( Contains( tail, "&&" ) )
                 {
@@ -249,14 +248,15 @@ TEST( ResultUnwrapCensus, RefQualifiedRule )
     // Both types must actually have been scanned — a header that moved would otherwise pass this
     // test by containing nothing, which is the empty-successful-answer shape §1.4 forbids.
     EXPECT_GE( declarations, 4 ) << "expected at least GetValue+ExtractValue and their deleted rvalue "
-                                    "overloads; found " << declarations;
+                                    "overloads; found "
+                                 << declarations;
     EXPECT_GE( deleted, 2 ) << "no rvalue overload is deleted, so unwrapping a temporary compiles again";
 
     std::ostringstream report;
     for ( const Finding& f : findings )
         report << "\n  " << f.File << ":" << f.Line << "  " << f.What;
-    EXPECT_TRUE( findings.empty() ) << findings.size() << " unwrap accessor(s) can take a temporary:"
-                                    << report.str();
+    EXPECT_TRUE( findings.empty() ) << findings.size()
+                                    << " unwrap accessor(s) can take a temporary:" << report.str();
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -323,8 +323,7 @@ TEST( ResultUnwrapCensus, ConstDefaultRule )
         const std::string raw = ReadAll( header );
         const std::string src = Desert::Tests::ConsumerText::StripCommentsAndLiterals( raw );
 
-        for ( std::size_t at = src.find( "static" ); at != std::string::npos;
-              at             = src.find( "static", at + 1 ) )
+        for ( std::size_t at = src.find( "static" ); at != std::string::npos; at = src.find( "static", at + 1 ) )
         {
             const std::size_t eol  = src.find( '\n', at );
             const std::string line = src.substr( at, eol == std::string::npos ? eol : eol - at );

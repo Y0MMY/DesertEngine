@@ -37,8 +37,8 @@ namespace Desert::Graphic
         // vectors and their lookup maps consistent with each other, which is what the draw path
         // indexes; building a property around nothing would have put a null in the vector and moved
         // the crash to the first frame that drew with this material.
-        const auto addProperties = [&]( const auto& names, auto&& fetch, auto&& make, auto& storage,
-                                        auto& lookup, const char* kind )
+        const auto addProperties =
+             [&]( const auto& names, auto&& fetch, auto&& make, auto& storage, auto& lookup, const char* kind )
         {
             for ( auto [name, index] : names )
             {
