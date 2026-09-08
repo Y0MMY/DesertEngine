@@ -70,24 +70,68 @@ namespace Desert::Editor::Control
         Quit,         ///< end the session with an exit status
     };
 
+    /**
+     * @brief DOES THIS OPERATION NEED AN EDITOR THAT HAS FINISHED COMING UP?
+     *
+     * THE DEFECT THIS ANSWERS, with its numbers. `commands` used to be answered the instant it arrived,
+     * from whatever the editor happened to hold at that moment — and the editor holds almost nothing for
+     * the first twenty seconds of a session. Measured on this repository's own project: the palette's
+     * `Open` group goes 0 -> 106 -> 130 as five separate startup stages fill the asset cache, and the
+     * 106-entry answer — every material, not one of the twenty-four cloud assets — is a SUCCESSFUL reply
+     * that stands for 3.3 seconds of every single boot. A client cannot tell it from a project that has no
+     * cloud documents. §1.4: an empty (or half-empty) successful answer is a silent wrong answer.
+     *
+     * TWO OPERATIONS ARE DELIBERATELY EXEMPT, and the exemptions are the interesting half.
+     *
+     * `state` must answer THROUGHOUT the boot, because it is how readiness is OBSERVED: its `quiescence`
+     * section names what is still outstanding, in the same words a refusal uses. Making it wait would be
+     * blinding the one client that is watching the editor come up, and would turn readiness back into
+     * something inferred from silence — which is exactly the property this whole change exists to remove.
+     *
+     * `quit` must answer because a boot that has WEDGED is the case where ending the session matters most.
+     * An operation that could only be run by an editor that was already fine is no use to anybody.
+     *
+     * STATED IN THE TABLE AND NOT IN A `switch`, so it is impossible to add an operation without deciding.
+     * The field has no default: `{ "thing", Op::Thing }` does not compile, and the next person is made to
+     * answer the question rather than inherit somebody else's answer.
+     */
+    enum class RequiresReady
+    {
+        No,  ///< answered from whatever state the editor is in, including mid-boot
+        Yes, ///< held until a presented frame proves the editor settled, or refused saying what is pending
+    };
+
     /// One accepted operation. A table, for the same reason kCommandLineFlags is one: the message that
     /// lists the known operations is built FROM the set the parser accepts, so the two cannot drift.
     struct OpSpec
     {
-        const char* Name;
-        Op          Operation;
+        const char*   Name;
+        Op            Operation;
+        RequiresReady Readiness;
     };
 
     inline constexpr OpSpec kOps[] = {
-         { "commands", Op::Commands },
-         { "run", Op::Run },
-         { "properties", Op::Properties },
-         { "set", Op::Set },
-         { "state", Op::State },
-         { "shot.window", Op::ShotWindow },
-         { "shot.viewport", Op::ShotViewport },
-         { "quit", Op::Quit },
+         { "commands", Op::Commands, RequiresReady::Yes },
+         { "run", Op::Run, RequiresReady::Yes },
+         { "properties", Op::Properties, RequiresReady::Yes },
+         { "set", Op::Set, RequiresReady::Yes },
+         { "state", Op::State, RequiresReady::No },
+         { "shot.window", Op::ShotWindow, RequiresReady::Yes },
+         { "shot.viewport", Op::ShotViewport, RequiresReady::Yes },
+         { "quit", Op::Quit, RequiresReady::No },
     };
+
+    /// The table's answer for one operation. Yes for anything not in the table at all — an operation this
+    /// build has never heard of is the last thing that should be run against a half-built editor.
+    [[nodiscard]] constexpr bool NeedsReadyEditor( Op op ) noexcept
+    {
+        for ( const OpSpec& spec : kOps )
+        {
+            if ( spec.Operation == op )
+                return spec.Readiness == RequiresReady::Yes;
+        }
+        return true;
+    }
 
     /// TWO CAPTURES THAT NEVER SUBSTITUTE FOR EACH OTHER, and that is why they are two operations rather
     /// than one with a flag. `shot.window` reads the presented swapchain image and therefore contains the

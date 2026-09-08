@@ -121,8 +121,13 @@ namespace Desert::Editor
         // Drained at the TOP of OnUpdate: accept, read one request, execute it. Everything it can run is
         // a palette entry.
         void ServiceControlChannel();
+        // Executes one request and decides whether its reply leaves now or waits for the frame that proves
+        // it. THE ONLY place a control request is run: there are two ways to arrive at one — read off the
+        // socket, or released by the readiness gate several frames later — and one way to run it.
+        void RunControlRequest( const Control::Request& request );
         // Sampled after the deferred queues have drained and BEFORE the scene is rendered — "was anything
         // outstanding while this frame was being made". Judged later, by the gate, at OnFramePresented.
+        // Also called once at the end of OnAttach: an unsampled census must not read as a settled editor.
         void SampleFrameQuiescence();
         // Runs one request against the live editor. Never throws, always answers.
         [[nodiscard]] Control::Response ExecuteControlRequest( const Control::Request& request );

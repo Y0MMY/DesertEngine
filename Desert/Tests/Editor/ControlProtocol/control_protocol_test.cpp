@@ -37,11 +37,13 @@ using Desert::Editor::Control::FormatResponse;
 using Desert::Editor::Control::IsShot;
 using Desert::Editor::Control::kOps;
 using Desert::Editor::Control::kStateSections;
+using Desert::Editor::Control::NeedsReadyEditor;
 using Desert::Editor::Control::Op;
 using Desert::Editor::Control::ParseRequest;
 using Desert::Editor::Control::PendingWork;
 using Desert::Editor::Control::PropertiesToJson;
 using Desert::Editor::Control::Request;
+using Desert::Editor::Control::RequiresReady;
 using Desert::Editor::Control::Response;
 using Desert::Editor::Control::ToJson;
 using Desert::Editor::Control::ValidateSections;
@@ -118,6 +120,46 @@ TEST( ControlProtocol, EveryKnownOperationParses )
         const Request request = ParseOk( line );
         EXPECT_EQ( static_cast<int>( request.Operation ), static_cast<int>( spec.Operation ) )
              << "'" << spec.Name << "' parsed as a different operation from the one the table pairs it with";
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// WHICH OPERATIONS NEED AN EDITOR THAT HAS FINISHED COMING UP.
+//
+// `commands` used to be answered the instant it arrived, from whatever the editor held at that moment --
+// and it holds almost nothing for the first twenty seconds of a session. Measured on this repository's own
+// project: the palette's `Open` group goes 0 -> 106 -> 130 as five separate startup stages fill the asset
+// cache, and the 106-entry answer is a SUCCESSFUL reply that stands for 3.3 s of every boot.
+//
+// The two exemptions are the load-bearing part, so they are pinned BY NAME. Both are about being able to
+// deal with an editor that is not fine: `state` is how readiness is observed at all, and `quit` is what
+// ends a session whose boot has wedged. An exemption that quietly grew a third member would put some other
+// answer back on the wrong side of the boot.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( ControlProtocol, OnlyTheTwoOperationsThatMustSurviveABootAreExemptFromWaitingForOne )
+{
+    EXPECT_FALSE( NeedsReadyEditor( Op::State ) ) << "'state' is how a client WATCHES the boot; blocking it "
+                                                     "makes readiness inferable only from silence";
+    EXPECT_FALSE( NeedsReadyEditor( Op::Quit ) ) << "a wedged boot is exactly when ending the session matters";
+
+    for ( const auto& spec : kOps )
+    {
+        if ( spec.Operation == Op::State || spec.Operation == Op::Quit )
+            continue;
+        EXPECT_TRUE( NeedsReadyEditor( spec.Operation ) )
+             << "'" << spec.Name << "' would answer about a project the editor has not read yet";
+    }
+}
+
+// The table and the function are one answer, not two. A `switch` beside the table is the shape that drifts;
+// this asserts that the function really is the table's own field and not a second copy of the decision.
+TEST( ControlProtocol, TheReadinessRuleComesFromTheTableAndNotFromASecondList )
+{
+    for ( const auto& spec : kOps )
+    {
+        EXPECT_EQ( NeedsReadyEditor( spec.Operation ), spec.Readiness == RequiresReady::Yes )
+             << "'" << spec.Name << "'";
     }
 }
 

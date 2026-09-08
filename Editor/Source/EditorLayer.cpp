@@ -820,6 +820,14 @@ namespace Desert::Editor
             sky.RequestBake = true;
         }
 
+        // THE FIRST SAMPLE IS TAKEN BEFORE THE FIRST FRAME, and without it the readiness gate is wrong in
+        // the one case it exists for. ServiceControlChannel runs at the TOP of OnUpdate and judges the
+        // sample from the frame before; on frame zero there is no frame before, so a default-constructed
+        // EditorQuiescence would answer Settled() — every flag false — and the very first request of a
+        // session, which is the one a client sends while the editor is still cooking, would be answered
+        // from an editor that has read nothing. An unsampled census must not read as a settled editor.
+        SampleFrameQuiescence();
+
         return BOOLSUCCESS;
     }
 
@@ -1393,7 +1401,20 @@ namespace Desert::Editor
         // hand the ordering guarantee to whoever wrote the client: two commands in flight cannot both be
         // "the command the next settled frame proves".
         if ( m_ControlInFlight )
+        {
+            // ONE STATE MEANS ONE THING: a request in flight with an IDLE gate is a request the readiness
+            // wait has just released and that has not run yet. Every other combination clears itself in
+            // OnFramePresented, so this is the only way to be here. Running it at the top of OnUpdate and
+            // not at the point of release keeps ONE execution site for control commands — the same point
+            // in the frame a request that never had to wait is run at.
+            if ( m_ControlGate.IsArmed() || m_ControlPendingReply )
+                return;
+
+            const Control::Request held = *m_ControlInFlight;
+            m_ControlInFlight.reset();
+            RunControlRequest( held );
             return;
+        }
 
         const std::optional<std::string> line = m_ControlSocket.PollRequestLine();
         if ( !line )
@@ -1409,15 +1430,59 @@ namespace Desert::Editor
             return;
         }
 
-        const Control::Request request  = parsed.GetValue();
-        Control::Response      response = ExecuteControlRequest( request );
+        const Control::Request request = parsed.GetValue();
+
+        // AN EDITOR THAT HAS NOT READ THE PROJECT DOES NOT ANSWER ABOUT IT.
+        //
+        // This is the whole of A6-1's second half, and it is one branch because the mechanism it needs
+        // already existed: PendingWork::StartupLoading has been in the quiescence census since the channel
+        // landed, and the gate has always been able to hold something until a presented frame proves the
+        // census empty. What was missing is that the READS never asked. `commands` was answered from the
+        // asset cache the moment it arrived, and the cache is filled by five separate startup stages — so
+        // for 3.3 s of every boot the palette successfully offers 106 of this project's 130 openable
+        // assets, and for the seconds before that, none of them. Neither answer says which it is.
+        //
+        // Held, not refused, because a refusal only moves the problem: the client would have to guess how
+        // long to wait and ask again, which is the polling loop this channel exists to delete. The refusal
+        // still exists — it is what a gate timeout produces, and it names what never finished.
+        //
+        // WHICH operations need this is the protocol's decision, not this file's: `state` and `quit` are
+        // exempt, for reasons written where the table is (Control/ControlProtocol.hpp). EditorLayer.cpp is
+        // compiled by no test suite, so a rule stated here is a rule nothing can show going red.
+        if ( Control::NeedsReadyEditor( request.Operation ) && !m_FrameQuiescence.Settled() )
+        {
+            LOG_INFO( "[Control] request {} is waiting for the editor to finish coming up: {}.", request.Id,
+                      m_FrameQuiescence.Describe() );
+            m_ControlInFlight = request;
+            m_ControlGate.ArmForReadiness( m_FrameIndex );
+            return;
+        }
+
+        RunControlRequest( request );
+    }
+
+    // Execute one request and decide whether its reply leaves now or waits for the frame that proves it.
+    //
+    // Split out of ServiceControlChannel because there are now two ways to ARRIVE at a request — read from
+    // the socket, or released by the readiness gate a few frames later — and exactly one way to RUN one.
+    // Two execution sites for one thing is the shape this codebase spends its days removing.
+    void EditorLayer::RunControlRequest( const Control::Request& request )
+    {
+        Control::Response response = ExecuteControlRequest( request );
 
         // READS ANSWER NOW; ANYTHING THAT CAN CHANGE THE PICTURE WAITS FOR ONE.
         //
-        // `commands`, `properties` and `state` observe and change nothing, so making them wait would buy
-        // latency and no guarantee at all. `run`, `set` and the two shots are the ones the promise is
-        // about — and a shot does not merely wait for the settled frame, it IS taken on it, which is why
-        // its response is finished in OnFramePresented rather than here.
+        // `commands`, `properties` and `state` observe and change nothing, so making them wait for a
+        // FURTHER frame would buy latency and no guarantee at all. `run`, `set` and the two shots are the
+        // ones the promise is about — and a shot does not merely wait for the settled frame, it IS taken
+        // on it, which is why its response is finished in OnFramePresented rather than here.
+        //
+        // NOT TO BE CONFUSED WITH THE READINESS WAIT ABOVE, which the reads DO take part in. The two are
+        // different questions about different moments: "has the editor finished coming up, so that this
+        // answer is about the real project?" is asked BEFORE a request runs, of every operation but the
+        // two exemptions; "has a frame been presented that shows what this command did?" is asked AFTER,
+        // and only of the commands that did something. By the time execution reaches this line the editor
+        // is settled either way, so a read answers from a state it has actually finished building.
         //
         // `set` is in the list for exactly the reason `run` is: it moves the preview, and a client that
         // set a value and captured immediately would photograph the frame BEFORE it. That failure is the
@@ -1475,8 +1540,12 @@ namespace Desert::Editor
             return;
         }
 
-        if ( !m_ControlInFlight || !m_ControlPendingReply )
+        if ( !m_ControlInFlight )
             return;
+
+        // WHICH OF THE TWO WAITS this frame is being judged for, sampled BEFORE the verdict: a discharge
+        // clears the subject, so asking afterwards would always answer "nothing".
+        const Control::GateSubject holding = m_ControlGate.Holding();
 
         // The frame just presented is judged by the quiescence sampled while it was being BUILT. The gate
         // uses m_FrameIndex - 1 because the counter was advanced above: the frame that has just gone out
@@ -1486,6 +1555,36 @@ namespace Desert::Editor
 
         if ( verdict == Control::GateVerdict::Waiting || verdict == Control::GateVerdict::Idle )
             return;
+
+        // THE READINESS HALF. The request has not run; this frame says whether it may.
+        //
+        // A discharge does nothing here on purpose: it leaves the request parked with an idle gate, which
+        // is the one state ServiceControlChannel reads as "run this at the top of the next update". That
+        // costs one frame and buys a single execution site for every control command — a request released
+        // by this wait runs at exactly the point in the frame a request that never waited runs at.
+        if ( holding == Control::GateSubject::Readiness )
+        {
+            if ( verdict == Control::GateVerdict::TimedOut )
+            {
+                m_ControlSocket.SendResponseLine( Control::FormatResponse( Control::Response::Failure(
+                     m_ControlInFlight->Id,
+                     Control::DescribeReadinessTimeout( m_FrameQuiescence, m_ControlGate.FramesWaited() ) ) ) );
+                m_ControlInFlight.reset();
+            }
+            return;
+        }
+
+        // Unreachable while the two arms above are the only ways to arm the gate, and stated rather than
+        // dereferenced: an Effect wait without a reply to release would be a request that ran and produced
+        // nothing, which is the silent failure Response exists to make impossible.
+        if ( !m_ControlPendingReply )
+        {
+            m_ControlSocket.SendResponseLine( Control::FormatResponse( Control::Response::Failure(
+                 m_ControlInFlight->Id, "the channel held a reply-less request past its frame; that is a "
+                                        "defect in the control channel, not in the request." ) ) );
+            m_ControlInFlight.reset();
+            return;
+        }
 
         Control::Response reply = *m_ControlPendingReply;
 
@@ -1755,6 +1854,13 @@ namespace Desert::Editor
         // So the editor asks the gate, before the submit, whether THIS frame is the one the reply waits
         // for — the same question, on the same inputs, that OnFramePresented will answer afterwards.
         if ( !m_ControlInFlight || m_ControlInFlight->Operation != Control::Op::ShotWindow )
+            return;
+        // THE EFFECT WAIT AND NOT THE READINESS ONE. A shot parked behind the readiness gate has not been
+        // taken yet — its `run`-like half is precisely this capture — so recording on the frame that
+        // merely proves the editor came up would photograph the boot instead of the thing asked for, and
+        // it would still be released as the answer to the request. The gate's two subjects are what keep
+        // "the editor is ready" and "the command has landed" from being read as one fact.
+        if ( m_ControlGate.Holding() != Control::GateSubject::Effect )
             return;
         if ( !m_ControlGate.WouldDischarge( m_FrameIndex, m_FrameQuiescence ) )
             return;

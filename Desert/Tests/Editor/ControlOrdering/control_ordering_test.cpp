@@ -32,9 +32,11 @@
 
 #include <string>
 
+using Desert::Editor::Control::DescribeReadinessTimeout;
 using Desert::Editor::Control::DescribeSettleTimeout;
 using Desert::Editor::Control::EditorQuiescence;
 using Desert::Editor::Control::FrameGate;
+using Desert::Editor::Control::GateSubject;
 using Desert::Editor::Control::GateVerdict;
 using Desert::Editor::Control::kPendingWorkNames;
 using Desert::Editor::Control::PendingWork;
@@ -228,7 +230,131 @@ TEST( ControlOrdering, DisarmingIsNotDischarging )
 }
 
 // ---------------------------------------------------------------------------------------------------
-// 6. The peek and the verdict agree.
+// 6. THE OTHER END OF THE SAME WAIT: an answer must not overtake the editor COMING UP.
+//
+// The gate began holding one thing -- a reply, until the frame that proves its command. A6-1 gave it the
+// mirror case, and it is the same question of the same census: a request that arrived BEFORE the editor had
+// read the project used to be answered anyway, from a state that was half built. Measured on this
+// repository's own project, the palette's `Open` group goes 0 -> 106 -> 130 as five separate startup stages
+// fill the asset cache, and the 106-entry answer -- every material, not one of the twenty-four cloud assets
+// -- is a SUCCESSFUL reply that stands for 3.3 seconds of every boot. Nothing in it says which it is.
+//
+// The relations that make the second wait real rather than decorative:
+//
+//   7. TWO SUBJECTS, ONE MECHANISM. The gate says WHICH wait it is serving, because a discharge means two
+//      different things and the caller must not have to guess.
+//   8. READINESS IS OBSERVED, NOT INFERRED. A frame drawn while the staged startup was running cannot
+//      release a parked request, exactly as it cannot release a reply.
+//   9. NO SILENT FOREVER, AGAIN -- and the refusal says the request NEVER RAN, which is a different fact
+//      from "it ran and the reply cannot vouch for the picture".
+// ---------------------------------------------------------------------------------------------------
+
+// The gate must be able to say which of the two things it is holding. A caller that could not ask would
+// have to infer it from somewhere else, and "somewhere else" is a second answer to one question.
+TEST( ControlOrdering, TheGateSaysWhichOfTheTwoWaitsItIsServing )
+{
+    FrameGate gate;
+    EXPECT_EQ( gate.Holding(), GateSubject::Nothing );
+
+    gate.ArmForReadiness( 3 );
+    EXPECT_EQ( gate.Holding(), GateSubject::Readiness );
+    EXPECT_TRUE( gate.IsArmed() );
+
+    gate.ArmAfterExecution( 3 );
+    EXPECT_EQ( gate.Holding(), GateSubject::Effect );
+    EXPECT_TRUE( gate.IsArmed() );
+
+    gate.Disarm();
+    EXPECT_EQ( gate.Holding(), GateSubject::Nothing );
+    EXPECT_FALSE( gate.IsArmed() );
+}
+
+// A discharge clears the subject. That is what lets EditorLayer hold ONE state -- "a request in flight with
+// an idle gate has been released and has not run yet" -- instead of a second flag beside the gate saying
+// the same thing, which is the shape that drifts.
+TEST( ControlOrdering, ADischargedReadinessWaitLeavesTheGateHoldingNothing )
+{
+    FrameGate gate;
+    gate.ArmForReadiness( 0 );
+
+    EXPECT_EQ( gate.ObserveFramePresented( 0, Settled() ), GateVerdict::Discharged );
+    EXPECT_EQ( gate.Holding(), GateSubject::Nothing );
+}
+
+// THE RULE THIS WHOLE HALF EXISTS FOR. A frame drawn while the staged startup was still running proves
+// nothing about a project the editor has not read, so it cannot release a request that is waiting to be
+// answered about that project. Asserted for EVERY kind of outstanding work rather than for the startup
+// alone: a scene load in flight makes an answer about the scene's entities just as wrong.
+TEST( ControlOrdering, AFrameDrawnBeforeTheEditorIsUpCannotReleaseAParkedRequest )
+{
+    for ( std::size_t i = 0; i < static_cast<std::size_t>( PendingWork::Count ); ++i )
+    {
+        FrameGate gate;
+        gate.ArmForReadiness( 0 );
+
+        const EditorQuiescence busy = Busy( static_cast<PendingWork>( i ) );
+        EXPECT_EQ( gate.ObserveFramePresented( 0, busy ), GateVerdict::Waiting ) << kPendingWorkNames[i];
+        EXPECT_EQ( gate.Holding(), GateSubject::Readiness ) << kPendingWorkNames[i];
+
+        // ...and the very next settled frame does release it, so the wait is a wait and not a refusal.
+        EXPECT_EQ( gate.ObserveFramePresented( 1, Settled() ), GateVerdict::Discharged ) << kPendingWorkNames[i];
+    }
+}
+
+// The staged boot runs ONE STAGE PER FRAME, so a boot is as many frames as it has stages -- eight here --
+// whether those frames cost three seconds or five minutes. This is the assertion that says the frame budget
+// is the right unit: a whole boot's worth of frames, thirty times over, still leaves the request parked
+// rather than refused.
+TEST( ControlOrdering, AReadinessWaitOutlastsAWholeBootWorthOfFrames )
+{
+    FrameGate gate;
+    gate.ArmForReadiness( 0 );
+
+    const EditorQuiescence booting = Busy( PendingWork::StartupLoading );
+    for ( uint32_t frame = 0; frame < 200; ++frame )
+        ASSERT_EQ( gate.ObserveFramePresented( frame, booting ), GateVerdict::Waiting ) << "gave up at " << frame;
+
+    EXPECT_EQ( gate.ObserveFramePresented( 200, Settled() ), GateVerdict::Discharged );
+}
+
+// An editor that never comes up refuses, and the refusal is NOT the settle timeout's. The two are at
+// opposite ends of the request: this one means the command never ran, so nothing in the editor changed; the
+// other means it ran and the reply cannot vouch for the picture. A client told the wrong one either retries
+// something that already happened or gives up on something that never did.
+TEST( ControlOrdering, AnEditorThatNeverComesUpRefusesSayingTheRequestNeverRan )
+{
+    FrameGate gate;
+    gate.ArmForReadiness( 0 );
+
+    const EditorQuiescence stuck = Busy( PendingWork::StartupLoading );
+    for ( uint32_t frame = 0; frame + 1 < FrameGate::kMaxSettleFrames; ++frame )
+        ASSERT_EQ( gate.ObserveFramePresented( frame, stuck ), GateVerdict::Waiting );
+
+    EXPECT_EQ( gate.ObserveFramePresented( FrameGate::kMaxSettleFrames - 1, stuck ), GateVerdict::TimedOut );
+    EXPECT_EQ( gate.Holding(), GateSubject::Nothing );
+
+    const std::string message = DescribeReadinessTimeout( stuck, FrameGate::kMaxSettleFrames );
+    EXPECT_NE( message.find( "NOT run" ), std::string::npos );
+    EXPECT_NE( message.find( kPendingWorkNames[static_cast<std::size_t>( PendingWork::StartupLoading )] ),
+               std::string::npos );
+    // The client is told where the same census can be read at any moment, so "wait and see" is a thing it
+    // can actually do rather than a thing it has to guess a duration for.
+    EXPECT_NE( message.find( "state" ), std::string::npos );
+
+    // ...and it is not the OTHER refusal wearing a new coat. Two messages that had drifted into one would
+    // be exactly the confusion this pair exists to prevent.
+    EXPECT_NE( message, DescribeSettleTimeout( stuck, FrameGate::kMaxSettleFrames ) );
+}
+
+// Same self-contradiction check the settle timeout gets: a readiness refusal against a settled census means
+// the gate and the census disagree, which is a defect in the channel and not a fact about the editor.
+TEST( ControlOrdering, AReadinessTimeoutWithNothingOutstandingBlamesTheChannel )
+{
+    EXPECT_NE( DescribeReadinessTimeout( Settled(), 240 ).find( "defect in the channel" ), std::string::npos );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 7. The peek and the verdict agree.
 // ---------------------------------------------------------------------------------------------------
 
 // A capture of the composited frame has to be RECORDED while that frame is still being built: a swapchain
