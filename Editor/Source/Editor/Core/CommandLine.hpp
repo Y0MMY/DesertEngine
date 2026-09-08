@@ -324,6 +324,32 @@ namespace Desert::Editor
     }
 
     /**
+     * @brief IS NOBODY SITTING AT THIS EDITOR? — asked once, here, and answered for every consequence.
+     *
+     * THREE PLACES USED TO ASK `shot.Active()` AND MEAN THIS INSTEAD, and their own comments say so: the
+     * recent-projects registry ("those runs happen in agent worktrees that are reclaimed within the hour,
+     * and each one used to file itself at the top of the developer's list"), the engine-install registry
+     * ("reclaiming it a day later would leave the launcher offering to start something that is gone") and
+     * the project tile written on exit ("the picture would be of a scene nobody chose, written into a
+     * project nobody will open"). Not one of those sentences is about capture. Every one of them is about
+     * a session a MACHINE drove.
+     *
+     * WHICH MEANT THE GUARD MISSED THE DOOR THAT REPLACED THE ONE IT WATCHES. The control channel exists
+     * so that an unattended run does not need `--shot` at all — it takes its pictures over the socket —
+     * and such a run therefore filed the throwaway worktree in the developer's recent-projects list,
+     * registered it as an installed engine, and overwrote the project's tile with a picture of whatever
+     * happened to be on screen. The three lines were written for exactly that and could not see it.
+     *
+     * A6-1 point 5: a capture flag must not be the switch for things that are not capture. Named once,
+     * taken as VALUES so a suite can drive it, and deliberately NOT a fourth thing to remember on the
+     * command line — a session is unattended because of how it was started, not because it said so.
+     */
+    [[nodiscard]] inline bool IsUnattendedSession( const ShotOptions& shot, bool controlChannelRequested )
+    {
+        return shot.Active() || controlChannelRequested;
+    }
+
+    /**
      * @brief The one capture precondition that needs the disk, written so it can be tested WITHOUT one:
      *        given the resolved options and whether the `--scene` file was found, either the run may go on
      *        or it must stop with a named reason.

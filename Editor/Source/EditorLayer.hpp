@@ -131,6 +131,18 @@ namespace Desert::Editor
         void SampleFrameQuiescence();
         // Runs one request against the live editor. Never throws, always answers.
         [[nodiscard]] Control::Response ExecuteControlRequest( const Control::Request& request );
+        // The `set` for the channel's second subject — the editor's own view. See
+        // Editor/Core/ViewportCameraProperties.hpp for why a camera pose is a property write and not a
+        // palette command.
+        [[nodiscard]] Control::Response SetViewportCameraProperty( const Control::Request& request );
+        // The active view IF it is the editor's fly camera; null in Play, where the scene's own
+        // CameraComponent drives. NoEditorCameraReason() is the refusal that goes with the null.
+        [[nodiscard]] ::Desert::Core::EditorCamera* ActiveEditorCamera() const;
+        [[nodiscard]] std::string                   NoEditorCameraReason() const;
+        // THE ONE PLACEMENT: `--camera`/`--look` and the control channel both land here, through the
+        // editor's own view-axis-gizmo and F-focus gestures. Two copies would drift.
+        static void PlaceEditorCamera( ::Desert::Core::EditorCamera& camera, const glm::vec3& position,
+                                       const glm::vec3& forward );
         // Everything ControlState needs, read off this layer in one pass.
         [[nodiscard]] Control::EditorSnapshot TakeEditorSnapshot() const;
         // CAPTURING THE COMPOSITED FRAME, in two halves, because a swapchain image may only be touched

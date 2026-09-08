@@ -305,7 +305,7 @@ namespace Desert::Editor::Control
      * census that quietly listed only the writable rows would tell a client that a texture slot is not
      * declared by the shader, which is a different fact with a different fix.
      */
-    [[nodiscard]] inline rfl::Generic::Object PropertiesToJson( const std::string&                   document,
+    [[nodiscard]] inline rfl::Generic::Object PropertiesToJson( const std::string&                   subject,
                                                                 const std::vector<EditableProperty>& properties )
     {
         using namespace StateDetail;
@@ -350,10 +350,15 @@ namespace Desert::Editor::Control
         }
 
         rfl::Generic::Object payload;
-        // Named, because "the focused document" moves. A client that asked for properties and then set one
-        // has to be able to see WHICH document answered, or a focus change between the two requests is
-        // invisible in both replies.
-        payload["document"]   = Str( document );
+        // NAMED "subject" AND NOT "document", and the rename is not cosmetic. The census answers for two
+        // kinds of thing now — the focused document, and the editor's own view — so a field called
+        // `document` carrying the word "viewport" would be a label asserting something the value denies,
+        // which is a shape this project has found nine times and stopped tolerating.
+        //
+        // Named at all, because BOTH subjects move: the focus changes, and so does whether the editor's
+        // camera is the one driving. A client that asked for properties and then set one has to be able to
+        // see WHICH thing answered, or a change between the two requests is invisible in both replies.
+        payload["subject"]    = Str( subject );
         payload["properties"] = rfl::Generic( entries );
         return payload;
     }

@@ -62,18 +62,26 @@ std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char**
 
     const Desert::Editor::CommandLineOptions options = parsed.ExtractValue();
 
+    // IS ANYBODY SITTING AT THIS EDITOR? Asked ONCE, and every consequence below reads this rather than
+    // guessing from a flag. It used to be spelled `options.Shot.Active()` in three places whose own
+    // comments were all about unattended runs and none about capture — so a control-channel run, which is
+    // the unattended path that no longer needs `--shot` at all, escaped every one of them and filed a
+    // throwaway worktree in the developer's registries. See CommandLine.hpp::IsUnattendedSession.
+    const bool unattended =
+         Desert::Editor::IsUnattendedSession( options.Shot, !options.ControlSocket.empty() );
+
     // The editor is PROJECT-DRIVEN: `--project <path/to/.deproj>` is REQUIRED. Picking/creating projects
     // is the Project Hub's job (Tools/ProjectHub, scripts/MacOS/RunProjectHub.sh) — the editor itself
     // never shows a chooser. Opening the project also remaps every engine content path into the project
     // folder, so it must happen BEFORE anything engine-side spins up.
     if ( !options.Project.empty() )
     {
-        // A headless capture run stays OUT of the recent-projects registry. Those runs happen in
-        // agent worktrees that are reclaimed within the hour, and each one used to file itself at
-        // the top of the developer's list — which is why the live registry on this machine is
-        // mostly dead paths, and why the launcher needs an "unopenable entry" state at all.
-        const auto record = options.Shot.Active() ? Desert::Editor::ProjectContext::RecordInRecent::No
-                                                  : Desert::Editor::ProjectContext::RecordInRecent::Yes;
+        // An UNATTENDED run stays OUT of the recent-projects registry. Those runs happen in agent
+        // worktrees that are reclaimed within the hour, and each one used to file itself at the top
+        // of the developer's list — which is why the live registry on this machine is mostly dead
+        // paths, and why the launcher needs an "unopenable entry" state at all.
+        const auto record = unattended ? Desert::Editor::ProjectContext::RecordInRecent::No
+                                       : Desert::Editor::ProjectContext::RecordInRecent::Yes;
         if ( !Desert::Editor::ProjectContext::Open( options.Project, record ) )
         {
             std::fprintf( stderr, "Could not open project '%s' (missing or corrupt .deproj).\n",
@@ -84,10 +92,10 @@ std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char**
 
     // Where this engine is, written down for the launcher — which after L3 has no DESERT_ROOT of
     // its own and no other way to find an engine. Skipped for the same runs the recent list skips:
-    // a `--shot` run inside a worktree would otherwise register that worktree as an installed
+    // an unattended run inside a worktree would otherwise register that worktree as an installed
     // engine, and reclaiming it a day later would leave the launcher offering to start something
     // that is gone.
-    if ( !options.Shot.Active() )
+    if ( !unattended )
     {
         const char* engineRoot = std::getenv( "DESERT_ROOT" );
         if ( const auto registered = Desert::Project::RegisterThisEngine(

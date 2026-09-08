@@ -94,6 +94,7 @@
 #include "Editor/Panels/Animation/AnimLayersPanel.hpp"
 #include "Editor/Core/ToastManager.hpp"
 #include "Editor/Core/OpenableAssets.hpp"
+#include "Editor/Core/ViewportCameraProperties.hpp"
 #include "Editor/Core/SubjectEditorRegistry.hpp"
 #include "Editor/Core/SubjectOpenRequest.hpp"
 
@@ -1147,14 +1148,14 @@ namespace Desert::Editor
         if ( auto& shot = ShotOptions::Get(); shot.Active() && shot.HasCamera && !m_SceneLoadRequested &&
                                               !StartupLoading() && ( !m_ShotCameraPlaced || shot.HasMotion() ) )
         {
-            if ( auto* cam = dynamic_cast<::Desert::Core::EditorCamera*>( m_MainScene->GetActiveCamera().get() ) )
+            if ( ::Desert::Core::EditorCamera* cam = ActiveEditorCamera() )
             {
-                const ShotCamera view    = shot.CameraAt( shot.Parameter( m_ShotFrame ) );
-                const glm::vec3  forward = glm::normalize( view.Forward );
-                cam->SnapToDirection( forward );
-                // Focus keeps the orientation and re-frames, so aiming at a point one framing distance
-                // ahead lands the camera exactly on the position asked for.
-                cam->Focus( view.Position + forward * 500.0f, 500.0f );
+                // THE SAME PLACEMENT THE CONTROL CHANNEL USES. It used to be spelled out here, with the
+                // framing distance written twice on one line as a bare 500.0f — and it was the ONLY way to
+                // place the camera at all, so a developer who wanted a viewpoint and no capture had to
+                // launch with `--shot --shot-frames 1000000` to reach it. See ViewportCameraProperties.hpp.
+                const ShotCamera view = shot.CameraAt( shot.Parameter( m_ShotFrame ) );
+                PlaceEditorCamera( *cam, view.Position, view.Forward );
                 cam->SetInputEnabled( false ); // nothing may nudge it between here and the capture
             }
             m_ShotCameraPlaced = true;
@@ -1678,13 +1679,27 @@ namespace Desert::Editor
 
             case Control::Op::Properties:
             {
+                if ( request.Whose == Control::Subject::Viewport )
+                {
+                    ::Desert::Core::EditorCamera* camera = ActiveEditorCamera();
+                    if ( !camera )
+                        return Control::Response::Failure( request.Id, NoEditorCameraReason() );
+
+                    return Control::Response::Success(
+                         request.Id,
+                         Control::PropertiesToJson(
+                              Control::kSubjects[static_cast<std::size_t>( Control::Subject::Viewport )].Name,
+                              DescribeViewportCamera( camera->GetPosition(), camera->GetDirection() ) ) );
+                }
+
                 ISubjectDocument* focused = m_Documents.Find( m_FocusedDocument );
                 if ( !focused )
                 {
                     return Control::Response::Failure(
                          request.Id,
                          "no document has the focus, so there is nothing whose properties could be listed. "
-                         "Open one — 'commands' offers an entry per openable asset under the group 'Open'." );
+                         "Open one — 'commands' offers an entry per openable asset under the group 'Open'. "
+                         "The editor's own view is a subject of its own: ask with subject 'viewport'." );
                 }
                 return Control::Response::Success(
                      request.Id, Control::PropertiesToJson( DocumentDisplayName( focused->GetName() ),
@@ -1693,6 +1708,9 @@ namespace Desert::Editor
 
             case Control::Op::Set:
             {
+                if ( request.Whose == Control::Subject::Viewport )
+                    return SetViewportCameraProperty( request );
+
                 // THE FOCUSED DOCUMENT AND NO OTHER. A property named without a document would have to be
                 // searched for across every open window, and the first match would win — which is a
                 // different document from the one the person or the capture is looking at, on any frame
@@ -1740,6 +1758,77 @@ namespace Desert::Editor
         return Control::Response::Failure( request.Id,
                                            "this operation parsed but has no implementation; that is a "
                                            "defect in the control channel." );
+    }
+
+    // ── THE EDITOR'S OWN VIEW, AS SOMETHING THE CHANNEL CAN ADDRESS ────────────────────────────────────
+    //
+    // The scene's active camera, IF it is the editor's fly camera. Null in Play, where the view belongs to
+    // the scene's own CameraComponent — and null is the honest answer there rather than a pinned override,
+    // because "the editor camera" is not what is being looked through.
+
+    ::Desert::Core::EditorCamera* EditorLayer::ActiveEditorCamera() const
+    {
+        if ( !m_MainScene )
+            return nullptr;
+        return dynamic_cast<::Desert::Core::EditorCamera*>( m_MainScene->GetActiveCamera().get() );
+    }
+
+    std::string EditorLayer::NoEditorCameraReason() const
+    {
+        if ( !m_MainScene )
+            return "there is no scene, so there is no view to address.";
+        return "the active view is not the editor's fly camera — the scene is in Play and its own "
+               "CameraComponent is driving. Leave Play ('Action' / 'Stop' in the palette) and ask again; "
+               "moving the editor camera now would change a view nobody is looking through.";
+    }
+
+    // THE ONE PLACEMENT. Both the `--camera`/`--look` capture path and the control channel's
+    // `set Camera.Position` land here, which is the rule the protocol states for a property write: the
+    // value goes into the same setter the widget calls, so there is one route into the camera and two ways
+    // to reach it. Two copies of this would drift the day one of them learned about roll.
+    //
+    // SnapToDirection + Focus are the EDITOR'S OWN gestures — the clickable view-axis gizmo and F-focus —
+    // and that is what makes this the same path a person's hands take rather than a private back door.
+    // Focus backs the camera off along the current view direction by the framing distance, so aiming one
+    // framing distance ahead is what lands it exactly on the position asked for; the two uses of that
+    // distance are one named constant for that reason.
+    void EditorLayer::PlaceEditorCamera( ::Desert::Core::EditorCamera& camera, const glm::vec3& position,
+                                         const glm::vec3& forward )
+    {
+        camera.SnapToDirection( glm::normalize( forward ) );
+        camera.Focus( ViewportCameraFocalPoint( position, forward ), kViewportCameraFramingDistance );
+    }
+
+    Control::Response EditorLayer::SetViewportCameraProperty( const Control::Request& request )
+    {
+        ::Desert::Core::EditorCamera* camera = ActiveEditorCamera();
+        if ( !camera )
+            return Control::Response::Failure( request.Id, NoEditorCameraReason() );
+
+        const auto which = ValidateViewportCameraWrite( request.Property, request.Value );
+        if ( !which )
+            return Control::Response::Failure( request.Id, which.GetError() );
+
+        // THE OTHER HALF OF THE POSE IS READ BACK FROM THE CAMERA, not remembered here. A client that sets
+        // only the direction means "look that way from where you are", and a copy of the position kept on
+        // this side would be the second answer to where the camera is — wrong the first time a person
+        // dragged it.
+        const glm::vec3 position = ( which.GetValue() == ViewportCameraWrite::Position )
+                                        ? glm::vec3( request.Value[0], request.Value[1], request.Value[2] )
+                                        : camera->GetPosition();
+        const glm::vec3 forward = ( which.GetValue() == ViewportCameraWrite::Direction )
+                                       ? glm::vec3( request.Value[0], request.Value[1], request.Value[2] )
+                                       : camera->GetDirection();
+
+        PlaceEditorCamera( *camera, position, forward );
+
+        // INPUT IS NOT DISABLED, and the difference from the capture path is deliberate. `--shot` turns it
+        // off because nothing may nudge the camera between the placement and the readback, and there is no
+        // one at the keyboard anyway. A channel client may well be driving an editor a person is also
+        // sitting at, and taking their camera away for the rest of the session would be a side effect they
+        // never asked for and could not undo. The ordering guarantee already covers the capture case: the
+        // reply is released only after a frame rendered from this pose.
+        return Control::Response::Success( request.Id );
     }
 
     Control::EditorSnapshot EditorLayer::TakeEditorSnapshot() const
@@ -6121,13 +6210,17 @@ namespace Desert::Editor
         // further down there is a WaitDeviceIdle and the release of exactly the GPU objects this
         // readback needs.
         //
-        // Not on a headless capture run: those open scratch projects in worktrees, and the picture
-        // would be of a scene nobody chose, written into a project nobody will open. Same rule, and
-        // the same reason, as staying out of the recent-projects registry.
+        // Not on an UNATTENDED run: those open scratch projects in worktrees, and the picture would
+        // be of a scene nobody chose, written into a project nobody will open. Same rule, and the
+        // same reason, as staying out of the recent-projects registry — and the same correction:
+        // this asked `shot.Active()` and therefore missed every control-channel session, which is
+        // the unattended path that no longer needs a capture flag at all. See
+        // Editor/Core/CommandLine.hpp::IsUnattendedSession.
         //
         // A failure is logged and nothing else. Refusing to shut down because a picture could not
         // be written would be the tail wagging the dog.
-        if ( !Editor::ShotOptions::Get().Active() )
+        if ( !Editor::IsUnattendedSession( Editor::ShotOptions::Get(),
+                                           Control::ControlChannelOptions::Get().Requested() ) )
             if ( const auto thumbnail = WriteProjectThumbnail(); !thumbnail.IsSuccess() )
                 LOG_WARN( "[Project] the tile thumbnail was not written on exit: {}", thumbnail.GetError() );
 

@@ -148,6 +148,54 @@ namespace Desert::Editor::Control
         return op == Op::ShotWindow || op == Op::ShotViewport;
     }
 
+    /**
+     * @brief WHOSE PROPERTIES `properties` AND `set` ARE ABOUT.
+     *
+     * A CLOSED SET OF TWO, and the second one is A6-1's. The category was written for the focused document
+     * and that stays the default, so every client that predates this sends nothing and gets what it always
+     * got. What it could not reach is the EDITOR'S OWN VIEW: placing the camera was wired to `--camera` /
+     * `--look`, which are read only inside `shot.Active()`, so a developer who wanted the camera somewhere
+     * and had no intention of taking a `--shot` had to launch with a fictitious `--shot --shot-frames
+     * 1000000` to unlock it. The mandatory step of a proof was being done by the flag family this channel
+     * replaced.
+     *
+     * A SUBJECT AND NOT AN OPERATION, because it is the same request: same census type, same refusals,
+     * same JSON. Two operations would be two vocabularies for "read a value and write it back", and the
+     * one nobody remembers falls behind — which is this codebase's most-paid-for defect shape.
+     *
+     * NOT A FREE STRING either. An unknown subject is refused NAMING the known ones, for the reason a
+     * section is (ControlState.hpp): a subject quietly ignored would answer about the focused document
+     * while the client believed it had addressed the viewport, and both answers look exactly alike.
+     */
+    enum class Subject
+    {
+        Document, ///< the focused document's own values — the default, and what every older client means
+        Viewport, ///< the editor's view: where the camera is and which way it looks
+    };
+
+    struct SubjectSpec
+    {
+        const char* Name;
+        Subject     Which;
+    };
+
+    inline constexpr SubjectSpec kSubjects[] = {
+         { "document", Subject::Document },
+         { "viewport", Subject::Viewport },
+    };
+
+    [[nodiscard]] inline std::string KnownSubjectList()
+    {
+        std::string list;
+        for ( const SubjectSpec& spec : kSubjects )
+        {
+            if ( !list.empty() )
+                list += ", ";
+            list += spec.Name;
+        }
+        return list;
+    }
+
     struct Request
     {
         /// Echoed in the response. A client that pipelines needs to know which answer is whose, and an id
@@ -160,7 +208,11 @@ namespace Desert::Editor::Control
         std::string Group;
         std::string Label;
 
-        /// Op::Set — the property of the focused document, addressed by the name its declaration gives it
+        /// Op::Properties / Op::Set — whose values. Absent means the focused document, which is what the
+        /// category has always meant and what every client written before the viewport existed sends.
+        Subject Whose = Subject::Document;
+
+        /// Op::Set — the property of the subject, addressed by the name its declaration gives it
         /// (not by its label: two properties may display the same words).
         std::string Property;
 
@@ -360,6 +412,35 @@ namespace Desert::Editor::Control
         Request request;
         request.Id        = ReadInt( fields, "id", 0 );
         request.Operation = spec->Operation;
+
+        // THE SUBJECT, FOR THE TWO OPERATIONS THAT HAVE ONE. Parsed before the per-operation switch
+        // because an unknown subject must be refused whatever else the request got right — a request that
+        // named "viewpoint" and was answered about the focused document would be answered wrongly and
+        // successfully, and the two replies are indistinguishable.
+        if ( spec->Operation == Op::Properties || spec->Operation == Op::Set )
+        {
+            const std::string subjectName = ReadString( fields, "subject" );
+            if ( !subjectName.empty() )
+            {
+                const SubjectSpec* subject = nullptr;
+                for ( const SubjectSpec& candidate : kSubjects )
+                {
+                    if ( subjectName == candidate.Name )
+                    {
+                        subject = &candidate;
+                        break;
+                    }
+                }
+
+                if ( subject == nullptr )
+                {
+                    return Common::MakeFormattedError<Request>(
+                         "'{}' is not something this editor has properties for. Known subjects: {}.",
+                         subjectName, KnownSubjectList() );
+                }
+                request.Whose = subject->Which;
+            }
+        }
 
         switch ( spec->Operation )
         {
