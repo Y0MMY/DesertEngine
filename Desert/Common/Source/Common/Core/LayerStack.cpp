@@ -4,32 +4,13 @@
 
 namespace Common
 {
-	LayerStack::LayerStack()
-	{
+    Layer* LayerStack::PushLayer( std::unique_ptr<Layer> layer )
+    {
+        if ( !layer )
+            return nullptr;
 
-	}
-
-	LayerStack::~LayerStack()
-	{
-
-	}
-
-	void LayerStack::PushLayer(Layer* layer)
-	{
-		LOG_INFO("[Layer] Adding Layer {}", layer->GetName());
-		m_Layers.push_back(layer);
-	}
-
-	void LayerStack::PopLayer(Layer* layer)
-	{
-		auto it = m_Layers.begin();
-		while (it != m_Layers.end()) {
-			if (*it == layer)
-			{
-				m_Layers.erase(it);
-				break;
-			}
-			++it;
-		}
-	}
-}
+        LOG_INFO( "[Layer] Adding Layer {}", layer->GetName() );
+        m_Layers.push_back( std::move( layer ) );
+        return m_Layers.back().get();
+    }
+} // namespace Common

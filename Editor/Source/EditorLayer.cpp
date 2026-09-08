@@ -251,18 +251,15 @@ namespace Desert::Editor
             // for a panel that merely starts visible, pinning it open forever.
             if ( relevant && !visible && !panel->Pinned() )
             {
-                visible = true;
-                m_ContextualShown.insert( panel.get() );
+                visible      = true;
                 m_FocusPanel = panel->GetName(); // bring it forward in whatever dock it lives
             }
             else if ( !relevant && visible && !panel->Pinned() )
             {
                 visible = false;
-                m_ContextualShown.erase( panel.get() );
             }
             else if ( !visible )
             {
-                m_ContextualShown.erase( panel.get() );
                 panel->Pinned() = false; // closed by hand -> stop pinning it open
             }
         }
@@ -2308,7 +2305,6 @@ namespace Desert::Editor
         Graphic::Renderer::GetInstance().WaitDeviceIdle();
 
         IPanel* panel = doc->Viewport;
-        m_ContextualShown.erase( panel );
         m_Panels.Remove( panel );
         doc->Viewport = nullptr;
 
@@ -2653,7 +2649,6 @@ namespace Desert::Editor
             m_DocumentWell.NoteClosed( *closed );
 
             const std::string name = closed->GetName();
-            m_ContextualShown.erase( closed.get() );
             m_OpenDocuments.ForgetDrawHistory( pending.Subject );
             if ( m_FocusedDocument == pending.Subject )
                 m_FocusedDocument = SubjectId{};
@@ -6737,6 +6732,13 @@ namespace Desert::Editor
         // left to ~EditorLayer, which runs after the layer stack has moved on.
         (void)m_OpenDocuments.ReleaseAll();
         m_Panels.Clear();
+        // EVERY ALIAS OF A PANEL DIES WITH THE PANEL, and this line is the half of that CloseSceneView
+        // already had and OnDetach did not. `m_Panels.Clear()` destroys every panel while
+        // m_FileExplorerPanel and every SceneDocument::Viewport still name one; nothing between here and
+        // the end of OnDetach reads them today, so this was latent rather than live — and "nothing reads
+        // it today" is the weakest guarantee in this audit, because it is about the code that exists
+        // rather than about the code. A8-2.
+        m_FileExplorerPanel = nullptr;
         // Reported and not returned even though OnDetach has a channel: everything below this line still
         // has to run, and an early return would leave the extra documents and their render slots alive.
         if ( const auto detached = m_ImGuiLayer->OnDetach(); !detached.IsSuccess() )
@@ -6749,6 +6751,7 @@ namespace Desert::Editor
         // the layer stack has moved on and would destroy renderers at an unspecified point relative to it.
         for ( auto& doc : m_ExtraScenes )
         {
+            doc->Viewport = nullptr; // the panel went with m_Panels above; see the note there
             doc->Registry.reset();
             doc->Scene.reset();
             doc->Renderer.reset();

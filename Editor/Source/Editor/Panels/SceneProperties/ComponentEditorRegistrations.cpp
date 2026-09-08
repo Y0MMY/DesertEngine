@@ -1005,7 +1005,6 @@ namespace Desert::Editor
             {
                 const float n = static_cast<float>( c.InstanceTransforms.size() );
                 c.InstanceTransforms.push_back( glm::translate( glm::mat4( 1.0f ), glm::vec3( n * 2.0f, 0, 0 ) ) );
-                c.InstancesDirty = true;
             }
             ::ImGui::SameLine();
             if ( ::ImGui::Button( "Add 10x10 Grid" ) )
@@ -1014,13 +1013,11 @@ namespace Desert::Editor
                     for ( int x = 0; x < 10; ++x )
                         c.InstanceTransforms.push_back(
                              glm::translate( glm::mat4( 1.0f ), glm::vec3( x * 2.0f, 0.0f, z * 2.0f ) ) );
-                c.InstancesDirty = true;
             }
             ::ImGui::SameLine();
             if ( ::ImGui::Button( "Clear" ) )
             {
                 c.InstanceTransforms.clear();
-                c.InstancesDirty = true;
             }
         };
         return e;

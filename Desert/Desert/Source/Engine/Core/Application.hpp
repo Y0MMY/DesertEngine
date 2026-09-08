@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include <string>
 #include <optional>
 #include <cstdint>
@@ -56,8 +58,9 @@ namespace Desert::Engine
         virtual void OnCreate()  = 0;
         virtual void OnDestroy() = 0;
 
-        void PushLayer( Common::Layer* layer );
-        void PopLayer( Common::Layer* layer );
+        /// Takes ownership of @p layer and attaches it. `PopLayer` is gone: it was called from nowhere,
+        /// it deleted nothing, and under ownership it would have been a silent destroy (see LayerStack).
+        void PushLayer( std::unique_ptr<Common::Layer> layer );
 
         const auto& GetWindow() const
         {

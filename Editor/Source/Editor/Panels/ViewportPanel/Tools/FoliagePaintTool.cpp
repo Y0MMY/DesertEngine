@@ -112,7 +112,6 @@ namespace Desert::Editor::Tools
                                               return dx * dx + dz * dz <= r2;
                                           } ),
                           xs.end() );
-                ism.InstancesDirty = true;
                 continue;
             }
 
@@ -145,7 +144,6 @@ namespace Desert::Editor::Tools
                 m = glm::scale( m, glm::vec3( scl ) );
                 ism.InstanceTransforms.push_back( m );
             }
-            ism.InstancesDirty = true;
         }
     }
 

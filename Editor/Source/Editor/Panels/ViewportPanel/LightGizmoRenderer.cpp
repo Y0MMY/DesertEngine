@@ -142,7 +142,8 @@ namespace Desert::Editor
                     const ImVec2 center( absoluteX, absoluteY );
                     const ImVec2 handle( windowPos.x + handleScreen.x, windowPos.y + handleScreen.y );
                     if ( DragValueHandle( HandleKind::PointRadius, entity.GetComponent<ECS::UUIDComponent>().UUID,
-                                          center, handle, light.Radius, 1.0f, 100000.0f, "Radius" ) &&
+                                          center, handle, light.Radius, 1.0f, 100000.0f, "Radius",
+                                          &light.Radius ) &&
                          !light.ShowRadius )
                     {
                         // Dragging the radius while the sphere is hidden is editing blind — show it.
@@ -318,7 +319,7 @@ namespace Desert::Editor
                 {
                     const ImVec2 handle( windowPos.x + endScreen.x, windowPos.y + endScreen.y );
                     DragValueHandle( HandleKind::SpotRange, owner, apex, handle, light.Range, 1.0f, 100000.0f,
-                                     "Range" );
+                                     "Range", &light.Range );
                 }
 
                 // Outer cone: the handle rides the cone's rim, and the drag scales tan(angle) — the rim's
@@ -339,9 +340,11 @@ namespace Desert::Editor
                         const ImVec2 handle( windowPos.x + rimScreen.x, windowPos.y + rimScreen.y );
 
                         float tangent = std::tan( glm::radians( outer ) );
+                        // The drag scales `tangent`, a LOCAL; the undo entry addresses the authored
+                        // degrees on the component. Passing `&tangent` here is what the defect was.
                         if ( DragValueHandle( HandleKind::SpotOuterAngle, owner, axisEnd, handle, tangent,
                                               std::tan( glm::radians( 0.5f ) ), std::tan( glm::radians( 89.0f ) ),
-                                              nullptr ) )
+                                              nullptr, &light.OuterConeAngle ) )
                         {
                             light.OuterConeAngle = glm::degrees( std::atan( tangent ) );
                             // The inner cone can never overtake the outer one (that inverts the falloff).
@@ -919,7 +922,7 @@ namespace Desert::Editor
 
     bool LightGizmoRenderer::DragValueHandle( HandleKind kind, const Common::UUID& owner, const ImVec2& center,
                                               const ImVec2& handle, float& value, float minValue, float maxValue,
-                                              const char* tooltip )
+                                              const char* tooltip, float* undoTarget )
     {
         constexpr float kHandleRadius = 5.0f;
         constexpr float kGrabRadius   = 9.0f; // forgiving hit area; the dot itself stays small
@@ -936,11 +939,11 @@ namespace Desert::Editor
         // A drag starts only on a fresh press over the dot, and only when nothing else is grabbed.
         if ( hovered && m_ActiveHandle == HandleKind::None && ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
         {
-            m_ActiveHandle       = kind;
-            m_ActiveHandleOwner  = owner;
-            m_ActiveHandleTarget = &value;
-            m_DragStartValue     = value;
-            m_DragStartDistance  = distance( center, handle );
+            m_ActiveHandle      = kind;
+            m_ActiveHandleOwner = owner;
+            m_DragStartValue    = value;
+            m_DragStartAuthored = undoTarget ? *undoTarget : value;
+            m_DragStartDistance = distance( center, handle );
         }
 
         bool changed = false;
@@ -948,15 +951,14 @@ namespace Desert::Editor
         {
             if ( !ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
             {
-                // One undo entry for the whole drag, not one per frame.
-                if ( m_ActiveHandleTarget && m_DragStartValue != *m_ActiveHandleTarget )
+                // One undo entry for the whole drag, not one per frame. Addressed through THIS frame's
+                // undoTarget, never a pointer kept since mouse-down.
+                if ( undoTarget && m_DragStartAuthored != *undoTarget )
                 {
-                    const float oldValue = m_DragStartValue;
-                    CommandHistory::Get().Push( m_ActiveHandleTarget, &oldValue, m_ActiveHandleTarget,
-                                                sizeof( float ) );
+                    const float oldValue = m_DragStartAuthored;
+                    CommandHistory::Get().Push( undoTarget, &oldValue, undoTarget, sizeof( float ) );
                 }
-                m_ActiveHandle       = HandleKind::None;
-                m_ActiveHandleTarget = nullptr;
+                m_ActiveHandle = HandleKind::None;
             }
             else if ( m_DragStartDistance > 2.0f )
             {

@@ -47,7 +47,6 @@ namespace Desert::Runtime
         volume->RecordDeviceBytes( data.Voxels.size() );
 
         m_Volumes[handle] = Entry{ std::move( volume ), asset->GetRevision() };
-        ++m_Generation;
 
         LOG_INFO( "[Clouds] Noise volume '{}' uploaded: {}^3 RGBA8, {:.2f} MiB on the device.",
                   asset->GetMetadata().Filepath.string(), data.Params.Resolution,
@@ -93,6 +92,5 @@ namespace Desert::Runtime
     {
         m_Volumes.clear();
         m_Default = Assets::AssetHandle{ 0 };
-        ++m_Generation;
     }
 } // namespace Desert::Runtime
