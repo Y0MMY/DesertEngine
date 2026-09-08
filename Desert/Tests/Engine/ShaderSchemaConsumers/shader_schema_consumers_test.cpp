@@ -355,6 +355,11 @@ namespace
          { "ShaderProgramMeta", "State", kMeshRend, nullptr },
          { "ShaderProgramMeta", "Domain", kMeshRend, nullptr },
          { "ShaderProgramMeta", "PassNames", kShaderSvc, nullptr },
+         // THE AUTHORED CLOUD MEDIUM's body — a program FRAGMENT, compiled INTO the four programs that
+         // sample the cloud field rather than into one of its own (Docs/Clouds/O1_DESIGN.md §12).
+         // ShaderService is the consumer: it recognises a medium at registration, keeps its text, and
+         // hands it to the cloud renderer as the substitution for one virtual include.
+         { "ShaderProgramMeta", "MediumSource", kShaderSvc, nullptr },
 
          // ---- The parser's own result ---------------------------------------------------------------
 
@@ -547,9 +552,11 @@ TEST( ShaderSchemaConsumers, TheDeadCountIsStatedSoAShrinkageIsVisible )
 
     EXPECT_EQ( dead, 1u ) << "the number of shader-schema fields the parser fills and nothing reads has "
                              "changed";
-    // FORTY since O1 added `ShaderParam::Timing` — when an edit to a parameter reaches the picture, read
-    // by the Material Editor's group headings and put on the control channel.
-    EXPECT_EQ( std::size( k_Census ), 40u )
+    // FORTY-ONE since O1-E added `ShaderProgramMeta::MediumSource` — the authored cloud medium's body,
+    // which is a program FRAGMENT rather than a program: ShaderService recognises it at registration and
+    // hands its text to the cloud renderer as one virtual include. (Forty since O1 added
+    // `ShaderParam::Timing`, when an edit to a parameter reaches the picture.)
+    EXPECT_EQ( std::size( k_Census ), 41u )
          << "the shader schema gained or lost a field; the count is quoted so that is a reviewable edit";
 }
 

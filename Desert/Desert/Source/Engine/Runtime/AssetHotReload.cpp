@@ -365,6 +365,19 @@ namespace Desert::Runtime
                 }
             }
 
+            // A VOLUME MEDIUM HAS NO Shader OBJECT TO RELOAD — it is a program FRAGMENT, compiled into
+            // the four programs that sample the cloud field. What it has is TEXT, and the service holds
+            // a copy of it; refreshing that copy is the whole of hot-reloading a medium. The cloud
+            // renderer notices on the next frame, because it compares the variant's content hash rather
+            // than the material's handle, and rebuilds the three pipelines it owns.
+            if ( shaderService->RefreshMediumSource( handle, asset->GetShaderContent() ) )
+            {
+                LOG_INFO( "[HotReload] Volume medium '{}' re-read; the cloud programs recompile against "
+                          "it on the next frame that resolves the material.",
+                          key );
+                continue;
+            }
+
             auto shader = shaderService->Get( handle );
             if ( !shader )
                 continue;

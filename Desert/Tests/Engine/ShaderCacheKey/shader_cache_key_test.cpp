@@ -467,7 +467,19 @@ TEST_F( ShaderRootFixture, SubstitutingTheShippedMediumMovesTheKeyOfTheRealCloud
 
     const uint64_t shipped = ComputeShaderCacheKey( ShaderStage::Compute, source, path );
 
-    const Desert::Core::ShaderVariant authored{ { { "Generated/CloudMedium.glslh", "// an authored medium\n" } } };
+    // THE SUBSTITUTION KEEPS THE FILE'S OWN INCLUDE, and it has to for this test to test what it says.
+    // A body that included nothing would drop Common/CloudMediumDefault.glslh out of the closure, and the
+    // key would then move because a HEADER left the list — which is the assertion three tests above,
+    // not this one. MEASURED: with the shorter body, deleting the variant from the key left this test
+    // GREEN. With the closure held equal, the variant's hash is the only thing that can separate the two.
+    const Desert::Core::ShaderVariant authored{
+         { { "Generated/CloudMedium.glslh",
+             "#include <Common/CloudMediumDefault.glslh>\n// an authored medium\n" } } };
+
+    EXPECT_EQ( CollectShaderIncludes( source, path ).size(),
+               CollectShaderIncludes( source, path, authored ).size() )
+         << "the substituted body's include closure differs from the file's, so the assertion below "
+            "would pass on the closure rather than on the variant";
 
     EXPECT_NE( shipped, ComputeShaderCacheKey( ShaderStage::Compute, source, path, authored ) );
 }

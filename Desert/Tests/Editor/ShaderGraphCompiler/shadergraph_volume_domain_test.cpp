@@ -116,6 +116,89 @@ namespace
     }
 } // namespace
 
+// The text a starter Volume graph compiles to, on stdout. Disabled because it asserts nothing; run it
+// with
+//   ./ShaderGraphCompiler --gtest_also_run_disabled_tests --gtest_filter=*DumpNeutralMedium*
+// to obtain a medium that can be dropped on a real cloud material and shot — which is how the
+// byte-for-byte half of this mechanism's acceptance is taken, and it needs the EMITTER's own output
+// rather than a hand-written copy of it.
+TEST( ShaderGraphVolumeDomain, DISABLED_DumpNeutralMedium )
+{
+    const auto compiled = SG::CompileToDShader( EmptyVolumeDoc() );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    std::printf( "%s", compiled.GetValue().c_str() );
+}
+
+// The same, for a graph that actually WIRES something: the shipped density scaled by a material
+// parameter, a warm albedo built from the sample's own depth, and an emission. Its purpose is to be
+// handed to shaderc — a text assertion cannot tell whether generated GLSL COMPILES, and the emitter is
+// the only thing between an artist's canvas and a shader that does not.
+//   ./ShaderGraphCompiler --gtest_also_run_disabled_tests --gtest_filter=*DumpWiredMedium*
+TEST( ShaderGraphVolumeDomain, DISABLED_DumpWiredMedium )
+{
+    SG::Document doc = EmptyVolumeDoc();
+
+    auto           defaults = SG::MakeNode( doc, "DefaultDensity" );
+    const uint64_t defOut   = defaults.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( defaults ) );
+
+    auto strength         = SG::MakeNode( doc, "CloudParam" );
+    strength.ParamName    = "DetailStrength";
+    const uint64_t strOut = strength.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( strength ) );
+
+    auto           scaled  = SG::MakeNode( doc, "MultiplyFloat" );
+    const uint64_t scaledA = scaled.Inputs[0].Id;
+    const uint64_t scaledB = scaled.Inputs[1].Id;
+    const uint64_t scaledO = scaled.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( scaled ) );
+
+    auto warm            = SG::MakeNode( doc, "Vec3Const" );
+    warm.Value           = { 1.0f, 0.85f, 0.7f, 0.0f };
+    const uint64_t warmO = warm.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( warm ) );
+
+    auto           layer  = SG::MakeNode( doc, "LayerAlbedo" );
+    const uint64_t layerO = layer.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( layer ) );
+
+    auto           tinted  = SG::MakeNode( doc, "MultiplyVec3" );
+    const uint64_t tintedA = tinted.Inputs[0].Id;
+    const uint64_t tintedB = tinted.Inputs[1].Id;
+    const uint64_t tintedO = tinted.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( tinted ) );
+
+    auto           sample  = SG::MakeNode( doc, "CloudSample" );
+    const uint64_t profile = sample.Outputs[2].Id; // Profile
+    doc.Nodes.push_back( std::move( sample ) );
+
+    auto           glow  = SG::MakeNode( doc, "ScaleVec3" );
+    const uint64_t glowA = glow.Inputs[0].Id;
+    const uint64_t glowB = glow.Inputs[1].Id;
+    const uint64_t glowO = glow.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( glow ) );
+
+    auto emit            = SG::MakeNode( doc, "Vec3Const" );
+    emit.Value           = { 0.2f, 0.05f, 0.0f, 0.0f };
+    const uint64_t emitO = emit.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( emit ) );
+
+    SG::Node& out = NodeOfKind( doc, "VolumeOutput" );
+    doc.Links.push_back( { doc.NextId++, defOut, scaledA } );
+    doc.Links.push_back( { doc.NextId++, strOut, scaledB } );
+    doc.Links.push_back( { doc.NextId++, scaledO, out.Inputs[IndexOfInput( out, "Density" )].Id } );
+    doc.Links.push_back( { doc.NextId++, layerO, tintedA } );
+    doc.Links.push_back( { doc.NextId++, warmO, tintedB } );
+    doc.Links.push_back( { doc.NextId++, tintedO, out.Inputs[IndexOfInput( out, "Albedo" )].Id } );
+    doc.Links.push_back( { doc.NextId++, emitO, glowA } );
+    doc.Links.push_back( { doc.NextId++, profile, glowB } );
+    doc.Links.push_back( { doc.NextId++, glowO, out.Inputs[IndexOfInput( out, "Emissive" )].Id } );
+
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    std::printf( "%s", compiled.GetValue().c_str() );
+}
+
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════
 // THE BAKE/MARCH SPLIT — the teamlead's acceptance condition
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════

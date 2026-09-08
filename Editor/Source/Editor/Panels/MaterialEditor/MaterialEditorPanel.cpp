@@ -1216,11 +1216,12 @@ namespace Desert::Editor
             ImGui::TableNextColumn();
             ImGui::PushItemWidth( -FLT_MIN );
 
-            // Non-texture asset references (CloudType / CloudLayout) — the schema declares the asset
-            // class, the value rides the same name->handle map the textures use. The rows are the ones
-            // the Details panel drew while these were component fields, moved here with the fields (O1):
-            // there is nothing to thumbnail, the files are authored in their own document windows, and an
-            // empty slot MEANS something good in both cases.
+            // Non-texture asset references (CloudType / CloudLayout / the authored Medium) — the schema
+            // declares the asset class, the value rides the same name->handle map the textures use. The
+            // first two are the rows the Details panel drew while these were component fields, moved here
+            // with the fields (O1); the third is a Volume shader graph. All three share the same three
+            // properties: there is nothing to thumbnail, the file is authored in its own window, and an
+            // empty slot MEANS something good rather than something missing.
             if ( p.IsAssetRef() )
             {
                 if ( isInstance )
@@ -1543,15 +1544,28 @@ namespace Desert::Editor
                             continue;
                         // Parsed rather than guessed from the path: "is this a medium" is a property of
                         // the FILE, and a folder convention would let a shader in the wrong directory be
-                        // offered for a slot that cannot use it. The failing parse of a half-saved file
-                        // simply drops it from the list instead of taking the editor down.
+                        // offered for a slot that cannot use it.
                         const auto parsed =
                              ::Desert::Core::Preprocess::DShaderParser::Parse( shader->GetShaderContent() );
-                        if ( !parsed.IsSuccess() || !parsed.GetValue().Meta.IsMediumProgram() )
+
+                        // TWO SKIPS AND THEY ARE NOT THE SAME EVENT, which is what GpuWriteCensus went
+                        // red about and it was right. "This shader is not a medium" is a FILTER — most
+                        // shaders are not, and saying so about each of them would be noise. "This shader
+                        // would not parse" is a REFUSAL: the file is broken, and a broken file that
+                        // simply vanishes from a list looks exactly like a file the artist never saved.
+                        // It is shown, greyed and unpickable, the same way the material shader picker
+                        // shows one that does not compile.
+                        const auto name = shader->GetMetadata().Filepath.stem().string();
+                        if ( !parsed.IsSuccess() )
+                        {
+                            ImGui::TextDisabled( "%s  (does not parse)", name.c_str() );
+                            continue;
+                        }
+                        if ( !parsed.GetValue().Meta.IsMediumProgram() )
                             continue;
 
                         const bool selected = ( static_cast<uint64_t>( h ) == handle );
-                        const auto label    = shader->GetMetadata().Filepath.stem().string();
+                        const auto label    = name;
                         if ( ImGui::Selectable( label.c_str(), selected ) )
                         {
                             data.SetTexture( p.Name, static_cast<uint64_t>( h ) );

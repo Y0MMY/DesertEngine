@@ -3,6 +3,8 @@
 #include <Engine/Assets/Shader/ShaderAsset.hpp>
 #include <Engine/Graphic/Shader.hpp>
 
+#include <unordered_set>
+
 namespace Desert::Runtime
 {
     class ShaderService
@@ -42,12 +44,17 @@ namespace Desert::Runtime
          * edited graph and a changed picture. It is a few kilobytes of text asked for once per frame at
          * most, against a shader compile if it has changed.
          *
-         * @return empty when the handle names nothing, names a shader that is not a medium, or names an
-         *         asset that has expired — each logged with the handle, because "the material points at
-         *         something that is not a medium" is an authoring mistake and must not read as "no
-         *         medium was set".
+         * @return empty when the handle names nothing or names a shader that is not a medium — logged
+         *         once per handle, because "the material points at something that is not a medium" is an
+         *         authoring mistake and must not read as "no medium was set". Not const: it latches
+         *         that warning, and this is asked every frame.
          */
-        std::string MediumSourceOf( const Assets::AssetHandle& handle ) const;
+        std::string MediumSourceOf( const Assets::AssetHandle& handle );
+
+        /// Re-read a medium's body after its file changed on disk. Called by the hot-reload poll, which
+        /// is the only thing that knows a shader asset was re-read.
+        /// @return true when @p content IS a medium, i.e. when the poll has nothing else to do for it.
+        bool RefreshMediumSource( const Assets::AssetHandle& handle, const std::string& content );
 
         /// Recompile every LIVE variant built from @p handle. The hot-reload poll reloads the program it
         /// registered; without this the variants of that same file would keep the code they were built
@@ -56,6 +63,12 @@ namespace Desert::Runtime
         int ReloadVariantsOf( const Assets::AssetHandle& handle );
 
         // All registered shader program names (for the editor's material shader picker).
+        //
+        // A NAME IN HERE DOES NOT PROMISE THAT GetByName RESOLVES IT. A Volume medium owns its name —
+        // it must, or a later shader could claim the same one and the two would fight over it — but it
+        // has no Shader object at all, because it is a program fragment. The picker's own loop already
+        // skips a name that does not resolve (a shader may also fail to compile), which is what makes
+        // this safe; a new caller has to do the same.
         std::vector<std::string> GetAllNames() const;
 
     private:
@@ -76,5 +89,16 @@ namespace Desert::Runtime
         };
         // Keyed "<name>#<16 hex digits of the variant hash>". Weak, for the reason in AcquireVariant.
         std::unordered_map<std::string, VariantEntry> m_Variants;
+
+        // THE BODY OF EVERY REGISTERED Volume MEDIUM, held as TEXT rather than as the asset it came from.
+        // A medium's source is needed continuously — the cloud renderer asks for it every frame — and the
+        // asset eviction sweep unloads a shader asset nothing holds strongly, which emptied it three
+        // seconds into a scene the first time this was written the other way. A few kilobytes per medium
+        // is the whole cost, and it makes the answer independent of when the sweep last ran.
+        std::unordered_map<Assets::AssetHandle, std::string> m_MediumSources;
+
+        /// Handles already reported as naming something that is not a medium, so the refusal is said once
+        /// per handle rather than once per frame.
+        std::unordered_set<uint64_t> m_WarnedNotAMedium;
     };
 } // namespace Desert::Runtime

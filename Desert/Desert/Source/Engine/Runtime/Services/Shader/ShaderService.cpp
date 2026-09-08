@@ -2,9 +2,29 @@
 
 #include <Common/Core/Logger.hpp>
 
-#include <Engine/Core/ShaderCompiler/ShaderPreprocess/ShaderPreprocessor.hpp>
+#include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
 
 #include <format>
+
+namespace
+{
+    /// The `Medium { ... }` body of @p source, or empty when it has none.
+    ///
+    /// THE RESULT-RETURNING PARSER AND NOT ShaderPreprocess::ParseProgramMeta, and the difference is a
+    /// crash. ParseProgramMeta ends in a DESERT_VERIFY on anything that is not DSL text — right for a
+    /// shader the engine is about to compile, fatal for a QUESTION asked about arbitrary content. The
+    /// first version of this asked it once per frame about an asset the eviction sweep had unloaded,
+    /// and an emptied asset is not DSL text: the editor died three seconds after the medium applied.
+    std::string MediumBodyOf( const std::string& source )
+    {
+        if ( source.empty() || !Desert::Core::Preprocess::DShaderParser::IsDShader( source ) )
+            return {};
+        const auto parsed = Desert::Core::Preprocess::DShaderParser::Parse( source );
+        if ( !parsed.IsSuccess() )
+            return {};
+        return parsed.GetValue().Meta.MediumSource;
+    }
+} // namespace
 
 namespace Desert::Runtime
 {
@@ -20,17 +40,22 @@ namespace Desert::Runtime
         // four other programs as the substitution for one of their includes; building a Shader object for
         // it would produce one with no modules, and the honest complaint below ("registered but has no
         // compiled stages — every material using it will not draw") would be a lie about a file that is
-        // working exactly as intended. It is still recorded by name and by handle, because that is how a
-        // material points at it and how the renderer fetches its text.
-        const auto meta = Core::Preprocess::ShaderPreprocess::ParseProgramMeta( shaderAsset->GetShaderContent() );
-        if ( meta.IsMediumProgram() )
+        // working exactly as intended.
+        //
+        // THE TEXT IS COPIED HERE AND THE ASSET IS NOT KEPT, which is the fix for a measured crash. The
+        // first version read the body back out of the asset on every frame, and the asset eviction sweep
+        // unloads a shader asset nothing holds — so three seconds after a medium was applied the source
+        // was empty, and an empty asset is not DSL text. Holding the ASSET instead would have fought the
+        // sweep for the sake of a few kilobytes of text; holding the text is bounded, immune to the
+        // sweep, and re-read by RefreshMediumSource when the file on disk changes.
+        if ( std::string body = MediumBodyOf( shaderAsset->GetShaderContent() ); !body.empty() )
         {
             const auto name         = shaderAsset->GetMetadata().Filepath.stem().string();
             m_NameToHandleMap[name] = shaderAsset->GetMetadata().Handle;
-            m_ShaderAssets[shaderAsset->GetMetadata().Handle] = shaderAsset;
             LOG_INFO( "[ShaderService] '{}' is a Volume medium ({} bytes of authored source); it compiles "
                       "into the programs that sample the cloud field rather than into one of its own.",
-                      name, meta.MediumSource.size() );
+                      name, body.size() );
+            m_MediumSources[shaderAsset->GetMetadata().Handle] = std::move( body );
             return BOOLSUCCESS;
         }
 
@@ -126,6 +151,24 @@ namespace Desert::Runtime
             return nullptr;
         }
 
+        // RE-READ IF THE SWEEP HAS BEEN THROUGH. A registered shader compiles ONCE at startup and never
+        // looks at its asset again, so the asset eviction sweep is free to release the text — and it
+        // does, marking two hundred assets cold as soon as a scene finishes loading. A variant is
+        // compiled LATER, from that same text, and the parser's answer to an empty file is a fatal
+        // engine error. This cost a thumbnail sweep and the whole editor with it, three seconds after a
+        // cloud medium applied, and it is the ordinary idiom besides: the hot-reload poll loads before
+        // it reloads, for the same reason.
+        if ( asset->GetShaderContent().empty() )
+        {
+            if ( const auto loaded = asset->Load(); !loaded )
+            {
+                LOG_ERROR( "[ShaderService] AcquireVariant('{}'): the shader's source had been released "
+                           "and could not be re-read: {}",
+                           name, loaded.GetError() );
+                return nullptr;
+            }
+        }
+
         auto program = Graphic::Shader::Create( asset, variant );
         program->ClaimOwnership( Graphic::ResourceOwner::AssetService, handleIt->second );
         if ( !program->IsCompiled() )
@@ -141,32 +184,42 @@ namespace Desert::Runtime
         return program;
     }
 
-    std::string ShaderService::MediumSourceOf( const Assets::AssetHandle& handle ) const
+    std::string ShaderService::MediumSourceOf( const Assets::AssetHandle& handle )
     {
         if ( handle.IsNull() )
             return {};
 
-        const auto it    = m_ShaderAssets.find( handle );
-        auto       asset = it != m_ShaderAssets.end() ? it->second.lock() : nullptr;
-        if ( !asset )
-        {
-            LOG_ERROR( "[ShaderService] a cloud material names medium shader {} and no such shader asset "
-                       "is registered — the layer will draw the DEFAULT medium.",
-                       static_cast<uint64_t>( handle ) );
-            return {};
-        }
+        if ( const auto it = m_MediumSources.find( handle ); it != m_MediumSources.end() )
+            return it->second;
 
-        auto meta = Core::Preprocess::ShaderPreprocess::ParseProgramMeta( asset->GetShaderContent() );
-        if ( !meta.IsMediumProgram() )
+        // A HANDLE THAT IS NOT A MEDIUM, and the two ways to get there are an unregistered shader and a
+        // Medium slot pointed at an ordinary one. Both draw the shipped medium, which is a picture that
+        // looks exactly like "I forgot to set it" — so it is said, once per handle, with the handle in
+        // it. Once, because this is asked every frame.
+        if ( m_WarnedNotAMedium.insert( static_cast<uint64_t>( handle ) ).second )
         {
-            // Pointing a Medium slot at an ordinary shader is an authoring mistake with a picture that
-            // looks exactly like "I forgot to set it". Named, so it does not.
-            LOG_ERROR( "[ShaderService] '{}' is in a cloud material's Medium slot but declares no Medium "
-                       "block, so it cannot be an authored medium. The layer will draw the DEFAULT one.",
-                       asset->GetMetadata().Filepath.string() );
-            return {};
+            LOG_ERROR( "[ShaderService] a cloud material's Medium slot names shader {}, which is not a "
+                       "registered Volume medium (no `Medium {{ ... }}` block, or not loaded). The layer "
+                       "draws the DEFAULT medium.",
+                       static_cast<uint64_t>( handle ) );
         }
-        return std::move( meta.MediumSource );
+        return {};
+    }
+
+    bool ShaderService::RefreshMediumSource( const Assets::AssetHandle& handle, const std::string& content )
+    {
+        std::string body = MediumBodyOf( content );
+        if ( body.empty() )
+            return false;
+
+        // A file that STOPS being a medium keeps its old body rather than silently reverting the sky to
+        // the engine's: an artist mid-edit has a half-saved file for a moment, and a sky that flickered
+        // back to the default every time they saved would be worse than one frame of stale text. The
+        // empty case above is therefore "not a medium", not "an empty medium" — the parser refuses an
+        // empty Medium block outright, for the same reason.
+        m_MediumSources[handle] = std::move( body );
+        m_WarnedNotAMedium.erase( static_cast<uint64_t>( handle ) );
+        return true;
     }
 
     int ShaderService::ReloadVariantsOf( const Assets::AssetHandle& handle )
@@ -204,6 +257,8 @@ namespace Desert::Runtime
         m_PassShaders.clear();
         m_NameToHandleMap.clear();
         m_ShaderAssets.clear();
+        m_MediumSources.clear();
+        m_WarnedNotAMedium.clear();
         // Only the weak bookkeeping — a variant's modules belong to whoever still holds it, and freeing
         // them from here would leave that holder with a program made of destroyed modules.
         m_Variants.clear();

@@ -33,6 +33,10 @@ namespace Desert::Editor
     {
         namespace SG = ShaderGraph;
 
+        // One colour per pin type, kept as a TABLE — the four rows are meant to be read side by side, and
+        // clang-format 18 splits each of them into two lines the moment one is touched. Fenced for the
+        // same reason the node catalogue in ShaderGraph.cpp is.
+        // clang-format off
         ImU32 PinColor( int type )
         {
             switch ( static_cast<SG::ValueType>( type ) )
@@ -46,6 +50,7 @@ namespace Desert::Editor
             }
             return IM_COL32_WHITE;
         }
+        // clang-format on
 
         std::filesystem::path GraphsDirectory()
         {
