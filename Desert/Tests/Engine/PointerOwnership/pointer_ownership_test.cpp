@@ -121,8 +121,8 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   It was found the only way a blind spot ever is: A8-3 converted eight raw members to co-owned
     //   handles and the total FELL by five instead of holding. The alias list is now derived from the
     //   tree (see DeclaredAliases), not typed.
-    EXPECT_EQ( CountOf( Form::Raw ), 138 );
-    EXPECT_EQ( CountOf( Form::Shared ), 219 );
+    EXPECT_EQ( CountOf( Form::Raw ), 137 );
+    EXPECT_EQ( CountOf( Form::Shared ), 220 );
     EXPECT_EQ( CountOf( Form::Unique ), 40 );
     EXPECT_EQ( CountOf( Form::Weak ), 17 );
     EXPECT_EQ( (int)Members().size(), 414 )
@@ -201,7 +201,7 @@ TEST( PointerOwnership, EveryRowCarriesAnArgument )
 
 TEST( PointerOwnership, MaterialPropertyStorageIsAddressStable )
 {
-    // 46 of the 138 rows rest on ONE argument: a material's cached `Texture2DProperty*` cannot dangle
+    // 46 of the 137 rows rest on ONE argument: a material's cached `Texture2DProperty*` cannot dangle
     // because the property lives in the material's own executor. That argument has three legs and all
     // three are facts about the source, so all three are checked here rather than believed.
     ASSERT_FALSE( RepoRoot().empty() );
@@ -325,7 +325,7 @@ TEST( PointerOwnership, NoRawPointerMemberIsDeletedByItsHolder )
 TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
 {
     // THE AUDIT'S LARGEST SINGLE RESULT IS A REFUSAL, and it is recorded here so the next person does
-    // not re-derive it. 219 of the 414 members in these trees are `shared_ptr`, and for the GPU
+    // not re-derive it. 220 of the 414 members in these trees are `shared_ptr`, and for the GPU
     // resources that is the CORRECT form rather than a habit: an Image2D is held at once by the
     // framebuffer that allocated it, by the descriptor sets that sample it and by the deletion queue
     // that outlives both, and no two of those have an ordered death. Converting them to `unique_ptr`
@@ -336,7 +336,7 @@ TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
     // `shared_ptr` here is a false impression of shared ownership, and the register's job is to make
     // the true owner findable instead of mass-replacing them for uniformity -- churn that would hide
     // the seven real findings in a diff of two hundred files.
-    EXPECT_EQ( CountOf( Form::Shared ), 219 );
+    EXPECT_EQ( CountOf( Form::Shared ), 220 );
     EXPECT_GT( CountOf( Form::Shared ), CountOf( Form::Unique ) + CountOf( Form::Weak ) );
 }
 

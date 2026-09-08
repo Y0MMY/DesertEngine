@@ -893,7 +893,7 @@ namespace Desert::Graphic::System
             bake.Noise[slot] = m_NoiseVolume[slot];
 
         bake.Modelling     = m_ModellingVolume.get();
-        bake.AuthoredAtlas = m_AuthoredAtlas;
+        bake.AuthoredAtlas = m_AuthoredAtlas.get();
 
         // THE PREVIOUS FRAME'S VOLUME, and it can be nothing else: this runs before the frame's own
         // dispatch of it. The first bake of a scene therefore marches with the profile-driven occlusion
@@ -1003,7 +1003,7 @@ namespace Desert::Graphic::System
             renderer.ComputeImageBeginRead( m_NoiseVolume[slot] );
         renderer.ComputeImageBeginRead( m_ModellingVolume.get() );
         if ( m_AuthoredAtlas )
-            renderer.ComputeImageBeginRead( m_AuthoredAtlas );
+            renderer.ComputeImageBeginRead( m_AuthoredAtlas.get() );
         renderer.ComputeImageBeginWrite( m_ShadowMapImage.get() );
 
         m_ShadowMapPipeline->SetOutput( kCloudShadowOutputBinding, m_ShadowMapImage.get(), 0 );
@@ -1016,7 +1016,7 @@ namespace Desert::Graphic::System
         m_ShadowMapPipeline->SetInput(
              kCloudShadowAuthoredAtlasBinding,
              m_AuthoredAtlas
-                  ? m_AuthoredAtlas
+                  ? m_AuthoredAtlas.get()
                   : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
         m_ShadowMapPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 
@@ -1025,7 +1025,7 @@ namespace Desert::Graphic::System
 
         renderer.ComputeImageEndWrite( m_ShadowMapImage.get() );
         if ( m_AuthoredAtlas )
-            renderer.ComputeImageEndRead( m_AuthoredAtlas );
+            renderer.ComputeImageEndRead( m_AuthoredAtlas.get() );
         renderer.ComputeImageEndRead( m_ModellingVolume.get() );
         for ( uint32_t slot = m_NoiseNeeded; slot-- > 0; )
             renderer.ComputeImageEndRead( m_NoiseVolume[slot] );
@@ -1131,7 +1131,7 @@ namespace Desert::Graphic::System
     void VolumetricCloudRenderer::BuildAuthoredPayload( const CloudGpuPayload& payload )
     {
         m_AuthoredPayload = CloudAuthoredPayload{};
-        m_AuthoredAtlas   = nullptr;
+        m_AuthoredAtlas.reset();
 
         if ( m_HeroClouds.empty() )
             return;
@@ -1256,7 +1256,7 @@ namespace Desert::Graphic::System
                        "atlas that is about to be bound ({} slabs); no hero cloud is drawn this frame.",
                        m_AuthoredPayload.Count, m_AuthoredPayload.SlabCount, atlas.SlabCount );
             m_AuthoredPayload = CloudAuthoredPayload{};
-            m_AuthoredAtlas   = nullptr;
+            m_AuthoredAtlas.reset();
         }
     }
 
@@ -1519,7 +1519,7 @@ namespace Desert::Graphic::System
                 renderer.ComputeImageBeginRead( m_NoiseVolume[slot] );
             renderer.ComputeImageBeginRead( m_ModellingVolume.get() );
             if ( m_AuthoredAtlas )
-                renderer.ComputeImageBeginRead( m_AuthoredAtlas );
+                renderer.ComputeImageBeginRead( m_AuthoredAtlas.get() );
             renderer.ComputeImageBeginWrite( m_SkyOcclusionVolume.get() );
 
             m_SkyOcclusionPipeline->SetOutput( kCloudSkyOcclusionOutputBinding, m_SkyOcclusionVolume.get(), 0 );
@@ -1532,7 +1532,7 @@ namespace Desert::Graphic::System
             m_SkyOcclusionPipeline->SetInput(
                  kCloudSkyOcclusionAuthoredAtlasBinding,
                  m_AuthoredAtlas
-                      ? m_AuthoredAtlas
+                      ? m_AuthoredAtlas.get()
                       : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
 
             // ONE INVOCATION PER COLUMN — the altitude axis is walked inside the shader, because the whole
@@ -1544,7 +1544,7 @@ namespace Desert::Graphic::System
 
             renderer.ComputeImageEndWrite( m_SkyOcclusionVolume.get() );
             if ( m_AuthoredAtlas )
-                renderer.ComputeImageEndRead( m_AuthoredAtlas );
+                renderer.ComputeImageEndRead( m_AuthoredAtlas.get() );
             renderer.ComputeImageEndRead( m_ModellingVolume.get() );
             for ( uint32_t slot = m_NoiseNeeded; slot-- > 0; )
                 renderer.ComputeImageEndRead( m_NoiseVolume[slot] );
@@ -1589,7 +1589,7 @@ namespace Desert::Graphic::System
             renderer.ComputeImageBeginRead( m_NoiseVolume[slot] );
         renderer.ComputeImageBeginRead( m_ModellingVolume.get() );
         if ( m_AuthoredAtlas )
-            renderer.ComputeImageBeginRead( m_AuthoredAtlas );
+            renderer.ComputeImageBeginRead( m_AuthoredAtlas.get() );
         renderer.ComputeImageBeginWrite( m_TraceImage.get() );
         renderer.ComputeImageBeginWrite( m_TraceGuideImage.get() );
 
@@ -1631,7 +1631,7 @@ namespace Desert::Graphic::System
         m_MarchPipeline->SetInput(
              kCloudAuthoredAtlasBinding,
              m_AuthoredAtlas
-                  ? m_AuthoredAtlas
+                  ? m_AuthoredAtlas.get()
                   : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
 
         // The sky-light occlusion volume, on the same always-bound terms as the two samplers above and for
@@ -1669,7 +1669,7 @@ namespace Desert::Graphic::System
         renderer.ComputeImageEndWrite( m_TraceGuideImage.get() );
         renderer.ComputeImageEndWrite( m_TraceImage.get() );
         if ( m_AuthoredAtlas )
-            renderer.ComputeImageEndRead( m_AuthoredAtlas );
+            renderer.ComputeImageEndRead( m_AuthoredAtlas.get() );
         renderer.ComputeImageEndRead( m_ModellingVolume.get() );
         for ( uint32_t slot = m_NoiseNeeded; slot-- > 0; )
             renderer.ComputeImageEndRead( m_NoiseVolume[slot] );

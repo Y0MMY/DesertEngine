@@ -15,8 +15,14 @@ namespace Desert::Runtime
     /// INVALID descriptor set, and this engine's compute path answers one by skipping the whole dispatch.
     struct CloudModellingAtlasBinding
     {
-        Graphic::Image3D* Volume    = nullptr;
-        uint32_t          SlabCount = 0;
+        // CO-OWNED, and it has to be. This service is PROCESS-WIDE while SceneRenderers are not: six
+        // renderer slots may be live at once (Docs/RENDERER_FRAME_STATE.md), and the moment a second one
+        // asks EnsureAtlas for a different set of bodies the service replaces `m_Atlas` and the previous
+        // image is destroyed — under the first renderer, which is still holding it and still marching
+        // through it. A handle instead of a pointer makes that impossible: the old atlas survives until
+        // the last renderer that took it lets go. A8-2.
+        std::shared_ptr<Graphic::Image3D> Volume;
+        uint32_t                          SlabCount = 0;
     };
 
     /**
@@ -75,12 +81,13 @@ namespace Desert::Runtime
          */
         CloudModellingAtlasBinding EnsureAtlas( const std::vector<Assets::AssetHandle>& bodies );
 
-        /// Bumped whenever the atlas is rebuilt. The renderer compares it to decide whether the descriptor
-        /// it bound last frame still points at the same image.
-        uint32_t GetGeneration() const
-        {
-            return m_Generation;
-        }
+        // `GetGeneration()` STOOD HERE AND ITS OWN COMMENT NAMED THE READER IT NEVER HAD: "the renderer
+        // compares it to decide whether the descriptor it bound last frame still points at the same
+        // image". No renderer ever called it — the guard was written, documented, and not connected, which
+        // is the shape Г12 spent a day removing elsewhere and which costs more here than it did there.
+        // Co-ownership answers the question the counter was for, and answers it without anyone having to
+        // remember to ask: a renderer holding the binding IS holding that image, so "is it still the same
+        // one" cannot be got wrong. A8-2.
 
         void Clear();
 
@@ -101,7 +108,5 @@ namespace Desert::Runtime
         /// reload changes the second without touching the first.
         std::vector<Assets::AssetHandle> m_AtlasSlabs;
         std::vector<uint32_t>            m_AtlasRevisions;
-
-        uint32_t m_Generation = 0;
     };
 } // namespace Desert::Runtime

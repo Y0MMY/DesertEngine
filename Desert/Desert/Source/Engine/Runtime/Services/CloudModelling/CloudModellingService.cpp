@@ -77,7 +77,6 @@ namespace Desert::Runtime
                 m_Atlas.reset();
                 m_AtlasSlabs.clear();
                 m_AtlasRevisions.clear();
-                ++m_Generation;
             }
             return {};
         }
@@ -101,7 +100,7 @@ namespace Desert::Runtime
         }
 
         if ( m_Atlas && m_AtlasSlabs == bodies && m_AtlasRevisions == revisions )
-            return CloudModellingAtlasBinding{ m_Atlas.get(), static_cast<uint32_t>( m_AtlasSlabs.size() ) };
+            return CloudModellingAtlasBinding{ m_Atlas, static_cast<uint32_t>( m_AtlasSlabs.size() ) };
 
         std::vector<const std::vector<unsigned char>*> voxels;
         voxels.reserve( bodies.size() );
@@ -147,13 +146,12 @@ namespace Desert::Runtime
         m_Atlas          = std::move( atlas );
         m_AtlasSlabs     = bodies;
         m_AtlasRevisions = std::move( revisions );
-        ++m_Generation;
 
         LOG_INFO( "[Clouds] Modelling atlas built: {} bodies, {}x{}x{} RGBA8, {:.2f} MiB on the device.",
                   bodies.size(), spec.Width, spec.Height, spec.Depth,
                   static_cast<double>( bytes.size() ) / ( 1024.0 * 1024.0 ) );
 
-        return CloudModellingAtlasBinding{ m_Atlas.get(), static_cast<uint32_t>( m_AtlasSlabs.size() ) };
+        return CloudModellingAtlasBinding{ m_Atlas, static_cast<uint32_t>( m_AtlasSlabs.size() ) };
     }
 
     void CloudModellingService::Clear()
@@ -162,6 +160,5 @@ namespace Desert::Runtime
         m_Atlas.reset();
         m_AtlasSlabs.clear();
         m_AtlasRevisions.clear();
-        ++m_Generation;
     }
 } // namespace Desert::Runtime

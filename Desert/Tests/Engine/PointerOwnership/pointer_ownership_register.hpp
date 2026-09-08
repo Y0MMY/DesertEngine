@@ -114,7 +114,7 @@ namespace Desert::Tests::PointerCensus
          "comes from a local or a member of the caller";
 
     // ----------------------------------------------------------------------------------------------
-    // THE 138 ROWS. Sorted by file and line, which is the order the scan reports them in.
+    // THE 137 ROWS. Sorted by file and line, which is the order the scan reports them in.
     // ----------------------------------------------------------------------------------------------
     //
     // The table is kept out of the formatter's hands: one row is three lines — where, what, why — and
@@ -163,7 +163,9 @@ namespace Desert::Tests::PointerCensus
           kWhyFramePayload },
         { "Desert/Desert/Source/Engine/Graphic/Clouds/CloudEnvironmentBake.hpp",
           "CloudEnvironmentBake", "AuthoredAtlas", Guard::FrameScoped,
-          kWhyFramePayload },
+          "the atlas is a PROCESS-WIDE service's image, and what makes this frame payload safe is that "
+          "the VolumetricCloudRenderer filling it CO-OWNS that image for as long as it holds it (A8-2); "
+          "before that, a second live SceneRenderer could free it mid-frame" },
         { "Desert/Desert/Source/Engine/Graphic/Clouds/CloudEnvironmentBake.hpp",
           "CloudEnvironmentBake", "SkyOcclusionVolume", Guard::FrameScoped,
           kWhyFramePayload },
@@ -501,9 +503,6 @@ namespace Desert::Tests::PointerCensus
         { "Desert/Desert/Source/Engine/Graphic/Systems/RenderSystem.hpp",
           "RenderSystem", "m_RenderGraphBuilder", Guard::ObservedContainsUs,
           "the builder is a member of the SceneRenderer that owns this system; note the sibling m_TargetFramebuffer is a weak_ptr, because THAT one is not owned by the renderer" },
-        { "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Clouds/VolumetricCloudRenderer.hpp",
-          "VolumetricCloudRenderer", "m_AuthoredAtlas", Guard::Debt,
-          "a raw pointer into CloudModellingService::m_Atlas, a PROCESS-WIDE slot; a second live SceneRenderer calling EnsureAtlas with a different body set frees the image this renderer is pointing at. The service declares GetGeneration() for exactly this check and the renderer never calls it", "A8-2" },
         { "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Mesh/MeshRenderer.hpp",
           "MeshRenderData", "Mesh", Guard::CallScoped,
           "a temporary aggregate consumed synchronously by MeshRenderer::SubmitMesh" },
