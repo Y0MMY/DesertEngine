@@ -16,7 +16,6 @@ project(test_name)
     files {
         test_files,
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/AssetEviction.cpp",
-        "%{wks.location}/Desert/Desert/Source/Engine/Assets/AssetManager.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Graphic/ResourceLedger.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/Mesh/StaticMeshAsset.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/Mesh/SkinnedMeshAsset.cpp",

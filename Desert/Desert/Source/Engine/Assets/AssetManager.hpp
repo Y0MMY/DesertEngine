@@ -3,7 +3,9 @@
 #include <Engine/Assets/AssetBase.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
 
+#include <algorithm>
 #include <typeinfo>
+#include <vector>
 
 namespace Desert::Assets
 {
@@ -22,10 +24,33 @@ namespace Desert::Assets
          * can never outlive its object. There is one registry per project today; a project switch that
          * built a second before releasing the first would simply have both swept, which is correct.
          */
-        [[nodiscard]] static const std::vector<AssetManager*>& LiveManagers();
+        //
+        // HEADER-ONLY, AND THAT IS LOAD-BEARING RATHER THAN A STYLE CHOICE. This class had no translation
+        // unit of its own, and eleven test suites rely on that: they compile a hand-picked list of asset
+        // sources precisely so that a registry can be constructed without linking the renderer. Giving it
+        // a `.cpp` broke every one of them with an undefined `AssetManager::AssetManager()` — caught by
+        // the sweep, one commit after it was written. The list below stays inline for the same reason.
+        [[nodiscard]] static std::vector<AssetManager*>& LiveManagerList()
+        {
+            static std::vector<AssetManager*> managers;
+            return managers;
+        }
 
-        AssetManager();
-        ~AssetManager();
+        [[nodiscard]] static const std::vector<AssetManager*>& LiveManagers()
+        {
+            return LiveManagerList();
+        }
+
+        AssetManager()
+        {
+            LiveManagerList().push_back( this );
+        }
+
+        ~AssetManager()
+        {
+            auto& managers = LiveManagerList();
+            managers.erase( std::remove( managers.begin(), managers.end(), this ), managers.end() );
+        }
 
         // Deleted for the reason the list makes newly load-bearing: a copy would enter a second pointer to
         // one logical registry, a move would leave the moved-from husk in the list.
