@@ -947,7 +947,7 @@ namespace Desert::Core::Preprocess
                 if ( src[i] == '/' && i + 1 < src.size() && src[i + 1] == '/' )
                 {
                     flushCode( i );
-                    const size_t end = src.find( '\n', i );
+                    const size_t end  = src.find( '\n', i );
                     const size_t stop = ( end == std::string::npos ) ? src.size() : end; // the '\n' is code
                     runs.push_back( { src.substr( i, stop - i ), false } );
                     i = codeBegin = stop;
@@ -1054,23 +1054,24 @@ namespace Desert::Core::Preprocess
                 {
                     replaceFirst( run.Text, kAutoIn, [&]( const std::smatch& )
                                   { return "layout(location = " + std::to_string( alloc( usedIn ) ) + ") in"; } );
-                    replaceFirst( run.Text, kAutoOut, [&]( const std::smatch& )
-                                  { return "layout(location = " + std::to_string( alloc( usedOut ) ) + ") out"; } );
-                    replaceFirst( run.Text, kAutoBinding,
-                                  [&]( const std::smatch& m )
-                                  {
-                                      const int         n  = alloc( usedBind );
-                                      const std::string kw = m[1].str();
-                                      if ( kw == "Uniform" )
-                                          return "layout(binding = " + std::to_string( n ) + ") uniform";
-                                      if ( kw == "ReadBuffer" )
-                                          return "layout(std430, binding = " + std::to_string( n ) +
-                                                 ") readonly buffer";
-                                      if ( kw == "WriteBuffer" )
-                                          return "layout(std430, binding = " + std::to_string( n ) +
-                                                 ") writeonly buffer";
-                                      return "layout(std430, binding = " + std::to_string( n ) + ") buffer";
+                    replaceFirst( run.Text, kAutoOut,
+                                  [&]( const std::smatch& ) {
+                                      return "layout(location = " + std::to_string( alloc( usedOut ) ) + ") out";
                                   } );
+                    replaceFirst(
+                         run.Text, kAutoBinding,
+                         [&]( const std::smatch& m )
+                         {
+                             const int         n  = alloc( usedBind );
+                             const std::string kw = m[1].str();
+                             if ( kw == "Uniform" )
+                                 return "layout(binding = " + std::to_string( n ) + ") uniform";
+                             if ( kw == "ReadBuffer" )
+                                 return "layout(std430, binding = " + std::to_string( n ) + ") readonly buffer";
+                             if ( kw == "WriteBuffer" )
+                                 return "layout(std430, binding = " + std::to_string( n ) + ") writeonly buffer";
+                             return "layout(std430, binding = " + std::to_string( n ) + ") buffer";
+                         } );
                 }
                 out += run.Text;
             }
