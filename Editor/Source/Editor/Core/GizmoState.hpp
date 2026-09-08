@@ -8,7 +8,9 @@ namespace Desert::Editor::Core
     // W/E/R + the GizmoController that renders the gizmo) and the main toolbar buttons reach ONE place
     // without cross-panel plumbing.
     //
-    // THIS CLASS STORES THE OPERATION AND NOTHING ELSE, and that is the point rather than an accident.
+    // THIS CLASS STORES ONLY SESSION STATE — the operation and the transform space — and that is the point
+    // rather than an accident. Both are "where you are in a task"; neither is written to disk, so neither
+    // can become a second copy of something a file already owns.
     // It used to hold the four snap values in private statics as well, which made them a SECOND copy of
     // four fields editor.json already owned — and the two copies had different writers. The toolbar's
     // magnet popup and the viewport's snap popup wrote HERE; the Preferences window wrote THERE;
@@ -36,6 +38,14 @@ namespace Desert::Editor::Core
             Scale     = 896,
         };
 
+        // Values match ImGuizmo::MODE (LOCAL = 0, WORLD = 1) so the GizmoController cast stays free, the
+        // same bargain Operation makes above.
+        enum class Space
+        {
+            Local = 0,
+            World = 1,
+        };
+
         // Deliberately NOT persisted: which handle you last dragged is where you are in a task, not a
         // preference, and every session starts in Select the way the editor's other modal state does.
         static Operation Get()
@@ -46,6 +56,50 @@ namespace Desert::Editor::Core
         static void Set( Operation op )
         {
             s_Operation = op;
+        }
+
+        // The transform space the USER chose. Not persisted either, and for the same reason as Operation:
+        // it is a position in a task, not a setting. UE keeps it per viewport and resets it per session.
+        static Space GetSpace()
+        {
+            return s_Space;
+        }
+
+        static void SetSpace( Space space )
+        {
+            s_Space = space;
+        }
+
+        // ── WHY THIS IS NOT JUST `GetSpace()` ────────────────────────────────────────────────────────
+        //
+        // ImGuizmo DISCARDS the mode argument for scaling. ImGuizmo.cpp:2653 reads
+        //
+        //     ComputeContext( view, projection, matrix, ( operation & SCALE ) ? LOCAL : mode );
+        //
+        // so a Scale drag is ALWAYS along the object's own axes no matter what this class stores. That is
+        // not a bug to route around — it is the only sane behaviour (a world-axis scale of a rotated
+        // object is a shear, which no TRS triple can hold), and UE forces Local for scale for the same
+        // reason.
+        //
+        // The hazard is the UI, not the maths: a World/Local toggle that still reads "World" while the
+        // scale handles demonstrably work in Local is a control reporting a state the frame does not
+        // have. So the toolbar, the gizmo and any test all ask THIS function what space is in force, and
+        // the toggle is disabled (showing Local) while Scale is the active operation. One value, one
+        // reader, and the button cannot claim something ImGuizmo will not do.
+        static Space EffectiveSpace( Operation op )
+        {
+            return SpaceIsForced( op ) ? Space::Local : s_Space;
+        }
+
+        static Space EffectiveSpace()
+        {
+            return EffectiveSpace( Get() );
+        }
+
+        // True when the operation dictates the space and the user's choice cannot apply.
+        static bool SpaceIsForced( Operation op )
+        {
+            return op == Operation::Scale;
         }
 
         // Snap increments, owned by EditorPreferences (~/.desertengine/editor.json). Snapping is active
@@ -71,5 +125,6 @@ namespace Desert::Editor::Core
 
     private:
         inline static Operation s_Operation = Operation::None;
+        inline static Space     s_Space     = Space::World; // UE's default, and the behaviour before this existed
     };
 } // namespace Desert::Editor::Core

@@ -302,21 +302,12 @@ namespace Desert::Editor
         // Breathing room: the row must not sit flush against the panel's left wall.
         ImGui::SetCursorPosX( ImGui::GetCursorPosX() + 6.0f );
 
-        // --- Mode dropdown ---
-        const char* kModes[] = { ICON_MDI_CURSOR_DEFAULT "  Select", ICON_MDI_GRASS "  Foliage",
-                                 ICON_MDI_CUBE_OUTLINE "  Modeling" };
-        int         mode     = static_cast<int>( Core::ViewportMode::Get() );
-        ImGui::SetNextItemWidth( 118.0f );
-        // WindowPadding is captured when the combo POPUP begins — push it here so the dropdown's
-        // items keep a margin from the popup border instead of touching it.
-        ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 8.0f, 6.0f ) );
-        if ( ImGui::Combo( "##ViewportMode", &mode, kModes, IM_ARRAYSIZE( kModes ) ) )
-            Core::ViewportMode::Set( static_cast<Core::EditorMode>( mode ) );
-        ImGui::PopStyleVar();
-
-        ImGui::SameLine();
-        ImGui::TextDisabled( "|" );
-        ImGui::SameLine();
+        // The editor mode (Select / Modeling / Foliage) is chosen on the MAIN toolbar's mode rail
+        // (EditorLayer::DrawToolbar) and nowhere else. A duplicate combo lived here and drove the same
+        // Core::ViewportMode, so the two could never disagree — but two controls for one value is still
+        // two places to look when the answer surprises you, and the rail is the one the mock keeps.
+        // Removed rather than hidden: a control kept "just in case" is the legacy path this tree does
+        // not carry.
 
         // --- Transform-tool toggles (GizmoState is the single source of truth; hotkeys mirror it) ---
         const auto opButton = [&]( const char* icon, Core::GizmoState::Operation op, const char* tip )

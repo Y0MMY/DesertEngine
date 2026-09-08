@@ -4938,6 +4938,29 @@ namespace Desert::Editor
         ImGui::SameLine();
         if ( ToolbarButton( ICON_MDI_ARROW_EXPAND_ALL, "", op == Gz::Operation::Scale, "Scale (R)" ) )
             Gz::Set( Gz::Operation::Scale );
+        ImGui::SameLine();
+
+        // ---- Transform space -------------------------------------------------------------------
+        // One button that both REPORTS the space and flips it, the same bargain the snap controls make
+        // below. It asks EffectiveSpace(), not GetSpace(), because ImGuizmo throws the mode away while
+        // scaling (ImGuizmo.cpp:2653) — so during a Scale the honest thing to show is Local, disabled,
+        // rather than a "World" the handles will not honour. The button that lies is worse than the
+        // button that is greyed out, and this is the only place the two could have drifted apart.
+        {
+            const bool      forced  = Gz::SpaceIsForced( op );
+            const Gz::Space space   = Gz::EffectiveSpace( op );
+            const bool      isLocal = space == Gz::Space::Local;
+
+            const char* tip = forced ? "Scaling is always along the object's own axes — a world-axis "
+                                       "scale of a rotated object is a shear, which a transform cannot hold"
+                              : isLocal
+                                   ? "Transform space: Local — drag along the object's own axes (click for World)"
+                                   : "Transform space: World — drag along the world axes (click for Local)";
+
+            if ( ToolbarButton( isLocal ? ICON_MDI_AXIS_ARROW : ICON_MDI_EARTH, isLocal ? "Local" : "World",
+                                isLocal, tip, /*enabled=*/!forced ) )
+                Gz::SetSpace( isLocal ? Gz::Space::World : Gz::Space::Local );
+        }
         ToolbarSeparator();
 
         // ---- The two snap values ----------------------------------------------------------------
