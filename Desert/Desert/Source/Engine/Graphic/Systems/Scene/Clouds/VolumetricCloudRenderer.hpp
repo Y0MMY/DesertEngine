@@ -456,7 +456,11 @@ namespace Desert::Graphic::System
 
         std::vector<HeroCloudInstance> m_HeroClouds;
         CloudAuthoredPayload           m_AuthoredPayload{};
-        Image3D*                       m_AuthoredAtlas = nullptr;
+        // CO-OWNED. This names an image the PROCESS-WIDE CloudModellingService owns, and a second live
+        // SceneRenderer asking that service for a different set of bodies destroys it — see
+        // CloudModellingAtlasBinding. Holding a handle rather than a pointer is what makes several live
+        // renderers legal here, which six renderer slots already make possible. A8-2.
+        std::shared_ptr<Image3D> m_AuthoredAtlas;
 
         // Latched so that a body standing outside its layer is said ONCE per scene rather than sixty
         // times a second, and re-armed the moment the arrangement changes so that fixing it and breaking

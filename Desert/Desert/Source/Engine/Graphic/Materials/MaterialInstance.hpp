@@ -12,6 +12,42 @@ namespace Desert::Graphic
     using MaterialInstancePtr = std::shared_ptr<MaterialInstance>;
     using MaterialPtr         = std::shared_ptr<Material>;
 
+    // ONE ENTITY'S MATERIAL SLOTS, AS THE RENDER PATH IS ALLOWED TO HOLD THEM.
+    //
+    // WHY THIS TYPE EXISTS AT ALL — A8-3. The mesh path used to carry
+    // `const std::vector<MaterialInstance*>*`: the ADDRESS OF A VECTOR MEMBER OF AN ECS COMPONENT. Both
+    // halves of that were unsound, and the second half is the one that a copy alone would not have fixed:
+    //
+    //   * the vendored entt keeps components BY VALUE in a flat `std::vector`, so `AddComponent` moves
+    //     every component already in the pool and `DestroyEntity` swap-and-pops another one over the hole
+    //     (asserted, not argued, by PointerOwnership.EnttComponentAddressesAreNotStable);
+    //   * and the MaterialInstances themselves are owned by that same component's
+    //     `RuntimeMaterialInstances`, so destroying the entity destroys them too.
+    //
+    // Between the two there is a real window and it is not a narrow one: `MeshECSSystem` RECORDS the draw,
+    // `ScriptSystem` — registered after it — then runs USER LUA (`World.spawnMarker` adds a component,
+    // `entity:destroy()` removes one), and only afterwards does `RenderCommandBuffer::ExecuteAll` read what
+    // was recorded, with five more passes reading it after that. The path from "took the address" to "read
+    // it" runs through code this project does not write.
+    //
+    // Ownership question 1 — who is obliged to destroy this? — has two answers here whose order is not
+    // fixed: the component that authored the slots, and any draw still in flight. Two owners with unordered
+    // deaths is precisely what a `shared_ptr` is for, so the render path CO-OWNS the binding instead of
+    // pointing at the component's storage. The cost is one atomic increment per mesh per frame, not the
+    // per-frame allocate-and-copy of a slot vector that the raw pointer was introduced to avoid (measured
+    // at ~0.9 ms of ExecuteAll for 256 meshes in Debug, which is why the naive fix is the wrong one).
+    struct MaterialSlotBinding
+    {
+        // Keeps every instance alive for as long as ANY holder of this binding lives. The render path never
+        // reads this vector; it exists to make the raw view below safe to read.
+        std::vector<MaterialInstancePtr> Owned;
+
+        // What the render path reads. Parallel to Owned, and rebuilt with it — never separately.
+        std::vector<MaterialInstance*> Slots;
+    };
+
+    using MaterialSlotBindingPtr = std::shared_ptr<const MaterialSlotBinding>;
+
     class MaterialInstance : public std::enable_shared_from_this<MaterialInstance>
     {
     public:

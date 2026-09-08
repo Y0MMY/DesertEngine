@@ -9,10 +9,12 @@ namespace Desert::Graphic::Render
     struct DrawStaticMeshCommand : RenderCommand
     {
         Desert::Mesh* Mesh;
-        // Pointer to the component's stable RuntimeSlotPtrs (valid for the frame, never mutated between the
-        // ECS update that records this command and its same-frame execution) — avoids copying a slot vector
-        // per entity through the submission chain (Debug-heavy).
-        const std::vector<Graphic::MaterialInstance*>* MaterialSlots;
+        // A CO-OWNED handle on the entity's material slots, not a pointer into the component that authored
+        // them. A command is recorded by MeshECSSystem, survives every later system — ScriptSystem among
+        // them, which runs user Lua that can add or destroy entities — and is only read afterwards. See
+        // Graphic::MaterialSlotBinding for the mechanism this replaces (A8-3). Copying it is one atomic
+        // increment; the per-entity slot-vector copy the old raw pointer avoided is still avoided.
+        Graphic::MaterialSlotBindingPtr                MaterialSlots;
         glm::mat4                                      Transform;
         bool                                           Outlined        = false;
         uint64_t                                       HiddenSubmeshes = 0;  // bit i = submesh i hidden
@@ -21,20 +23,20 @@ namespace Desert::Graphic::Render
         bool                                           CastShadows     = true;
         bool                                           ReceiveShadows  = true;
 
-        DrawStaticMeshCommand( Desert::Mesh* mesh, const std::vector<Graphic::MaterialInstance*>* materialSlots,
+        DrawStaticMeshCommand( Desert::Mesh* mesh, Graphic::MaterialSlotBindingPtr materialSlots,
                                const glm::mat4& transform, bool outlined = false, uint64_t hiddenSubmeshes = 0,
                                int forcedLOD = -1, int lodBias = 0, bool castShadows = true,
                                bool receiveShadows = true )
-             : Mesh( mesh ), MaterialSlots( materialSlots ), Transform( transform ), Outlined( outlined ),
-               HiddenSubmeshes( hiddenSubmeshes ), ForcedLOD( forcedLOD ), LODBias( lodBias ),
-               CastShadows( castShadows ), ReceiveShadows( receiveShadows )
+             : Mesh( mesh ), MaterialSlots( std::move( materialSlots ) ), Transform( transform ),
+               Outlined( outlined ), HiddenSubmeshes( hiddenSubmeshes ), ForcedLOD( forcedLOD ),
+               LODBias( lodBias ), CastShadows( castShadows ), ReceiveShadows( receiveShadows )
         {
         }
 
         void Execute( SceneRenderer& renderer ) override
         {
             if ( MaterialSlots )
-                renderer.SubmitMesh( Mesh, *MaterialSlots, Transform,
+                renderer.SubmitMesh( Mesh, MaterialSlots, Transform,
                                      { .Outlined        = Outlined,
                                        .HiddenSubmeshes = HiddenSubmeshes,
                                        .ForcedLOD       = ForcedLOD,
@@ -44,17 +46,18 @@ namespace Desert::Graphic::Render
         }
     };
 
-    // UE-style Instanced Static Mesh: one mesh + one material drawn for every transform. Transforms point
-    // at the component's stable per-frame array (valid until the command buffer is cleared between frames).
+    // UE-style Instanced Static Mesh: one mesh + one material drawn for every transform. The material
+    // instance and the transform array are both CO-OWNED — both are owned by the ECS component that
+    // recorded this command, and the entity can be destroyed by Lua before the command is executed (A8-3).
     struct DrawInstancedStaticMeshCommand : RenderCommand
     {
-        Desert::Mesh*                 Mesh;
-        Graphic::MaterialInstance*    Material;
-        const std::vector<glm::mat4>* Transforms;
+        Desert::Mesh*                                 Mesh;
+        Graphic::MaterialInstancePtr                  Material;
+        std::shared_ptr<const std::vector<glm::mat4>> Transforms;
 
-        DrawInstancedStaticMeshCommand( Desert::Mesh* mesh, Graphic::MaterialInstance* material,
-                                        const std::vector<glm::mat4>* transforms )
-             : Mesh( mesh ), Material( material ), Transforms( transforms )
+        DrawInstancedStaticMeshCommand( Desert::Mesh* mesh, Graphic::MaterialInstancePtr material,
+                                        std::shared_ptr<const std::vector<glm::mat4>> transforms )
+             : Mesh( mesh ), Material( std::move( material ) ), Transforms( std::move( transforms ) )
         {
         }
 

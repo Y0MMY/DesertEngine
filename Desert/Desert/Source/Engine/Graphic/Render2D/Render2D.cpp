@@ -9,7 +9,10 @@
 #include <Engine/Graphic/Texture.hpp>
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
+#include <Engine/Graphic/Materials/Properties/PropertyDirty.hpp>
 #include <Engine/Graphic/Materials/Properties/Texture2DProperty.hpp>
+#include <Engine/Graphic/Render2D/Render2DExecutorRetire.hpp>
+#include <Engine/Core/FrameManager.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Runtime/Services/Shader/ShaderService.hpp>
 
@@ -154,17 +157,20 @@ namespace Desert::Graphic::Render2D
     MaterialExecutor* Render2D::ExecutorFor( ExecutorCache& cache, const std::shared_ptr<Shader>& shader,
                                              const char* sampler, const void* texture, Image2D* image )
     {
+        const uint64_t frame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
+
         auto              it = cache.find( texture );
         MaterialExecutor* exec;
         if ( it != cache.end() )
         {
-            exec = it->second.get();
+            exec                     = it->second.Executor.get();
+            it->second.LastUsedFrame = frame;
         }
         else
         {
             auto owned = MaterialExecutor::Create( "Render2D", shader );
             exec       = owned.get();
-            cache.emplace( texture, std::move( owned ) );
+            cache.emplace( texture, CachedExecutor{ std::move( owned ), frame } );
         }
 
         if ( auto texProp = exec->GetTexture2DProperty( sampler ) )
@@ -281,5 +287,27 @@ namespace Desert::Graphic::Render2D
                              (uint32_t)m_ViewportPx.w );
 
         m_UsedBackdrop = usedBackdrop;
+
+        RetireUnusedExecutors();
+    }
+
+    void Render2D::RetireUnusedExecutors()
+    {
+        // The window is the material properties' own: frames-in-flight times renderer slots. Taking it
+        // from there rather than writing a number here is what stops the two from ever disagreeing about
+        // how long a recorded frame lives.
+        const uint64_t frame  = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
+        const uint32_t window = PropertyDirty::DirtyLifetime();
+
+        for ( ExecutorCache* cache : { &m_Executors, &m_TextExecutors, &m_GlassExecutors } )
+        {
+            for ( auto it = cache->begin(); it != cache->end(); )
+            {
+                if ( MayRetireExecutor( it->second.LastUsedFrame, frame, window ) )
+                    it = cache->erase( it );
+                else
+                    ++it;
+            }
+        }
     }
 } // namespace Desert::Graphic::Render2D

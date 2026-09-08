@@ -32,10 +32,11 @@ namespace Desert::Graphic::System
         class Mesh* Mesh;
         glm::mat4   Transform;
 
-        // Pointer to the component's stable RuntimeSlotPtrs (valid for the frame) — passed by pointer through
-        // the whole submission chain so no per-mesh slot-vector copy happens (Debug-heavy: this was ~0.9ms
-        // of CmdBuffer ExecuteAll for 256 meshes).
-        const std::vector<MaterialInstance*>* MaterialSlots = nullptr;
+        // A CO-OWNED handle on the entity's slots — see Graphic::MaterialSlotBinding (A8-3). Still no
+        // per-mesh slot-vector copy (that cost ~0.9 ms of CmdBuffer ExecuteAll for 256 meshes in Debug);
+        // what travels the chain is a shared_ptr, so the slots and the instances in them cannot be freed
+        // under a draw that is still in flight.
+        MaterialSlotBindingPtr MaterialSlots;
 
         // optional
         std::vector<glm::mat4> BoneMatrices;
@@ -55,14 +56,15 @@ namespace Desert::Graphic::System
         {
             class Desert::StaticMesh* Mesh      = nullptr;
             glm::mat4                 Transform = glm::mat4( 1.0f );
-            // Pointer into the component's stable RuntimeSlotPtrs (valid for the frame) — no per-mesh copy.
-            const std::vector<MaterialInstance*>* MaterialSlots   = nullptr;
-            bool                                  Outlined        = false;
-            uint64_t                              HiddenSubmeshes = 0;  // bit i = submesh i hidden
-            int                                   ForcedLOD       = -1; // -1 = auto (by distance)
-            int                                   LODBias         = 0;  // shifts the auto LOD (ignored when forced)
-            bool                                  CastShadows     = true;
-            bool                                  ReceiveShadows  = true;
+            // Co-owned, and it must be: this queue is read by five passes, all of them AFTER the frame's
+            // ECS systems have run (A8-3).
+            MaterialSlotBindingPtr MaterialSlots;
+            bool                   Outlined        = false;
+            uint64_t               HiddenSubmeshes = 0;  // bit i = submesh i hidden
+            int                    ForcedLOD       = -1; // -1 = auto (by distance)
+            int                    LODBias         = 0;  // shifts the auto LOD (ignored when forced)
+            bool                   CastShadows     = true;
+            bool                   ReceiveShadows  = true;
         };
 
         struct SkinnedMeshRenderData
@@ -73,20 +75,25 @@ namespace Desert::Graphic::System
             // `.demat`, which is why nothing per-object may be stored on it: the pose below is packed
             // into a per-frame buffer and named by a push constant instead.
             class Graphic::MaterialPBR* Material = nullptr;
-            MaterialInstance*           Instance = nullptr; // instance applied during Bind
+            // The binding the instance below was selected FROM, carried so that it keeps that instance
+            // alive: the entity that authored it can be destroyed between the record and this queue being
+            // drawn (A8-3). Holding the binding rather than a second shared_ptr to the instance keeps the
+            // static and skinned queues answering the lifetime question the same way.
+            MaterialSlotBindingPtr      MaterialSlots;
+            MaterialInstance*           Instance = nullptr; // instance applied during Bind; owned by MaterialSlots
             std::vector<glm::mat4>      BoneMatrices;       // animated pose, or bind pose
             bool                        Outlined    = false;
             bool                        CastShadows = true;
         };
 
-        // A UE-style Instanced Static Mesh: ONE mesh + ONE PBR material drawn N times. The transforms come
-        // straight from the component's array (pointer, stable for the frame) — no per-entity overhead.
+        // A UE-style Instanced Static Mesh: ONE mesh + ONE PBR material drawn N times. The material and the
+        // transforms are CO-OWNED handles on what the component produced, not pointers into it (A8-3).
         // Rendered through the SAME instanced pipeline/SSBO as the auto-batched static meshes.
         struct InstancedMeshRenderData
         {
-            class Desert::StaticMesh*             Mesh      = nullptr;
-            MaterialInstance*                     Material  = nullptr; // slot 0 (PBR)
-            const std::vector<glm::mat4>*         Transforms = nullptr; // -> component's InstanceTransforms
+            class Desert::StaticMesh*                     Mesh = nullptr;
+            MaterialInstancePtr                           Material;   // slot 0 (PBR)
+            std::shared_ptr<const std::vector<glm::mat4>> Transforms; // snapshot of InstanceTransforms
         };
 
         // A static mesh drawn with a generic data-driven material. Two producers:

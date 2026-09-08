@@ -115,10 +115,12 @@ namespace Desert::ECS
         std::vector<Assets::AssetHandle> MaterialSlots;
         std::vector<Graphic::MaterialInstancePtr>
              RuntimeMaterialInstances; // Cache to keep instances alive and avoid per-frame allocations
-        std::vector<Graphic::MaterialInstance*>
-             RuntimeSlotPtrs; // Raw-pointer view of RuntimeMaterialInstances, rebuilt only when instances change
-                              // so the per-frame render path passes a pointer instead of allocating+copying a slot
-                              // vector every frame (Debug-heavy)
+        // The render path's CO-OWNED handle on those instances, rebuilt with them and never separately.
+        // It replaced a `std::vector<MaterialInstance*> RuntimeSlotPtrs` whose ADDRESS the draw commands
+        // took: entt moves components when the pool changes and Lua runs between recording a draw and
+        // executing it, so both the vector and the instances in it could be gone by the time the renderer
+        // read them. See Graphic::MaterialSlotBinding for the full account (A8-3).
+        Graphic::MaterialSlotBindingPtr        RuntimeSlots;
         std::optional<Geometry::PrimitiveType> Primitive;   // Optional primitive type for dynamic generation
         std::shared_ptr<DynamicMesh>           RuntimeMesh; // Unique mesh instance for modifications
         bool                                   OutlineDraw = false;
@@ -188,6 +190,19 @@ namespace Desert::ECS
         std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances;
         bool                                      InstancesDirty       = true;
         uint32_t                                  SeenMaterialsVersion = 0; // see StaticMeshComponent
+
+        // The render path's CO-OWNED snapshot of InstanceTransforms above. The draw command used to carry
+        // `&InstanceTransforms` — the address of a vector member of an ECS component — and the same two
+        // things were wrong with it as with the static path's slot view: entt moves components when the
+        // pool changes, and Lua running between the record and the read can destroy this entity outright.
+        // See Graphic::MaterialSlotBinding for the full account (A8-3).
+        //
+        // REBUILT BY COMPARING, NOT BY A FLAG. `InstancesDirty` beside it is set by four authoring sites
+        // and read by nobody, so keying the snapshot off it would have made a stale picture depend on
+        // every future mutation site remembering to raise it. Comparing the snapshot with the authored
+        // vector cannot drift: an edit that changes the contents rebuilds it, an unchanged frame costs one
+        // comparison and no allocation.
+        std::shared_ptr<const std::vector<glm::mat4>> RuntimeInstanceSnapshot;
     };
 
     // A FOLIAGE type (UE5-style). Sits alongside an InstancedStaticMeshComponent (the mesh + per-instance

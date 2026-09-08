@@ -80,7 +80,22 @@ namespace Desert::Graphic::Render2D
         // Grow the dynamic buffers to hold at least the given counts (reused across frames otherwise).
         void EnsureCapacity( uint32_t vertexCount, uint32_t indexCount );
 
-        using ExecutorCache = std::unordered_map<const void*, std::unique_ptr<MaterialExecutor>>;
+        // One cached executor and the frame it was last drawn with. THE STAMP IS THE WHOLE FIX: without
+        // it nothing could ever be removed from these caches safely, and so nothing was removed at all —
+        // an executor and its descriptor set per texture address ever bound, for the life of the process
+        // (A8-1). Retirement is decided by Render2D::MayRetireExecutor, which is asserted rather than
+        // described.
+        struct CachedExecutor
+        {
+            std::unique_ptr<MaterialExecutor> Executor;
+            uint64_t                          LastUsedFrame = 0;
+        };
+
+        using ExecutorCache = std::unordered_map<const void*, CachedExecutor>;
+
+        // Destroy the entries no frame still in flight can be reading. Called once per Flush, after the
+        // last draw is recorded.
+        void RetireUnusedExecutors();
 
         // Lazily-created MaterialExecutor per bound texture, one @p cache per shader (UI2D vs UIText). Each
         // executor owns its own descriptor set, so switching textures across batches never overwrites a live

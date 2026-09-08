@@ -153,8 +153,11 @@ namespace Desert::Graphic
 
         void Resize( const uint32_t width, const uint32_t height );
 
-        void SubmitMesh( const Mesh* mesh, const std::vector<MaterialInstance*>& materialSlots,
-                         const glm::mat4& transform, const RenderSubmissionExtra& extra );
+        // The slot binding is taken BY SHARED HANDLE, not by reference to the caller's storage: the
+        // caller is a draw command whose recorder (an ECS component) may already be gone. See
+        // Graphic::MaterialSlotBinding (A8-3).
+        void SubmitMesh( const Mesh* mesh, const MaterialSlotBindingPtr& materialSlots, const glm::mat4& transform,
+                         const RenderSubmissionExtra& extra );
 
         // Submit one terrain entity for this frame (from TerrainECSSystem via DrawTerrainCommand).
         void SubmitTerrain( const glm::mat4& transform, float size, int resolution, float heightScale,
@@ -181,9 +184,10 @@ namespace Desert::Graphic
                                      bool castShadows = false );
 
         // UE-style Instanced Static Mesh: one mesh + one PBR material drawn for every transform in
-        // @p transforms (a pointer to the component's stable per-frame array — not copied).
-        void SubmitInstancedMesh( const Mesh* mesh, MaterialInstance* material,
-                                  const std::vector<glm::mat4>* transforms );
+        // @p transforms. Material and transforms are both co-owned handles for the reason SubmitMesh's
+        // binding is (A8-3).
+        void SubmitInstancedMesh( const Mesh* mesh, const MaterialInstancePtr& material,
+                                  const std::shared_ptr<const std::vector<glm::mat4>>& transforms );
 
         void SetEnvironment( const std::shared_ptr<MaterialSkybox>& material, float intensity = 1.0f );
 

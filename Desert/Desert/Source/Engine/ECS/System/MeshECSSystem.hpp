@@ -159,13 +159,19 @@ namespace Desert::ECS
                                  }
                              }
 
-                             // Rebuild the raw-pointer slot view ONLY here (when the instance set changes), not
-                             // every frame: the render command/queue takes a pointer to this stable vector, so
-                             // a per-frame allocate+copy of a slot vector per entity is eliminated.
-                             mesh.RuntimeSlotPtrs.clear();
-                             mesh.RuntimeSlotPtrs.reserve( mesh.RuntimeMaterialInstances.size() );
-                             for ( const auto& inst : mesh.RuntimeMaterialInstances )
-                                 mesh.RuntimeSlotPtrs.push_back( inst.get() );
+                             // Rebuild the render path's binding ONLY here (when the instance set changes),
+                             // not every frame: what the draw commands then carry is a shared_ptr COPY of
+                             // it, which is one atomic increment and no allocation, and which keeps both
+                             // the slot array and every instance in it alive for as long as any draw is
+                             // still in flight. A fresh object rather than a mutation of the old one, for
+                             // the reason the whole change exists: a command recorded last frame may still
+                             // be holding the previous binding.
+                             auto binding   = std::make_shared<Graphic::MaterialSlotBinding>();
+                             binding->Owned = mesh.RuntimeMaterialInstances;
+                             binding->Slots.reserve( binding->Owned.size() );
+                             for ( const auto& inst : binding->Owned )
+                                 binding->Slots.push_back( inst.get() );
+                             mesh.RuntimeSlots = std::move( binding );
 
                              // One-shot seed, CONSUMED here: PBR-channel MaterialComponent params exist only
                              // as a hand-off buffer (scripts that ran before this build + legacy scenes).
@@ -346,7 +352,7 @@ namespace Desert::ECS
                          // submesh went custom).
                          if ( pbrDrawEmitted )
                              renderCommandBuffer.Emplace<Graphic::Render::DrawStaticMeshCommand>(
-                                  targetMesh, &mesh.RuntimeSlotPtrs, worldTransform, outlined, pbrHidden,
+                                  targetMesh, mesh.RuntimeSlots, worldTransform, outlined, pbrHidden,
                                   mesh.ForcedLOD, mesh.LODBias, shadowRoute == Rules::MeshShadowCaster::PbrDraw,
                                   mesh.ReceiveShadows );
                      } );
@@ -406,17 +412,20 @@ namespace Desert::ECS
                          // ISM draws through the batched PBR instancing path — a custom-shader slot
                          // material can't drive it. Use the first PBR slot; if none, warn once and
                          // skip (per-instance generic draws would defeat the point of an ISM).
-                         Graphic::MaterialInstance* ismInstance = nullptr;
+                         // CO-OWNED, for the same reason the static path's slots are: this instance is
+                         // owned by THIS component's RuntimeMaterialInstances, and the entity can be
+                         // destroyed by Lua between recording the draw and executing it.
+                         Graphic::MaterialInstancePtr ismInstancePtr;
                          for ( const auto& inst : ism.RuntimeMaterialInstances )
                          {
                              if ( inst && !dynamic_cast<Graphic::DataDrivenMaterial*>(
                                                inst->GetParentMaterial() ) )
                              {
-                                 ismInstance = inst.get();
+                                 ismInstancePtr = inst;
                                  break;
                              }
                          }
-                         if ( !ismInstance )
+                         if ( !ismInstancePtr )
                          {
                              static bool s_WarnedCustomISM = false;
                              if ( !s_WarnedCustomISM )
@@ -429,9 +438,17 @@ namespace Desert::ECS
                              return;
                          }
 
-                         // InstanceTransforms are WORLD-space (the entity is a container); zero-copy pointer.
+                         // InstanceTransforms are WORLD-space (the entity is a container). The command
+                         // carries a CO-OWNED snapshot, not the component's address: see the member's own
+                         // note and Graphic::MaterialSlotBinding (A8-3). The comparison is what makes the
+                         // snapshot impossible to leave stale.
+                         if ( !ism.RuntimeInstanceSnapshot ||
+                              *ism.RuntimeInstanceSnapshot != ism.InstanceTransforms )
+                             ism.RuntimeInstanceSnapshot =
+                                  std::make_shared<const std::vector<glm::mat4>>( ism.InstanceTransforms );
+
                          renderCommandBuffer.Emplace<Graphic::Render::DrawInstancedStaticMeshCommand>(
-                              targetMesh, ismInstance, &ism.InstanceTransforms );
+                              targetMesh, ismInstancePtr, ism.RuntimeInstanceSnapshot );
                      } );
             }
 
@@ -492,10 +509,15 @@ namespace Desert::ECS
                          if ( mesh.RuntimeMaterialInstances.empty() )
                              return;
 
-                         std::vector<Graphic::MaterialInstance*> slots;
-                         slots.reserve( mesh.RuntimeMaterialInstances.size() );
-                         for ( const auto& inst : mesh.RuntimeMaterialInstances )
-                             slots.push_back( inst.get() );
+                         // Built per frame here, as the raw vector it replaces was — the skinned path has
+                         // no cached binding because it has no cached slot view to cache it beside. What
+                         // changed is that the command now CO-OWNS the instances instead of copying bare
+                         // pointers to instances this component alone keeps alive (A8-3).
+                         auto slots   = std::make_shared<Graphic::MaterialSlotBinding>();
+                         slots->Owned = mesh.RuntimeMaterialInstances;
+                         slots->Slots.reserve( slots->Owned.size() );
+                         for ( const auto& inst : slots->Owned )
+                             slots->Slots.push_back( inst.get() );
 
                          // Bone matrices: animated pose if an Animator exists, else bind pose (identity = the
                          // skeleton's rest shape, which stays correct after Phase-2 rest-pose edits since

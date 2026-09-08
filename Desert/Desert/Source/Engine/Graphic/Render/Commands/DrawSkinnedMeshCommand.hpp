@@ -8,19 +8,21 @@ namespace Desert::Graphic::Render
 {
     struct DrawSkinnedMeshCommand : RenderCommand
     {
-        Desert::SkinnedMesh*                    Mesh;
-        std::vector<Graphic::MaterialInstance*> MaterialSlot;
-        glm::mat4                               Transform;
-        std::vector<glm::mat4>                  BoneMatrices;
-        bool                                    Outlined    = false;
-        bool                                    CastShadows = true;
+        Desert::SkinnedMesh* Mesh;
+        // CO-OWNED, not a copy of bare pointers: the copy this used to make kept the ARRAY safe and left
+        // every MaterialInstance in it owned by an ECS component that Lua can destroy before this command
+        // runs. See Graphic::MaterialSlotBinding (A8-3).
+        Graphic::MaterialSlotBindingPtr MaterialSlot;
+        glm::mat4                       Transform;
+        std::vector<glm::mat4>          BoneMatrices;
+        bool                            Outlined    = false;
+        bool                            CastShadows = true;
 
-        DrawSkinnedMeshCommand( Desert::SkinnedMesh*                           mesh,
-                                const std::vector<Graphic::MaterialInstance*>& materialSlot,
+        DrawSkinnedMeshCommand( Desert::SkinnedMesh* mesh, Graphic::MaterialSlotBindingPtr materialSlot,
                                 const glm::mat4& transform, const std::vector<glm::mat4>& bones,
                                 bool outlined = false, bool castShadows = true )
-             : Mesh( mesh ), MaterialSlot( materialSlot ), Transform( transform ), BoneMatrices( bones ),
-               Outlined( outlined ), CastShadows( castShadows )
+             : Mesh( mesh ), MaterialSlot( std::move( materialSlot ) ), Transform( transform ),
+               BoneMatrices( bones ), Outlined( outlined ), CastShadows( castShadows )
         {
         }
 

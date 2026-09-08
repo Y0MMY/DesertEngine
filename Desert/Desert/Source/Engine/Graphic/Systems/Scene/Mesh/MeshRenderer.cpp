@@ -621,9 +621,9 @@ namespace Desert::Graphic::System
         std::vector<PBRGpuMaterial>              gpuMats;
         for ( const auto& data : m_StaticQueue )
         {
-            if ( !data.Mesh || !data.MaterialSlots || data.MaterialSlots->empty() )
+            if ( !data.Mesh || !data.MaterialSlots || data.MaterialSlots->Slots.empty() )
                 continue;
-            MaterialInstance* pbrInst = FirstPBRSlot( *data.MaterialSlots, MeshVertexPath::Static );
+            MaterialInstance* pbrInst = FirstPBRSlot( data.MaterialSlots->Slots, MeshVertexPath::Static );
             if ( !pbrInst )
                 continue;
             auto*          mat = static_cast<MaterialPBR*>( pbrInst->GetParentMaterial() );
@@ -691,9 +691,9 @@ namespace Desert::Graphic::System
         std::vector<PBRGpuMaterial>              gpuMats;
         for ( const auto& data : m_StaticQueue )
         {
-            if ( !data.Mesh || !data.MaterialSlots || data.MaterialSlots->empty() )
+            if ( !data.Mesh || !data.MaterialSlots || data.MaterialSlots->Slots.empty() )
                 continue;
-            MaterialInstance* pbrInst = FirstPBRSlot( *data.MaterialSlots, MeshVertexPath::Static );
+            MaterialInstance* pbrInst = FirstPBRSlot( data.MaterialSlots->Slots, MeshVertexPath::Static );
             if ( !pbrInst )
                 continue;
             PBRGpuMaterial gm =
@@ -770,15 +770,15 @@ namespace Desert::Graphic::System
 
         for ( const auto& data : m_StaticQueue )
         {
-            if ( !data.Mesh || !data.MaterialSlots || data.MaterialSlots->empty() ||
-                 !( *data.MaterialSlots )[0] )
+            if ( !data.Mesh || !data.MaterialSlots || data.MaterialSlots->Slots.empty() ||
+                 !data.MaterialSlots->Slots[0] )
                 continue;
 
             // First PBR slot drives the batch. Slots holding a custom-shader material
             // (DataDrivenMaterial) are not PBR — their submeshes were routed to the generic
             // path at submit and are masked out of this draw; an object with NO PBR slot at
             // all has nothing for this path to do.
-            if ( MaterialInstance* pbrInst = FirstPBRSlot( *data.MaterialSlots, MeshVertexPath::Static ) )
+            if ( MaterialInstance* pbrInst = FirstPBRSlot( data.MaterialSlots->Slots, MeshVertexPath::Static ) )
                 groupFor( static_cast<MaterialPBR*>( pbrInst->GetParentMaterial() ) ).push_back( &data );
         }
 
@@ -832,7 +832,7 @@ namespace Desert::Graphic::System
             {
                 ObjDraw od;
                 od.Obj  = obj;
-                od.Inst = FirstPBRSlot( *obj->MaterialSlots, MeshVertexPath::Static );
+                od.Inst = FirstPBRSlot( obj->MaterialSlots->Slots, MeshVertexPath::Static );
                 od.Gm   = BuildEffectiveMaterial( mat, od.Inst );
                 if ( od.Gm.GlassTint.a > 0.001f )
                     continue;
@@ -1029,7 +1029,7 @@ namespace Desert::Graphic::System
                 d.FirstInstance = static_cast<uint32_t>( instTransforms.size() );
                 d.MaterialIndex = static_cast<uint32_t>( instMaterials.size() );
                 instTransforms.insert( instTransforms.end(), ism.Transforms->begin(), ism.Transforms->end() );
-                instMaterials.push_back( BuildEffectiveMaterial( mat, ism.Material ) );
+                instMaterials.push_back( BuildEffectiveMaterial( mat, ism.Material.get() ) );
                 instDraws.push_back( d );
             }
         }
@@ -2194,13 +2194,14 @@ namespace Desert::Graphic::System
                 skinnedData.BoneMatrices = data.BoneMatrices;
                 skinnedData.Outlined     = data.Outlined;
                 skinnedData.CastShadows  = data.CastShadows;
-                if ( data.MaterialSlots && !data.MaterialSlots->empty() )
+                skinnedData.MaterialSlots = data.MaterialSlots; // keeps Instance below alive (A8-3)
+                if ( data.MaterialSlots && !data.MaterialSlots->Slots.empty() )
                 {
                     // THE SAME selector the static queue uses, asked for the SKINNED path. It used to be
                     // a second loop hunting a different C++ CLASS, and since MaterialFactory could not
                     // produce that class from an asset under any circumstances, an imported character
                     // with its own materials matched nothing and was dropped without drawing.
-                    if ( auto* inst = FirstPBRSlot( *data.MaterialSlots, MeshVertexPath::Skinned ) )
+                    if ( auto* inst = FirstPBRSlot( data.MaterialSlots->Slots, MeshVertexPath::Skinned ) )
                     {
                         skinnedData.Instance = inst;
                         skinnedData.Material = static_cast<MaterialPBR*>( inst->GetParentMaterial() );
