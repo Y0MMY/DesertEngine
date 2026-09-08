@@ -111,11 +111,20 @@ namespace Desert::Editor
         // person can reach with Ctrl+P, an agent can reach by naming a group and a label, by construction
         // rather than by anybody maintaining a second list. See Editor/Core/Control/ControlDispatch.hpp.
         //
-        // Built on demand — when the palette opens, or when a request arrives — never per frame.
+        // Built on demand — when the palette opens, or when a request arrives — never per frame. THAT
+        // SENTENCE USED TO BE FALSE: DrawCommandPalette rebuilt it on every frame the overlay was up, and
+        // the dictionary walks the scene's entities, the levels on disk and every openable file under the
+        // content root. See DrawCommandPalette for what makes rebuilding on OPEN correct rather than a
+        // snapshot going stale.
         [[nodiscard]] std::vector<PaletteCommand> BuildPaletteCommands();
 
         // Ctrl+P "go to anything": draws the overlay over the dictionary above. No-op unless open.
         void DrawCommandPalette();
+        // The palette asked for BY NAME, from its own dictionary — the only way an unattended run can put
+        // it on screen, since a keystroke is not available here. Deferred rather than opened in the
+        // closure: Draw() closes the palette on the line after it runs an entry, so opening it from inside
+        // itself would work over the socket and do nothing under a person's hand.
+        bool m_OpenPaletteRequested = false;
 
         // ===== Control channel (Editor/Core/Control) =====
         // Drained at the TOP of OnUpdate: accept, read one request, execute it. Everything it can run is

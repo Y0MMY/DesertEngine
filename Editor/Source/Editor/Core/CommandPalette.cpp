@@ -13,10 +13,11 @@ namespace Desert::Editor
 
     void CommandPalette::Open()
     {
-        m_Open       = true;
-        m_JustOpened = true;
-        m_Selected   = 0;
-        m_Query[0]   = '\0';
+        m_Open          = true;
+        m_JustOpened    = true;
+        m_NeedsCommands = true;
+        m_Selected      = 0;
+        m_Query[0]      = '\0';
     }
 
     void CommandPalette::Draw()

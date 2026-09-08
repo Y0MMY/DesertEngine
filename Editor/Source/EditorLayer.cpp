@@ -3261,6 +3261,14 @@ namespace Desert::Editor
                                       Editor::ViewportPanel::ToggleUIMode( *m_MainScene );
                               } } );
 
+        // THE PALETTE'S OWN DOOR. Ctrl+P is the only other way to it and a keystroke is not available to
+        // this machine, so the command palette was the single window in this editor that no unattended run
+        // could put on screen — and therefore the one whose appearance no change to it could ever be
+        // checked against. Г14's rule reaches its own instrument: a capability reachable only by hand does
+        // not exist for the channel. Found by needing it, exactly as the snap steps and the entity delete
+        // were: A6-1 changed WHEN this list is built and could not photograph the result.
+        commands.push_back( { "View", "Open the command palette", [this] { m_OpenPaletteRequested = true; } } );
+
         // OPENABLE ASSETS. This is where `--open-panel <path-to-asset>` went — the half of that flag that
         // opened a DOCUMENT rather than a tool, and the only way a document has ever been put on screen
         // unattended, since a document does not exist until something opens its asset and therefore has
@@ -3416,10 +3424,46 @@ namespace Desert::Editor
 
     void EditorLayer::DrawCommandPalette()
     {
+        // THE OVERLAY ITSELF, ASKED FOR BY NAME. Ctrl+P is the only other way in, and a keystroke is not
+        // available to this machine — so the command palette was the one window in this editor that no
+        // unattended run could photograph, which made every change to it unverifiable. Г14's rule applied
+        // to the palette's own door: a capability reachable only by hand does not exist for the channel.
+        //
+        // A DEFERRED FLAG rather than calling Open() in the closure, and the reason is the one asymmetry
+        // that would otherwise make this a knob that does nothing. CommandPalette::Draw runs the chosen
+        // entry and then sets m_Open = false on the very next line, so an entry that opened the palette
+        // from inside the palette would be closed again before the frame ended — working over the socket
+        // and doing nothing under a person's hand. Consumed below, in this same frame, so the channel's
+        // ordering guarantee still holds: the frame that answers the command is the frame that shows it.
+        if ( m_OpenPaletteRequested )
+        {
+            m_OpenPaletteRequested = false;
+            m_CommandPalette.Open();
+        }
+
+        // BUILT ON THE FRAME IT OPENS, AND NOT ON EVERY FRAME IT IS OPEN.
+        //
+        // This used to call BuildPaletteCommands() unconditionally, sixty times a second for as long as
+        // the overlay was up — while EditorLayer.hpp said, one line above the declaration, "Built on
+        // demand — when the palette opens, or when a request arrives — never per frame." The comment was
+        // the design; the code was not doing it, and nothing said so.
+        //
+        // It became load-bearing with A6-1: the `Open` group is now enumerated from the project's FILES
+        // rather than from the asset manager's cache, so a per-frame rebuild is a recursive walk of the
+        // content tree sixty times a second while somebody types a query. (The scene list beside it,
+        // CollectAvailableScenes, has always walked a directory tree here too, so the rebuild was already
+        // doing disk work per frame — the file half simply made it bigger and more obvious.)
+        //
+        // Rebuilding on OPEN is not a snapshot going stale, and that is why this is the fix rather than a
+        // cache: the palette takes the keyboard while it is up, so nothing can open a document, load a
+        // scene or delete an entity between the build and the choice. Running an entry closes it, and the
+        // next Ctrl+P builds again.
+        if ( m_CommandPalette.TakeJustOpened() )
+            m_CommandPalette.SetCommands( BuildPaletteCommands() );
+
         if ( !m_CommandPalette.IsOpen() )
             return;
 
-        m_CommandPalette.SetCommands( BuildPaletteCommands() );
         m_CommandPalette.Draw();
     }
 

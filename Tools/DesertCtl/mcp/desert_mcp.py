@@ -50,7 +50,15 @@ class ChannelError(RuntimeError):
 class Channel:
     """One `desertctl` invocation per call. No connection is held between calls, and that is not a
     simplification — the editor answers a command only after a frame that already reflects it, so the reply
-    IS the synchronisation, and a held connection would buy nothing but a state to get wrong."""
+    IS the synchronisation, and a held connection would buy nothing but a state to get wrong.
+
+    AND THERE IS NO RETRY LOOP HERE EITHER, which used to be impossible. A request that arrives before the
+    editor has finished coming up is HELD by the editor until a presented frame proves it has, then run —
+    so one call is already the wait. Before that, `list_commands` was answered from a half-built editor:
+    measured at 0, then 106, then 130 of one project's openable assets as the startup stages filled the
+    asset cache, with nothing in the reply to say which it was. Every client had to guess how long to wait
+    and ask again. `get_state` is the exception and deliberately so — it answers throughout the boot,
+    because its `quiescence` section is how readiness is OBSERVED."""
 
     def __init__(self, binary: str, socket_path: str):
         self.binary = binary
