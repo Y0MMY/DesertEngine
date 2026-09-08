@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -283,6 +284,160 @@ TEST( ShippedShaderPasses, AGeneratedMaterialRowAlwaysArrivesWithThePushConstant
          << ". If a shader was legitimately added or removed, change this number. If it is zero or"
             " unexpectedly small, the marker string above has stopped matching the emitter and this test"
             " was passing without examining anything.";
+}
+
+// THE THIRD RELATION: what a shader SAYS and what a shader DECLARES are two different texts, and the
+// sugar may only rewrite the second. In / Out / Uniform / Buffer / PushConstant are ordinary English
+// words, and the paren-less rules used to match them anywhere in the file — so six shipped shaders had
+// a sentence of their own documentation compiled into a layout qualifier, each one silently consuming
+// an automatic number:
+//
+//   Particles/ParticleSimulate    "// Integrate alive particles. In LOCAL mode (u_Counts.w) ..."
+//   Sky/SkyDistantLight           "// ... two LUT fetches per step. In one thread that is ~2000 ..."
+//   Deferred/DeferredLighting     "// ... many dynamic lights in screen space. In a debug mode it ..."
+//   Fog/HeightFog                 "// ... is what fades this in. In the physical ..."
+//   Clouds/CloudShadowMap         "// WHERE IT RUNS. In-frame compute, outside any render pass ..."
+//   Clouds/CloudSkyOcclusionVolume  same sentence
+//
+// AND THE INCLUDES TOO, which is why this test walks `.glslh` as well as `.shader`. ShaderIncluder.cpp
+// runs TranslateSugar over every included file, so a shared header is sugared exactly like a stage —
+// Common/CloudAuthored.glslh ("In RGBA8 that is 4.00 MiB", "In FLOAT, a") and Common/SkyMedium.glslh
+// ("// ---- Uniform sphere sampling ----", which took a BINDING, not a location) were doing it too. A
+// section heading is the likeliest place of all for one of these words, and no shader author would ever
+// look there.
+//
+// None of the nine was visible in a frame, because none of those texts declares an automatic In / Out /
+// Uniform / Buffer — the eaten number was never asked for. That is precisely why it needed a test rather
+// than a habit: the cost lands on whoever adds the first automatic declaration to one of them, and it
+// lands as attributes shifted by one, in the code, with the cause in the prose above it.
+//
+// This is checked over the SHIPPED TREE and not only in the parser's unit tests because the alternative
+// is a convention — "do not write these words in comments" — that nobody can be told and no reviewer can
+// see. The comment scanner below is deliberately a SECOND implementation of "where the comments are":
+// if it and the parser's ever disagree, this test is what says so.
+namespace
+{
+    // The comment runs of a GLSL text: `//` to end of line, `/* */` non-nesting. Nothing else — the
+    // language has no string literals, and `#if 0` is code (see DShaderParserComments).
+    std::vector<std::string> CommentRuns( const std::string& text )
+    {
+        std::vector<std::string> runs;
+        for ( size_t i = 0; i + 1 < text.size(); )
+        {
+            if ( text[i] == '/' && text[i + 1] == '/' )
+            {
+                const size_t end  = text.find( '\n', i );
+                const size_t stop = ( end == std::string::npos ) ? text.size() : end;
+                runs.push_back( text.substr( i, stop - i ) );
+                i = stop;
+            }
+            else if ( text[i] == '/' && text[i + 1] == '*' )
+            {
+                const size_t close = text.find( "*/", i + 2 );
+                const size_t stop  = ( close == std::string::npos ) ? text.size() : close + 2;
+                runs.push_back( text.substr( i, stop - i ) );
+                i = stop;
+            }
+            else
+            {
+                ++i;
+            }
+        }
+        return runs;
+    }
+
+    // A capitalized sugar keyword standing alone in prose — the shape that used to be rewritten.
+    bool MentionsASugarKeyword( const std::string& comment )
+    {
+        static const std::regex kKeyword( R"(\b(In|Out|Uniform|Buffer|ReadBuffer|WriteBuffer|PushConstant)\b)" );
+        return std::regex_search( comment, kKeyword );
+    }
+
+    // Every assembled GLSL text a shader produces: the default stages plus every pass's stages.
+    std::vector<std::string> AllStageTexts( const DShaderParseResult& parsed )
+    {
+        std::vector<std::string> texts;
+        for ( const auto& [stage, source] : parsed.Stages )
+            texts.push_back( source );
+        for ( const auto& pass : parsed.Passes )
+            for ( const auto& [stage, source] : pass.Stages )
+                texts.push_back( source );
+        return texts;
+    }
+
+    // Every `.glslh` under the shader root — Common/ and Mesh/, not only Programs/. These never reach
+    // DShaderParser::Parse; the compiler's includer hands each one to TranslateSugar on its own
+    // (ShaderIncluder.cpp), which is what this reproduces.
+    const std::vector<std::filesystem::path>& ShippedIncludes()
+    {
+        static const std::vector<std::filesystem::path> files = []()
+        {
+            std::filesystem::path here = std::filesystem::current_path();
+            for ( int up = 0; up < 8 && !std::filesystem::exists( here / "Editor" / "Resources" / "Shaders" );
+                  ++up )
+                here = here.parent_path();
+
+            std::vector<std::filesystem::path> out;
+            const auto                         root = here / "Editor" / "Resources" / "Shaders";
+            if ( std::filesystem::exists( root ) )
+                for ( const auto& entry : std::filesystem::recursive_directory_iterator( root ) )
+                    if ( entry.is_regular_file() && entry.path().extension() == ".glslh" )
+                        out.push_back( entry.path() );
+            std::sort( out.begin(), out.end() );
+            return out;
+        }();
+        return files;
+    }
+} // namespace
+
+TEST( ShippedShaderPasses, NoShippedShaderTranslatesItsOwnProse )
+{
+    int filesWithProseKeywords = 0;
+
+    // THE PREDICATE IS "VERBATIM", NOT "CONTAINS layout(". The first spelling of this test looked for
+    // `layout(` inside an output comment and reported two false positives immediately: CloudParams.glslh
+    // and FogParams.glslh both DOCUMENT the raw form — "Raw `layout(std430, ...)` rather than the
+    // ReadBuffer(n) sugar" — so the string a human typed was indistinguishable from one the sugar wrote.
+    // A comment the sugar left alone is present, character for character, in the file it came from; a
+    // rewritten one is not. That has no false positives and needs no list of exceptions.
+    const auto check =
+         [&filesWithProseKeywords]( const std::filesystem::path& file, const std::vector<std::string>& translated )
+    {
+        const std::string source = ReadFile( file );
+
+        bool mentions = false;
+        for ( const auto& comment : CommentRuns( source ) )
+            mentions = mentions || MentionsASugarKeyword( comment );
+        filesWithProseKeywords += mentions ? 1 : 0;
+
+        for ( const auto& text : translated )
+            for ( const auto& comment : CommentRuns( text ) )
+                EXPECT_NE( source.find( comment ), std::string::npos )
+                     << file.string() << ": this comment came out of the translation in a form the file"
+                     << " does not contain, so the sugar rewrote a word of PROSE — which also consumed an"
+                     << " automatic location/binding. Offending comment:\n"
+                     << comment;
+    };
+
+    for ( const auto& shader : ShippedShaders() )
+    {
+        ASSERT_TRUE( shader.Parsed.IsSuccess() ) << shader.File.string() << ": " << shader.Parsed.GetError();
+        check( shader.File, AllStageTexts( shader.Parsed.GetValue() ) );
+    }
+
+    ASSERT_FALSE( ShippedIncludes().empty() ) << "found no .glslh files — the shader root was not located";
+    for ( const auto& include : ShippedIncludes() )
+        check( include, { DShaderParser::TranslateSugar( ReadFile( include ) ) } );
+
+    // The check must have something to examine. If a future cleanup deletes every mention of the six
+    // words from every shipped comment, this test would go green by having nothing to look at — the one
+    // failure mode a census must not have. It is a floor, not a pinned count: the whole point of the fix
+    // is that an author may now write "In LOCAL mode" without thinking about it, so the number is free
+    // to grow.
+    EXPECT_GE( filesWithProseKeywords, 14 )
+         << "shipped shaders and includes stopped mentioning sugar keywords in prose, so this test"
+            " examined nothing. Either add such a comment back, or delete this test and say why in the"
+            " commit.";
 }
 
 int main( int argc, char** argv )
