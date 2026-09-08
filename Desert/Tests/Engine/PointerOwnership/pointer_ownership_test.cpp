@@ -153,11 +153,21 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   (string literals in an `inline constexpr std::array`), and again the value is that a raw pointer
     //   could not be ADDED without someone being asked. Note the shape of the thing it caught: a table
     //   written to make an exception explainable, which would itself have been an unexplained pointer.
-    EXPECT_EQ( CountOf( Form::Raw ), 325 );
-    EXPECT_EQ( CountOf( Form::Shared ), 317 );
+    //
+    //   786 -> 787, and the interesting half of this one is the SHARED count going DOWN. U7-2 made the UI
+    //   editor a document over one entity's UICanvasComponent, and a document holds its scene WEAKLY: a
+    //   closed scene is one of the ways its subject dies, and a shared_ptr would hide that death and leak
+    //   the level with it (the argument is written out at AnimGraphPanel::m_Scene). So UIEditorPanel::m_Scene
+    //   moved shared -> weak, which is 317 -> 316 and 34 -> 35 with the total unchanged by that move. The
+    //   +1 is the class constant `kComponentTypeName` — the literal the registration and the Details button
+    //   both read so the two cannot spell the subject's facet differently — and it is the same easy answer
+    //   the two documents beside it give: a string literal in static storage, owned by nobody and outliving
+    //   everything.
+    EXPECT_EQ( CountOf( Form::Raw ), 326 );
+    EXPECT_EQ( CountOf( Form::Shared ), 316 );
     EXPECT_EQ( CountOf( Form::Unique ), 110 );
-    EXPECT_EQ( CountOf( Form::Weak ), 34 );
-    EXPECT_EQ( (int)Members().size(), 786 )
+    EXPECT_EQ( CountOf( Form::Weak ), 35 );
+    EXPECT_EQ( (int)Members().size(), 787 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }
@@ -357,7 +367,7 @@ TEST( PointerOwnership, NoRawPointerMemberIsDeletedByItsHolder )
 TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
 {
     // THE AUDIT'S LARGEST SINGLE RESULT IS A REFUSAL, and it is recorded here so the next person does
-    // not re-derive it. 317 of the 783 members in these trees are `shared_ptr`, and for the GPU
+    // not re-derive it. Roughly two fifths of the members in these trees are `shared_ptr`, and for the GPU
     // resources that is the CORRECT form rather than a habit: an Image2D is held at once by the
     // framebuffer that allocated it, by the descriptor sets that sample it and by the deletion queue
     // that outlives both, and no two of those have an ordered death. Converting them to `unique_ptr`
@@ -368,7 +378,7 @@ TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
     // `shared_ptr` here is a false impression of shared ownership, and the register's job is to make
     // the true owner findable instead of mass-replacing them for uniformity -- churn that would hide
     // the seven real findings in a diff of two hundred files.
-    EXPECT_EQ( CountOf( Form::Shared ), 317 );
+    EXPECT_EQ( CountOf( Form::Shared ), 316 );
     EXPECT_GT( CountOf( Form::Shared ), CountOf( Form::Unique ) + CountOf( Form::Weak ) );
 }
 

@@ -2,11 +2,6 @@
 #include "UIElementCatalog.hpp"
 #include "UIElementFactory.hpp"
 
-#include <Editor/Panels/PanelContext.hpp>
-
-#include <Editor/Core/IconsMaterialDesignIcons.hpp>
-#include <Editor/Core/Selection/SelectionManager.hpp>
-
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
@@ -29,10 +24,10 @@ namespace Desert::Editor
 
     namespace
     {
-        // The preview target is the canvas's DESIGN resolution, not the panel's size, and that is what makes
+        // The preview target is the canvas's DESIGN resolution, not the window's size, and that is what makes
         // the preview honest: at the reference resolution all three canvas scale modes coincide (Stretch is
         // 1:1, ScaleWithScreen scales by 1, Letterbox fits exactly), so the picture is the canvas as authored
-        // rather than the canvas squeezed into whatever the user dragged the window to. The panel then just
+        // rather than the canvas squeezed into whatever the user dragged the window to. The window then just
         // fits that image into its content region.
         //
         // The cap is memory, not policy: Reference Width/Height go up to 7680x4320 in Details, and an RGBA32F
@@ -50,19 +45,47 @@ namespace Desert::Editor
         }
     } // namespace
 
-    UIEditorPanel::UIEditorPanel( const std::shared_ptr<::Desert::Core::Scene>& scene )
-         : IPanel( "UI Editor", /*showPanel=*/false ), m_Scene( scene )
+    UIEditorPanel::UIEditorPanel( const SubjectId& subject, const std::string& displayName,
+                                  const std::shared_ptr<::Desert::Core::Scene>& scene )
+         : ISubjectDocument( displayName, subject ), m_Scene( scene )
     {
         // An authoring preview is a SECOND view of a scene the viewport is already drawing. The one clock
         // this walk does not own is the UIAnim playhead, which lives in the component; the viewport's pass
         // advances it, and this view must not, or every clip runs at twice its authored speed whenever the
-        // panel is open.
+        // window is open.
         m_UICanvas.DrivesSceneAnimation = false;
     }
 
     UIEditorPanel::~UIEditorPanel()
     {
         ReleaseTarget();
+    }
+
+    entt::entity UIEditorPanel::ResolveCanvasEntity() const
+    {
+        const auto scene = m_Scene.lock();
+        if ( !scene )
+            return entt::null;
+
+        const auto entOpt = scene->FindEntityByID( Subject().Owner );
+        if ( !entOpt )
+            return entt::null;
+
+        const entt::entity handle = entOpt->get().GetHandle();
+        return scene->GetRegistry().has<ECS::UICanvasComponent>( handle ) ? handle : entt::null;
+    }
+
+    ECS::UICanvasComponent* UIEditorPanel::ResolveCanvas() const
+    {
+        const auto scene = m_Scene.lock();
+        if ( !scene )
+            return nullptr;
+
+        const entt::entity handle = ResolveCanvasEntity();
+        if ( handle == entt::null )
+            return nullptr;
+
+        return &scene->GetRegistry().get<ECS::UICanvasComponent>( handle );
     }
 
     void UIEditorPanel::ReleaseTarget()
@@ -147,23 +170,36 @@ namespace Desert::Editor
     {
         m_PreviewRecorded = false;
 
-        // A closed panel renders nothing and holds nothing: the target is released so a session that opened
-        // the UI editor once does not keep a design-resolution framebuffer alive for the rest of it.
-        if ( !m_SowPanel || !m_Scene )
+        // WAS ANYBODY LOOKING? Read here and cleared here, because the editor runs every OnPreUpdate before
+        // the document well draws anything — so what this reads is last frame's answer, which is the only
+        // one that exists at this point in the frame. See the header for why this document counts its own
+        // hidden frames instead of using the six-slot sweep.
+        m_FramesUndrawn  = m_DrawnLastFrame ? 0u : m_FramesUndrawn + 1u;
+        m_DrawnLastFrame = false;
+        if ( m_FramesUndrawn >= kFramesUndrawnBeforeTargetRelease )
         {
             ReleaseTarget();
             return;
         }
 
-        auto&              reg    = m_Scene->GetRegistry();
-        const entt::entity canvas = FindUICanvas( reg );
-        if ( canvas == entt::null )
+        const auto scene = m_Scene.lock();
+        if ( !scene )
         {
             ReleaseTarget();
             return;
         }
 
-        const auto& canvasData = reg.get<ECS::UICanvasComponent>( canvas ).Data;
+        const ECS::UICanvasComponent* canvas = ResolveCanvas();
+        if ( !canvas )
+        {
+            // The subject is gone. The window itself is closed by the editor's own liveness sweep
+            // (IsSubjectAlive) with a named reason; releasing here is so the target does not outlive the
+            // canvas by the frames that takes.
+            ReleaseTarget();
+            return;
+        }
+
+        const auto& canvasData = canvas->Data;
         if ( !canvasData.Visible )
             return;
 
@@ -194,11 +230,18 @@ namespace Desert::Editor
         // worldViewProj = nullptr on purpose too: a WorldSpace canvas is billboarded by the camera in the
         // viewport, but there is no camera here — the authoring view shows it flat, at its design size.
         //
-        // m_UICanvas is THIS panel's own canvas state, and inertness is not enough without it: the walk
+        // m_UICanvas is THIS window's own canvas state, and inertness is not enough without it: the walk
         // hands its hot election over at the end whether or not it had input, so this preview used to clear
         // the viewport's elected element every single frame it was open — one scene, no second document
         // needed. See UICanvasContext.hpp.
-        ::Desert::UI::RenderCanvas2D( m_UICanvas, reg, m_Render2D.GetDrawList(), viewport,
+        //
+        // THE WALK IS OVER THE WHOLE REGISTRY AND NOT OVER THIS SUBJECT'S SUBTREE, which is the shipping
+        // renderer's own behaviour: RenderCanvas2D finds the canvases in the registry and draws them. So a
+        // scene with two canvases shows both in either window, and what the subject decides is which canvas
+        // the TOOLBAR parents into and whose design resolution the target is sized to. Narrowing the walk
+        // would be a second implementation of the canvas pass, which is exactly what this window's previous
+        // ImGui-based preview was and why it was deleted.
+        ::Desert::UI::RenderCanvas2D( m_UICanvas, scene->GetRegistry(), m_Render2D.GetDrawList(), viewport,
                                       /*worldViewProj=*/nullptr,
                                       /*input=*/nullptr );
         m_Render2D.Flush();
@@ -209,30 +252,23 @@ namespace Desert::Editor
 
     void UIEditorPanel::OnUIRender()
     {
-        if ( !m_Scene )
+        m_DrawnLastFrame = true;
+
+        const auto                    scene  = m_Scene.lock();
+        const ECS::UICanvasComponent* canvas = ResolveCanvas();
+        if ( !scene || !canvas )
         {
-            ImGui::TextDisabled( "No active scene." );
+            // One frame at most: the editor closes a document whose subject is gone, with the reason. Said
+            // rather than left blank so that frame is not a window that looks broken.
+            ImGui::TextDisabled( "This canvas no longer exists; closing." );
             return;
         }
 
-        auto&              reg    = m_Scene->GetRegistry();
-        const entt::entity canvas = FindUICanvas( reg );
-
-        if ( canvas == entt::null )
-        {
-            ImGui::TextDisabled( "No UI Canvas in the scene." );
-            if ( ImGui::Button( ICON_MDI_PLUS " Create UI Canvas" ) )
-            {
-                auto& e = m_Scene->CreateNewEntity( "UI Canvas" );
-                e.AddComponent<ECS::UICanvasComponent>();
-            }
-            return;
-        }
-
-        const auto& canvasData = reg.get<ECS::UICanvasComponent>( canvas ).Data;
+        const entt::entity canvasEntity = ResolveCanvasEntity();
+        const auto&        canvasData   = canvas->Data;
 
         // Toolbar, generated from the one element catalog the viewport's "UI" menu also reads. Buttons wrap
-        // to the next line instead of running off the edge — a dozen of them do not fit a docked panel.
+        // to the next line instead of running off the edge — a dozen of them do not fit a docked window.
         {
             const ImGuiStyle& style     = ImGui::GetStyle();
             const float       rightEdge = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
@@ -241,7 +277,7 @@ namespace Desert::Editor
                 const UIElementEntry& entry = kUIElements[i];
                 const std::string     label = std::string( entry.Icon ) + " + " + entry.Label;
                 if ( ImGui::Button( label.c_str() ) )
-                    CreateUIElement( *m_Scene, canvas, i );
+                    CreateUIElement( *scene, canvasEntity, i );
 
                 if ( i + 1 >= kUIElementCount )
                     break;
@@ -279,8 +315,8 @@ namespace Desert::Editor
 
         if ( m_PreviewRecorded )
         {
-            // Built on first use rather than in the constructor: the panel is constructed while the editor
-            // layer is still being assembled, and the ImGui texture cache needs a live renderer backend.
+            // Built on first use rather than in the constructor: a document is constructed between frames
+            // and the ImGui texture cache needs a live renderer backend.
             if ( !m_UIHelper )
             {
                 m_UIHelper = std::make_unique<Editor::UI::UIHelper>();
@@ -293,11 +329,6 @@ namespace Desert::Editor
 
         ImGui::SetCursorScreenPos( origin );
         ImGui::Dummy( avail );
-    }
-
-    bool UIEditorPanel::IsRelevant() const
-    {
-        return SelectionHas<ECS::UILayoutComponent>( m_Scene ) || SelectionHas<ECS::UICanvasComponent>( m_Scene );
     }
 
 } // namespace Desert::Editor
