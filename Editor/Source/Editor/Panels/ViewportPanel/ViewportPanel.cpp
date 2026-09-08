@@ -30,6 +30,7 @@
 #include <Engine/Runtime/SelectionContext.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/ECS/EntityLock.hpp>
 #include <Engine/UI/UICanvasLayout.hpp>
 #include <Engine/UI/UILayout.hpp>
 #include <Editor/Panels/UI/UIElementCatalog.hpp>
@@ -1606,6 +1607,17 @@ namespace Desert::Editor
 
                 if ( uiHit != entt::null && reg.has<ECS::UUIDComponent>( uiHit ) )
                 {
+                    // The lock applies HERE too, and not only to the 3D raycast below. This is a second
+                    // picking path through the same click, and a lock that stopped one of them would be
+                    // the "blocks two of the three things it claims to" failure the predicate exists to
+                    // prevent — with the padlock still drawn closed in the Outliner either way.
+                    if ( ECS::IsLocked( reg, uiHit ) )
+                    {
+                        ToastManager::Push( Tools::Describe( Tools::PickOutcome::RefusedLocked ), ToastLevel::Info,
+                                            2.5f );
+                        return false;
+                    }
+
                     const auto uuid = reg.get<ECS::UUIDComponent>( uiHit ).UUID;
                     if ( ::ImGui::GetIO().KeyCtrl )
                         Core::SelectionManager::Toggle( uuid );

@@ -3289,13 +3289,20 @@ namespace Desert::Editor
                 // whole subject is what the viewport will and will not let you touch — so a channel that
                 // cannot set it cannot check it either. Same recursive setter both of those call.
                 {
-                    const bool locked = m_MainScene->GetRegistry().has<ECS::LockComponent>( entity.GetHandle() );
-                    Desert::Core::Scene* scene  = m_MainScene.get();
-                    const entt::entity   handle = entity.GetHandle();
-                    commands.push_back( { "Entity", ( locked ? "Unlock " : "Lock " ) + name,
-                                          [scene, handle, locked]
+                    // Captures the UUID and re-resolves at RUN time, exactly as Delete above does, rather
+                    // than holding a Scene* and an entt handle from build time. The list is rebuilt per
+                    // use, so a stale pointer is not reachable today — but "not reachable today" is a
+                    // lifetime argument the next reader has to reconstruct, and a UUID lookup that simply
+                    // finds nothing needs no argument at all. Asked through the shared predicate, so this
+                    // label cannot disagree with the padlock the Outliner draws for the same entity.
+                    const bool locked = ECS::IsLocked( m_MainScene->GetRegistry(), entity.GetHandle() );
+                    commands.push_back( { "Entity", ( locked ? "Unlock " : "Lock " ) + name, [this, uuid, locked]
                                           {
-                                              ECS::SetLockedRecursive( scene->GetRegistry(), handle, !locked );
+                                              if ( !m_MainScene )
+                                                  return PaletteCommandDone();
+                                              if ( auto ref = m_MainScene->FindEntityByID( uuid ) )
+                                                  ECS::SetLockedRecursive( m_MainScene->GetRegistry(),
+                                                                           ref->get().GetHandle(), !locked );
                                               return PaletteCommandDone();
                                           } } );
                 }
@@ -4999,14 +5006,24 @@ namespace Desert::Editor
         ToolbarSeparator();
 
         // ---- Transform tools --------------------------------------------------------------------
+        //
+        // THE KEYS NAMED HERE ARE THE KEYS THAT WORK. These three tooltips read "(W)", "(E)" and "(R)"
+        // — UE's bindings — while the only handler in the editor binds T, R and C
+        // (ViewportPanel::OnKeyPressedEvent). So the rail advertised three shortcuts that did nothing,
+        // and the viewport strip's own tooltips (Move (T) / Rotate (R) / Scale (C)) said the true thing
+        // eight inches away. A UI string is a promise about the tree, and this one was not kept.
+        //
+        // Corrected toward the CODE rather than toward UE, deliberately: adopting W/E/R is a shortcut
+        // decision with a Foliage/Modeling conflict to weigh and belongs to whoever owns the keymap, not
+        // to a tooltip edit. Naming the working key costs nothing and is true today either way.
         const Gz::Operation op = Gz::Get();
-        if ( ToolbarButton( ICON_MDI_CURSOR_MOVE, "", op == Gz::Operation::Translate, "Translate (W)" ) )
+        if ( ToolbarButton( ICON_MDI_CURSOR_MOVE, "", op == Gz::Operation::Translate, "Translate (T)" ) )
             Gz::Set( Gz::Operation::Translate );
         ImGui::SameLine();
-        if ( ToolbarButton( ICON_MDI_ROTATE_ORBIT, "", op == Gz::Operation::Rotate, "Rotate (E)" ) )
+        if ( ToolbarButton( ICON_MDI_ROTATE_ORBIT, "", op == Gz::Operation::Rotate, "Rotate (R)" ) )
             Gz::Set( Gz::Operation::Rotate );
         ImGui::SameLine();
-        if ( ToolbarButton( ICON_MDI_ARROW_EXPAND_ALL, "", op == Gz::Operation::Scale, "Scale (R)" ) )
+        if ( ToolbarButton( ICON_MDI_ARROW_EXPAND_ALL, "", op == Gz::Operation::Scale, "Scale (C)" ) )
             Gz::Set( Gz::Operation::Scale );
         ImGui::SameLine();
 
