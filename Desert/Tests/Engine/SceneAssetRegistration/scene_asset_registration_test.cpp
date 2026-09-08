@@ -201,20 +201,32 @@ TEST( SceneAssetRegistration, TheResolverHasExactlyOneRegistrationSitePerService
          ReadAll( root + "Desert/Desert/Source/Engine/Core/Serialize/ComponentRegistry.cpp" );
     ASSERT_FALSE( source.empty() );
 
-    // Every spelling by which this file can hand a record to either of the two services. Both entry
-    // points are counted, because "register eagerly here and lazily there" is the same two-sites defect
-    // wearing different method names.
-    const size_t meshSites = CountOccurrences( source, "GetMeshService()->Register(" ) +
-                             CountOccurrences( source, "GetMeshService()->RegisterAsset(" );
-    const size_t materialSites = CountOccurrences( source, "GetMaterialService()->Register(" ) +
-                                 CountOccurrences( source, "GetMaterialService()->RegisterAsset(" );
+    // HOW MANY TIMES THIS FILE REACHES EACH SERVICE AT ALL — not how many times it calls a particular
+    // method on one. Counting `->Register(` would pass a file that registered eagerly in one branch and
+    // lazily in another, and it would also pass a branch whose only contact with the service is a
+    // `->Get()` used as a guard, which is the shape this task removed (it BUILT the material it was
+    // asking about). One accessor call is the strongest form of "one site" that a text scan can state,
+    // and it is what the file now looks like: `auto* service = ...GetMeshService();` inside
+    // EnsureMeshRegistered, and nowhere else.
+    //
+    // MEASURED ON THE TREE THIS TASK STARTED FROM: 2 for the mesh service (FromPath's create branch,
+    // FromGuid's guard) and 3 for the material service (the same two plus FromGuid's `Get`-as-a-guard).
+    // That is the red this suite was shown in.
+    const size_t meshSites     = CountOccurrences( source, "GetMeshService()" );
+    const size_t materialSites = CountOccurrences( source, "GetMaterialService()" );
 
-    EXPECT_EQ( meshSites, 1u ) << "the mesh reference must be registered in ONE place, so the found and "
-                                  "created routes cannot drift apart";
-    EXPECT_EQ( materialSites, 1u ) << "the material reference must be registered in ONE place, so the "
+    EXPECT_EQ( meshSites, 1u ) << "the mesh reference must reach the service in ONE place, so the found "
+                                  "and created routes cannot drift apart";
+    EXPECT_EQ( materialSites, 1u ) << "the material reference must reach the service in ONE place, so the "
                                       "found and created routes cannot drift apart";
 
     // And that one place is reached through the rule above, not by a hand-written find-else-create beside
     // it. Two call sites: the mesh reference and the material reference.
     EXPECT_GE( CountOccurrences( source, "ResolveSceneReference(" ), 2u );
+}
+
+int main( int argc, char** argv )
+{
+    testing::InitGoogleTest( &argc, argv );
+    return RUN_ALL_TESTS();
 }
