@@ -186,17 +186,22 @@ namespace Desert::Tests::PointerCensus
           "CloudBakeBinding", "DistantSkyLight", Guard::CallScoped,
           kWhyArgumentPack },
         { "Desert/Desert/Source/Engine/Graphic/Clouds/CloudShadowPayload.hpp",
-          "CloudShadowInput", "Map", Guard::CallScoped,
-          kWhyArgumentPack },
+          "CloudShadowInput", "Map", Guard::FrameScoped,
+          "SceneRenderer gathers ONE of these per frame and hands the same one to the deferred, the PBR "
+          "and the terrain materials; the map is owned by the VolumetricCloudRenderer of that same "
+          "SceneRenderer, and null is the ordinary state every consumer already tests" },
         { "Desert/Desert/Source/Engine/Graphic/ExternalRenderPass.hpp",
-          "ExternalPassContext", "Camera", Guard::CallScoped,
-          kWhyArgumentPack },
+          "ExternalPassContext", "Camera", Guard::FrameScoped,
+          "per-frame data handed to an editor-registered pass when the render graph executes it; the "
+          "target and its depth belong to the SceneRenderer running the graph" },
         { "Desert/Desert/Source/Engine/Graphic/ExternalRenderPass.hpp",
-          "ExternalPassContext", "Target", Guard::CallScoped,
-          kWhyArgumentPack },
+          "ExternalPassContext", "Target", Guard::FrameScoped,
+          "per-frame data handed to an editor-registered pass when the render graph executes it; the "
+          "target and its depth belong to the SceneRenderer running the graph" },
         { "Desert/Desert/Source/Engine/Graphic/ExternalRenderPass.hpp",
-          "ExternalPassContext", "Depth", Guard::CallScoped,
-          kWhyArgumentPack },
+          "ExternalPassContext", "Depth", Guard::FrameScoped,
+          "per-frame data handed to an editor-registered pass when the render graph executes it; the "
+          "target and its depth belong to the SceneRenderer running the graph" },
         { "Desert/Desert/Source/Engine/Graphic/MappedMemory.hpp",
           "MappedMemory", "kNeverAttempted", Guard::StaticStorage,
           "a string literal held by a constexpr static" },
