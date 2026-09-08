@@ -249,6 +249,24 @@ namespace Desert::Platform::MacOS
         m_Data.Specification = specification;
     }
 
+    // Width/Height in the specification are a CACHE of the OS's answer, normally refilled by the resize
+    // callback — which fires out of glfwPollEvents, i.e. on the NEXT frame. That is one frame too late for
+    // a caller that maximizes or restores and then immediately asks how big the window now is, and the
+    // title bar's drag does exactly that: it restores a maximized window and places it so the cursor stays
+    // at the same fraction across the bar. Reading the stale maximized width there would drop the window
+    // several hundred pixels away from the pointer. Refilled from the same source the callback uses, so
+    // this is the cache catching up, not a second owner of the size.
+    void MacOSWindow::RefreshCachedSize()
+    {
+        int w = 0, h = 0;
+        glfwGetWindowSize( m_GLFWWindow, &w, &h );
+        if ( w > 0 && h > 0 )
+        {
+            m_Data.Specification.Width  = (uint32_t)w;
+            m_Data.Specification.Height = (uint32_t)h;
+        }
+    }
+
     void MacOSWindow::SetTitle( const std::string& title )
     {
         m_Data.Specification.Title = title;
@@ -281,11 +299,13 @@ namespace Desert::Platform::MacOS
     void MacOSWindow::Maximize()
     {
         glfwMaximizeWindow( m_GLFWWindow );
+        RefreshCachedSize();
     }
 
     void MacOSWindow::Restore()
     {
         glfwRestoreWindow( m_GLFWWindow );
+        RefreshCachedSize();
     }
 
     void MacOSWindow::Minimize()

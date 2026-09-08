@@ -225,6 +225,19 @@ namespace Desert::Platform::Windows
         m_Data.Specification = specification;
     }
 
+    // The cache catching up, not a second owner of the size — the reason one frame of staleness matters is
+    // written out over the same function in MacOSWindow.cpp.
+    void WindowsWindow::RefreshCachedSize()
+    {
+        int w = 0, h = 0;
+        glfwGetWindowSize( m_GLFWWindow, &w, &h );
+        if ( w > 0 && h > 0 )
+        {
+            m_Data.Specification.Width  = (uint32_t)w;
+            m_Data.Specification.Height = (uint32_t)h;
+        }
+    }
+
     void WindowsWindow::SetTitle( const std::string& title )
     {
         m_Data.Specification.Title = title;
@@ -257,11 +270,13 @@ namespace Desert::Platform::Windows
     void WindowsWindow::Maximize()
     {
         glfwMaximizeWindow( m_GLFWWindow );
+        RefreshCachedSize();
     }
 
     void WindowsWindow::Restore()
     {
         glfwRestoreWindow( m_GLFWWindow );
+        RefreshCachedSize();
     }
 
     void WindowsWindow::Minimize()

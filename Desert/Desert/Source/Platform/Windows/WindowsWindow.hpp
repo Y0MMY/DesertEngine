@@ -75,6 +75,9 @@ namespace Desert::Platform::Windows
 
     private:
         bool OnEventWindowResize( Common::EventWindowResize& e );
+        /// Refill the cached Width/Height from the OS after a call that resized the window without going
+        /// through the resize callback yet. See the definition for why one frame of staleness matters.
+        void RefreshCachedSize();
 
     private:
         struct WindowData
