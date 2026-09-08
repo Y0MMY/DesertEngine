@@ -5,7 +5,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace Desert::Graphic
@@ -328,5 +330,256 @@ namespace Desert::Graphic
         static void     SetBytes( uint64_t row, std::size_t bytes );
         static bool     Read( uint64_t row, ResourceOwner& owner, Common::AssetHandle& asset );
     };
+
+    // A NAMED detail namespace and INLINE functions, not an anonymous namespace. An anonymous namespace
+    // in a header gives every translation unit its own copy of these statics — so the ledger would count
+    // per-TU and every number it reports would be a fraction of the truth, silently. `inline` in a named
+    // namespace is what gives the whole program one map.
+    namespace LedgerDetail
+    {
+        struct LedgerRow
+        {
+            ResourceKind        Kind  = ResourceKind::Image2D;
+            ResourceOwner       Owner = ResourceOwner::Unclaimed;
+            Common::AssetHandle Asset;
+            std::size_t         Bytes      = 0;
+            bool                BytesKnown = false;
+        };
+
+        /// The rows, and the id that indexes them.
+        ///
+        /// A MAP AND NOT A VECTOR WITH A FREE LIST, and the reason is the defect this file's neighbour
+        /// already has: `ImageService` indexes a vector by a recycled handle and resolves on the INDEX
+        /// alone, so a stale handle silently resolves to whoever moved into the slot. A monotonically
+        /// increasing id that is never reused cannot do that: a token from a released row finds nothing,
+        /// which is the only safe answer. Ids are 64-bit, so exhausting them is not a scenario.
+        ///
+        /// Function-local statics rather than file-scope ones because GPU objects are constructed during
+        /// static initialisation in some translation units (the default textures), and a file-scope map
+        /// might not be alive yet. The `Meyers` form gives construction on first use in every order.
+        inline std::mutex& Lock()
+        {
+            static std::mutex lock;
+            return lock;
+        }
+
+        inline std::unordered_map<uint64_t, LedgerRow>& Rows()
+        {
+            static std::unordered_map<uint64_t, LedgerRow> rows;
+            return rows;
+        }
+
+        inline uint64_t& NextRowId()
+        {
+            static uint64_t next = 1; // 0 is "accounts for nothing" and is never handed out
+            return next;
+        }
+
+        /// The attribution a new row gets when nobody claims it. Thread-local: two threads building GPU
+        /// objects at once must not attribute each other's, and the preloader does run staged work.
+        inline ResourceOwner& AmbientOwner()
+        {
+            static thread_local ResourceOwner owner = ResourceOwner::Unclaimed;
+            return owner;
+        }
+    } // namespace LedgerDetail
+
+    using namespace LedgerDetail;
+
+    inline ResourceAttributionScope::ResourceAttributionScope( const ResourceOwner owner ) noexcept
+         : m_Previous( AmbientOwner() )
+    {
+        AmbientOwner() = owner;
+    }
+
+    inline ResourceAttributionScope::~ResourceAttributionScope()
+    {
+        AmbientOwner() = m_Previous;
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────────────────────────
+    // ResourceOwnership — the token
+    // ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    inline ResourceOwnership ResourceOwnership::Take( const ResourceKind kind, const std::size_t bytes )
+    {
+        return ResourceOwnership( ResourceLedger::Open( kind, bytes ) );
+    }
+
+    inline ResourceOwnership::~ResourceOwnership()
+    {
+        if ( m_Row != 0 )
+            ResourceLedger::Close( m_Row );
+    }
+
+    inline ResourceOwnership::ResourceOwnership( ResourceOwnership&& other ) noexcept : m_Row( other.m_Row )
+    {
+        other.m_Row = 0;
+    }
+
+    inline ResourceOwnership& ResourceOwnership::operator=( ResourceOwnership&& other ) noexcept
+    {
+        if ( this != &other )
+        {
+            // The row this token already held is closed FIRST. Overwriting it would leave a row with no
+            // token — the exact "reports objects that are gone" drift the header refuses to allow.
+            if ( m_Row != 0 )
+                ResourceLedger::Close( m_Row );
+            m_Row       = other.m_Row;
+            other.m_Row = 0;
+        }
+        return *this;
+    }
+
+    inline void ResourceOwnership::Claim( const ResourceOwner owner, const Common::AssetHandle asset )
+    {
+        if ( m_Row != 0 )
+            ResourceLedger::Attribute( m_Row, owner, asset );
+    }
+
+    inline void ResourceOwnership::RecordBytes( const std::size_t bytes )
+    {
+        if ( m_Row != 0 )
+            ResourceLedger::SetBytes( m_Row, bytes );
+    }
+
+    inline ResourceOwner ResourceOwnership::GetOwner() const
+    {
+        ResourceOwner       owner = ResourceOwner::Unclaimed;
+        Common::AssetHandle asset;
+        if ( m_Row != 0 )
+            (void)ResourceLedger::Read( m_Row, owner, asset );
+        return owner;
+    }
+
+    inline Common::AssetHandle ResourceOwnership::GetAsset() const
+    {
+        ResourceOwner       owner = ResourceOwner::Unclaimed;
+        Common::AssetHandle asset;
+        if ( m_Row != 0 )
+            (void)ResourceLedger::Read( m_Row, owner, asset );
+        return asset;
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────────────────────────
+    // ResourceLedger — the storage
+    // ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    inline uint64_t ResourceLedger::Open( const ResourceKind kind, const std::size_t bytes )
+    {
+        std::lock_guard<std::mutex> guard( Lock() );
+
+        const uint64_t id = NextRowId()++;
+
+        LedgerRow row;
+        row.Kind = kind;
+        // The ambient default, if a scope is open. Nothing else reads it: a later Claim() overwrites the
+        // owner outright, because naming the asset behind an object is more specific than naming the
+        // subsystem that happened to be building when it appeared.
+        row.Owner      = AmbientOwner();
+        row.Bytes      = bytes;
+        row.BytesKnown = bytes != 0;
+        Rows().emplace( id, row );
+
+        return id;
+    }
+
+    inline void ResourceLedger::Close( const uint64_t row )
+    {
+        std::lock_guard<std::mutex> guard( Lock() );
+        Rows().erase( row );
+    }
+
+    inline void ResourceLedger::Attribute( const uint64_t row, const ResourceOwner owner,
+                                           const Common::AssetHandle asset )
+    {
+        std::lock_guard<std::mutex> guard( Lock() );
+        if ( const auto it = Rows().find( row ); it != Rows().end() )
+        {
+            it->second.Owner = owner;
+            it->second.Asset = asset;
+        }
+    }
+
+    inline void ResourceLedger::SetBytes( const uint64_t row, const std::size_t bytes )
+    {
+        std::lock_guard<std::mutex> guard( Lock() );
+        if ( const auto it = Rows().find( row ); it != Rows().end() )
+        {
+            it->second.Bytes      = bytes;
+            it->second.BytesKnown = bytes != 0;
+        }
+    }
+
+    inline bool ResourceLedger::Read( const uint64_t row, ResourceOwner& owner, Common::AssetHandle& asset )
+    {
+        std::lock_guard<std::mutex> guard( Lock() );
+        const auto                  it = Rows().find( row );
+        if ( it == Rows().end() )
+            return false;
+        owner = it->second.Owner;
+        asset = it->second.Asset;
+        return true;
+    }
+
+    inline ResourceCensus ResourceLedger::Take()
+    {
+        std::lock_guard<std::mutex> guard( Lock() );
+
+        ResourceCensus census;
+        for ( const auto& [id, row] : Rows() )
+        {
+            ++census.Live;
+            ++census.PerKind[static_cast<std::size_t>( row.Kind )];
+            ++census.PerOwner[static_cast<std::size_t>( row.Owner )];
+            ++census.PerOwnerKind[static_cast<std::size_t>( row.Owner )][static_cast<std::size_t>( row.Kind )];
+
+            if ( row.Owner == ResourceOwner::Unclaimed )
+                ++census.Unclaimed;
+            if ( static_cast<uint64_t>( row.Asset ) == 0 )
+                ++census.WithoutAsset;
+            if ( row.BytesKnown )
+            {
+                census.Bytes += row.Bytes;
+                ++census.BytesKnownFor;
+            }
+        }
+        return census;
+    }
+
+    inline std::string ResourceLedger::Report()
+    {
+        const ResourceCensus census = Take();
+
+        std::string text;
+        text += "live=" + std::to_string( census.Live );
+        text += " unclaimed=" + std::to_string( census.Unclaimed );
+        text += " without-asset=" + std::to_string( census.WithoutAsset );
+        // Both numbers, always. "12 MiB" over 400 rows of which 9 reported a size is a different fact from
+        // "12 MiB" over 400 rows that all did, and a reader who is not told cannot separate them.
+        text += " bytes=" + std::to_string( census.Bytes ) + " (known for " +
+                std::to_string( census.BytesKnownFor ) + " of " + std::to_string( census.Live ) + ")";
+
+        for ( std::size_t owner = 0; owner < static_cast<std::size_t>( ResourceOwner::Count ); ++owner )
+        {
+            if ( census.PerOwner[owner] == 0 )
+                continue;
+
+            text += "\n  ";
+            text += ResourceOwnerName( static_cast<ResourceOwner>( owner ) );
+            text += " = " + std::to_string( census.PerOwner[owner] ) + ":";
+
+            for ( std::size_t kind = 0; kind < static_cast<std::size_t>( ResourceKind::Count ); ++kind )
+            {
+                if ( census.PerOwnerKind[owner][kind] == 0 )
+                    continue;
+                text += ' ';
+                text += ResourceKindName( static_cast<ResourceKind>( kind ) );
+                text += '=' + std::to_string( census.PerOwnerKind[owner][kind] );
+            }
+        }
+
+        return text;
+    }
 
 } // namespace Desert::Graphic
