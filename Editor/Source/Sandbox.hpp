@@ -117,10 +117,9 @@ std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char**
 
     if ( !Desert::Editor::ProjectContext::HasProject() )
     {
-        std::fprintf( stderr,
-                      "No project given. Pass: --project <path/to/.deproj>\n"
-                      "(the launcher lives in the desert-launcher repository and starts the editor\n"
-                      " with exactly that flag — it is not part of this build.)\n" );
+        std::fprintf( stderr, "No project given. Pass: --project <path/to/.deproj>\n"
+                              "(the launcher lives in the desert-launcher repository and starts the editor\n"
+                              " with exactly that flag — it is not part of this build.)\n" );
         std::exit( 1 );
     }
 
