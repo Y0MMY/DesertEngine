@@ -113,10 +113,20 @@ Editor/Cooked/Textures/*
 # recreate it, because no source .fbx exists for it. Editor/Resources/Assets/Scenes/MESH_SkinnedProbe.desce
 # places it beside a static box of the same material, and Desert/Tests/Engine/SkinnedMeshDependency pins
 # both derived numbers (the rig signature and the mesh's path-derived handle) so a rename fails loudly.
+# THE THIRD: the STATIC probe, and it is here for the same reason one merge later. Until 2026-09-08 no
+# scene in this repository named a `.stmesh` at all — the one that did (M10_MeshSlot) pointed at a 40 MB
+# import nobody else has — so the cooked STATIC mesh path was as unobservable as the skinned one had been,
+# and it was silently broken: MeshService::Register built the GPU mesh BEFORE the file was parsed, cached a
+# mesh with zero submeshes under the handle, and every draw from then on issued nothing. 7 KB, two boxes of
+# deliberately different shape (a 100 cm cube and a 100x200x100 pillar) so a frame that loses ONE submesh
+# is visibly wrong rather than merely dimmer. Hand-authored, like the skinned pair: no source .fbx exists,
+# so re-running the cook would not recreate it. Desert/Tests/Engine/StaticMeshCooked parses this exact file
+# and pins what it carries; M10_MeshSlot.desce places it.
 !Editor/Cooked/Meshes/
 Editor/Cooked/Meshes/*
 !Editor/Cooked/Meshes/SkinProbe.skeleton
 !Editor/Cooked/Meshes/SkinProbe.skmesh
+!Editor/Cooked/Meshes/StaticProbe.stmesh
 
 # Fetched by scripts/MacOS/Setup.sh (not a submodule)
 ThirdParty/meshoptimizer/

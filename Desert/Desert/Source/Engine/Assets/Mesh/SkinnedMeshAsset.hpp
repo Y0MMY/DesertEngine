@@ -50,7 +50,7 @@ namespace Desert::Assets
             return m_MaterialAssetHandles;
         }
 
-        const std::vector<Submesh>& GetSubmeshes() const
+        const std::vector<Submesh>& GetSubmeshes() const override
         {
             return m_Submeshes;
         }

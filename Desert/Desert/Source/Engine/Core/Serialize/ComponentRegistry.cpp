@@ -448,8 +448,19 @@ namespace Desert::Core::Serialize
                         created = m.CreateAsset<Assets::StaticMeshAsset>( Assets::AssetPriority::High, path );
                     if ( created )
                     {
-                        Runtime::ResourceRegistry::GetMeshService()->Register( created );
-                        created->Load();
+                        // NO `Load()` AFTER THIS, AND THAT ORDER WAS THE DEFECT. `CreateAsset` deduplicates
+                        // on a spelling-independent key, so a scene naming `Cooked/Meshes/base.stmesh`
+                        // receives AssetPreloader's UNPARSED shell for the absolute spelling of that same
+                        // file — `Register` then built a mesh out of nothing and cached it, and the
+                        // `created->Load()` that used to stand here filled the ASSET while the cached MESH
+                        // stayed empty for the life of the process. Register parses first now.
+                        if ( const auto registered =
+                                  Runtime::ResourceRegistry::GetMeshService()->Register( created );
+                             !registered )
+                        {
+                            LOG_ERROR( "[Mesh] '{}' named by the scene could not be built: {}", path,
+                                       registered.GetError() );
+                        }
                         a = created;
                     }
                 }
@@ -504,8 +515,14 @@ namespace Desert::Core::Serialize
                     return 0;
                 if ( auto* svc = Runtime::ResourceRegistry::GetMeshService(); svc && !svc->GetAsset( handle ) )
                 {
-                    svc->Register( a );
-                    a->Load();
+                    // Same inverted order as the FromPath branch above, and the same removal: Register
+                    // parses before it builds, so the `a->Load()` that stood here could only ever run after
+                    // the empty mesh had already been cached.
+                    if ( const auto registered = svc->Register( a ); !registered )
+                    {
+                        LOG_ERROR( "[Mesh] handle {} named by a component could not be built: {}", guid,
+                                   registered.GetError() );
+                    }
                 }
                 return guid;
             }

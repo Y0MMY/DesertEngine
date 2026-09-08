@@ -29,6 +29,14 @@ namespace Desert::Assets
         virtual const std::vector<Common::UUID>& GetMaterialHandles() const                             = 0;
         virtual bool                             IsSkinned() const                                      = 0;
 
+        // THE DRAWABLE PARTS OF THIS MESH — on the base, because the one thing every caller of the mesh
+        // services needs to know about a mesh asset is how many pieces it has, and until now that question
+        // could only be asked of a *concrete* type. Both subclasses already had this exact signature; only
+        // the base did not, so `MeshService::Register` could not compare what it BUILT against what the
+        // asset HOLDS and shipped a mesh with zero submeshes built from an unparsed shell. See
+        // MeshService::BuildAndCache for the relation this makes expressible.
+        virtual const std::vector<Submesh>& GetSubmeshes() const = 0;
+
         // Blendshapes for this mesh (empty when it has none). Overridden by Static/SkinnedMeshAsset; the base
         // default lets any MeshAsset* be queried uniformly (e.g. the Details morph widget).
         virtual const std::vector<MorphTarget>& GetMorphTargets() const
