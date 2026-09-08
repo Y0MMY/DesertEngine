@@ -212,11 +212,14 @@ namespace Desert::Editor
             LOG_ERROR( "[AssetThumbnailRenderer] EndScene failed: {}", ended.GetError() );
     }
 
-    void AssetThumbnailRenderer::RequestMaterial( const Assets::AssetHandle& materialHandle,
-                                                  const std::string& outPng, bool flatPreview )
+    Common::BoolResultStr AssetThumbnailRenderer::RequestMaterial( const Assets::AssetHandle& materialHandle,
+                                                                   const std::string& outPng, bool flatPreview )
     {
-        if ( static_cast<uint64_t>( materialHandle ) == 0 || m_Phase != 0 )
-            return;
+        if ( static_cast<uint64_t>( materialHandle ) == 0 )
+            return Common::MakeFormattedError( "no material handle for '{}'", outPng );
+        if ( m_Phase != 0 )
+            return Common::MakeFormattedError( "a capture is already in flight; '{}' was not queued", outPng );
+
         m_PendingHandle      = materialHandle;
         m_PendingPng         = outPng;
         m_PendingIsMesh      = false;
@@ -226,18 +229,43 @@ namespace Desert::Editor
         // early readback returns an empty frame. Capture happens on the last count (reads the prior, warm
         // frame's already-submitted render).
         m_Phase = kRenderFrames;
+        return Common::MakeSuccess( true );
     }
 
-    void AssetThumbnailRenderer::RequestMesh( const Assets::AssetHandle& meshHandle, const std::string& outPng,
-                                              const Assets::AssetHandle& material )
+    Common::BoolResultStr AssetThumbnailRenderer::RequestMesh( const Assets::AssetHandle& meshHandle,
+                                                               const std::string&         outPng,
+                                                               const Assets::AssetHandle& material )
     {
-        if ( static_cast<uint64_t>( meshHandle ) == 0 || m_Phase != 0 )
-            return;
+        if ( static_cast<uint64_t>( meshHandle ) == 0 )
+            return Common::MakeFormattedError( "no mesh handle for '{}'", outPng );
+        if ( m_Phase != 0 )
+            return Common::MakeFormattedError( "a capture is already in flight; '{}' was not queued", outPng );
+
+        // THE GEOMETRY HAS TO EXIST NOW, not merely be nameable. See the header for the measurement: a
+        // handle the MeshService has not built captured the empty backdrop and every layer above read the
+        // resulting file as a finished picture. Asked here rather than in Tick() because this is the last
+        // moment the caller is still on the stack and can be told; five frames later there is only a PNG.
+        auto* mesh = Runtime::ResourceRegistry::GetMeshService()->Get( meshHandle );
+        if ( !mesh )
+        {
+            return Common::MakeFormattedError(
+                 "mesh {} is not built in the MeshService, so a capture would photograph an empty scene "
+                 "and write it to '{}' as if it were the asset",
+                 static_cast<uint64_t>( meshHandle ), outPng );
+        }
+        if ( mesh->GetSubmeshes().empty() )
+        {
+            return Common::MakeFormattedError(
+                 "mesh {} is built but has no submeshes, so there is nothing to photograph for '{}'",
+                 static_cast<uint64_t>( meshHandle ), outPng );
+        }
+
         m_PendingHandle   = meshHandle;
         m_PendingMaterial = material;
         m_PendingPng      = outPng;
         m_PendingIsMesh   = true;
         m_Phase           = kRenderFrames;
+        return Common::MakeSuccess( true );
     }
 
     void AssetThumbnailRenderer::Tick()

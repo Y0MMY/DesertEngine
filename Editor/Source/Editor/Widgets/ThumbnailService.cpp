@@ -294,10 +294,23 @@ namespace Desert::Editor
         const Request req = m_Queue.front();
         m_Queue.erase( m_Queue.begin() );
 
-        if ( req.Type == Kind::Material )
-            m_Renderer->RequestMaterial( req.Handle, req.Png, req.Flat );
-        else
-            m_Renderer->RequestMesh( req.Handle, req.Png, req.Material );
+        // THE DISPATCH ANSWERS NOW. A refused request used to be indistinguishable from an accepted one:
+        // both returned void, so the service marked the asset in-flight and then waited out
+        // kInFlightGiveUpTicks (240 frames, four seconds of a blocked queue) before deciding it had
+        // "never completed" — with no idea why. The renderer knows why at the moment it says no, and the
+        // most common reason is one no amount of waiting fixes: a mesh whose geometry is not built, whose
+        // capture would have written a photograph of empty sky and called it the asset.
+        const auto queued = req.Type == Kind::Material
+                                 ? m_Renderer->RequestMaterial( req.Handle, req.Png, req.Flat )
+                                 : m_Renderer->RequestMesh( req.Handle, req.Png, req.Material );
+        if ( !queued.IsSuccess() )
+        {
+            LOG_WARN( "[Thumbnails] '{}' was refused by the renderer: {} — not retrying.", req.Identity,
+                      queued.GetError() );
+            m_Failed.insert( req.Identity );
+            m_Queued.erase( req.Identity );
+            return;
+        }
 
         m_InFlight          = req.Identity;
         m_InFlightPng       = req.Png;

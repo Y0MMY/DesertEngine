@@ -147,40 +147,31 @@ namespace Desert::Editor
     void StaticMeshComponentWidget::DrawMeshThumbnail( const ECS::StaticMeshComponent& staticMesh,
                                                        float                           size ) const
     {
-        // LIVE first, WHILE THERE IS A LIVE ONE: the panel lends one preview renderer, and it shows what
-        // this entity actually renders — orbitable, and it follows a material edit while you drag the
-        // slider. It is safe because per-frame GPU state is stored per (frame x renderer slot) now, so a
-        // second renderer no longer overwrites the viewport's camera, lights and shadows
-        // (Docs/RENDERER_FRAME_STATE.md).
+        // THE REQUEST COMES FIRST, BEFORE THE LIVE PREVIEW IS EVEN CONSIDERED, and the ordering is the
+        // whole lesson of this function.
         //
-        // HasContent() IS PART OF THE CONDITION, and it is what makes the branch below reachable at all.
-        // ScenePropertiesPanel builds the viewport as soon as a mesh entity is selected and only points it
-        // at the mesh on the NEXT OnPreUpdate, and it declines to build one when the six renderer slots are
-        // all taken. Asking DrawPreview alone answers "was a widget lent" — which was true in every state
-        // this row is ever drawn in, so the cached picture underneath was unreachable code wearing a
-        // fallback's clothes. Asking the preview whether it has anything to SHOW is the question the row
-        // actually has.
-        if ( m_Ctx && m_Ctx->Preview && m_Ctx->Preview->HasContent() &&
-             m_Ctx->DrawPreview( ImVec2( size, size ) ) )
-        {
-            Utils::ImGuiUtilities::Tooltip( "Live preview — drag to orbit, wheel to zoom" );
-            ImGui::SameLine();
-            return;
-        }
-
-        // No live preview: the rendered thumbnail, ASKED FOR rather than found. THE MESH first — this row
-        // is the mesh slot, and showing a material sphere where the model belongs answers a question nobody
-        // asked. The material is only the last resort, for an entity whose mesh slot is empty (a primitive).
+        // The obvious arrangement — show the live preview, and ask for a cached picture only on the frames
+        // there is no live one — asks for the fallback at exactly the moment it cannot be produced. What
+        // takes the live preview away is a shortage of renderer slots, and a capture needs a renderer slot
+        // too; the service refuses to take the last one (ThumbnailService.cpp, kSlotsKeptFreeForTheUser),
+        // and rightly, so the row would sit on "queued" for as long as the shortage lasted. Measured, not
+        // reasoned: with the request placed after the branch, a selected mesh produced no capture at all
+        // and the log showed the queue draining a material nobody had asked this row for.
         //
-        // THE REQUEST IS THE POINT OF THIS BLOCK. It used to read `ThumbnailCache::DiskPath( path )` and
-        // hope: the picture existed only if the asset browser had happened to walk past this asset, and if
-        // it had not, the row showed a grey cube glyph forever with nothing anywhere saying why. That is the
-        // very wart ThumbnailService's own header declares removed for the material slot — a guarantee
-        // stated in prose that one of its two slots did not keep. Through the service, not a second route:
-        // it owns the one renderer for the whole editor, deduplicates against what other panels asked for,
-        // never re-renders a picture that is still fresh on disk and never retries an asset that failed.
-        // Desert/Tests/Editor/ThumbnailRequesters is the census that keeps every showing slot a requesting
-        // slot.
+        // So the cache is warmed WHILE there is room to warm it. It costs one capture per mesh asset, ever
+        // — 378 ms measured on this machine, then a PNG that survives restarts — and the service drops the
+        // request outright when the picture on disk is still fresh, which after the first time it is.
+        //
+        // Asked through the service, never by reading `ThumbnailCache::DiskPath` and hoping. That hope was
+        // the defect: the file existed only if the asset browser had happened to walk past this asset, and
+        // if it had not, the row showed a grey cube glyph for the life of the project with nothing anywhere
+        // saying why — the very wart ThumbnailService's header declares removed for the material slot, and
+        // did not keep for this one. Desert/Tests/Editor/ThumbnailRequesters is the census that keeps every
+        // showing slot a requesting slot.
+        //
+        // THE MESH first: this row is the mesh slot, and showing a material sphere where the model belongs
+        // answers a question nobody asked. The material is the last resort, for an entity whose mesh slot
+        // is empty (a primitive).
         static ThumbnailCache s_Thumbnails;
 
         std::shared_ptr<Graphic::Image2D> thumb;
@@ -227,6 +218,25 @@ namespace Desert::Editor
                 else
                     s_Thumbnails.Invalidate( png );
             }
+        }
+
+        // NOW the live one, if there is a live one with something in it. It is the better picture —
+        // orbitable, wearing this entity's own materials, and it follows a material edit while you drag the
+        // slider — and it is safe because per-frame GPU state is stored per (frame x renderer slot)
+        // (Docs/RENDERER_FRAME_STATE.md).
+        //
+        // HasContent() IS PART OF THE CONDITION, and it is what makes the cached picture above reachable at
+        // all. ScenePropertiesPanel builds the viewport as soon as a mesh entity is selected and only points
+        // it at the mesh on the NEXT OnPreUpdate, and it declines to build one when every renderer slot is
+        // taken. Asking DrawPreview alone answers "was a widget lent", which was true in every state this
+        // row is ever drawn in — so the fallback underneath was unreachable code wearing a fallback's
+        // clothes. Asking whether the preview has anything to SHOW is the question the row actually has.
+        if ( m_Ctx && m_Ctx->Preview && m_Ctx->Preview->HasContent() &&
+             m_Ctx->DrawPreview( ImVec2( size, size ) ) )
+        {
+            Utils::ImGuiUtilities::Tooltip( "Live preview — drag to orbit, wheel to zoom" );
+            ImGui::SameLine();
+            return;
         }
 
         const ImVec2 at = ImGui::GetCursorScreenPos();

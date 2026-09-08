@@ -26,17 +26,32 @@ namespace Desert::Editor
         // recorded into is still executing against its pipelines and descriptor pools.
         ~AssetThumbnailRenderer();
 
-        // Queue a material to be captured to outPng. No-op if a capture is already in flight (see HasPending).
+        // Queue a material to be captured to outPng. Refuses (with the reason) when the handle is null or a
+        // capture is already in flight — see RequestMesh for why these answer instead of returning void.
         // `flatPreview` previews on a camera-facing PLANE/card instead of a sphere — right for foliage/cutout
         // materials (a grass card atlas wraps/garbles on a sphere). Drives forward via Tick().
-        void RequestMaterial( const Assets::AssetHandle& materialHandle, const std::string& outPng,
-                              bool flatPreview = false );
+        [[nodiscard]] Common::BoolResultStr RequestMaterial( const Assets::AssetHandle& materialHandle,
+                                                             const std::string& outPng, bool flatPreview = false );
 
-        // Queue a mesh (must be registered in the MeshService), auto-framed by its bounds, to outPng. If
-        // `material` is non-null it's applied to every slot (the mesh's linked/sidecar material) so the
-        // preview shows the real look; otherwise the default material is used.
-        void RequestMesh( const Assets::AssetHandle& meshHandle, const std::string& outPng,
-                          const Assets::AssetHandle& material = Assets::AssetHandle( static_cast<uint64_t>( 0 ) ) );
+        /**
+         * @brief Queue a mesh, auto-framed by its bounds, to outPng. If `material` is non-null it is applied
+         *        to every slot; otherwise the mesh's own submesh materials are used.
+         *
+         * IT ANSWERS, AND THAT IS THE POINT. The mesh has to be BUILT in the MeshService — the handle alone
+         * is not enough — and until now a handle the service did not have was accepted in silence: Tick()
+         * cleared the material slots, framed a unit box around nothing, and captured the empty backdrop.
+         * A 200 KB PNG of blank sky was then written, its modification time moved, and every layer above
+         * read that as success: ThumbnailService counted "1 captured", the freshness rule called the file a
+         * current picture of the asset, and the row drew a square of sky forever. Measured on this tree,
+         * with a real 44 MB mesh a scene had referenced but nothing had loaded.
+         *
+         * That is the contract's §1.4 exactly — an empty successful answer is a silent wrong answer — and
+         * it cannot be fixed after the render, because a picture of an empty scene is a legitimate picture
+         * of some assets. It has to be refused BEFORE the capture, where the reason is still known.
+         */
+        [[nodiscard]] Common::BoolResultStr
+        RequestMesh( const Assets::AssetHandle& meshHandle, const std::string& outPng,
+                     const Assets::AssetHandle& material = Assets::AssetHandle( static_cast<uint64_t>( 0 ) ) );
 
         // Is a capture in flight? Gates requests to one at a time.
         [[nodiscard]] bool HasPending() const { return m_Phase != 0; }
