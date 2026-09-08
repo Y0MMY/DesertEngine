@@ -681,6 +681,28 @@ namespace
         return text.substr( i, end - i );
     }
 
+    // A CALL of `name`, optionally qualified by `qualifier` — `MachineSettings::Load(`, `GameUserDirectory(`.
+    //
+    // IT HAS TO BE A CALL AND NOT A MENTION, and that is not pedantry: the first version of the assertion
+    // below asked only whether the WORDS appeared, and deleting the whole `MachineSettings::Load(...)`
+    // statement from Runtime/Source/Main.cpp left it green — the `#include <Common/Settings/
+    // MachineSettings.hpp>` line is not a string literal, so the stripper keeps it, and `Load` is a common
+    // word. A check that cannot fail is worth exactly what an absent one is; the mutation is what found it.
+    bool CallsFunction( const std::string& text, const std::string& qualifier, const std::string& name )
+    {
+        using namespace Desert::Tests::ConsumerText;
+
+        for ( std::size_t at : WordPositions( text, name ) )
+        {
+            if ( !qualifier.empty() && QualifierBefore( text, at ) != qualifier )
+                continue;
+            const std::size_t i = SkipSpace( text, at + name.size() );
+            if ( i < text.size() && text[i] == '(' )
+                return true;
+        }
+        return false;
+    }
+
     // `ProjectContext::Current().Name`, `EditorPreferences::Get().DebugView`, and — inside the type's own
     // implementation file — the bare `Get().FavouriteFields`. A static accessor handing the value out with
     // no local in between; AnchorReadsField stops at the `::`, so the chain is walked here.
@@ -1182,6 +1204,66 @@ TEST( ConfigOwnership, TheSerializedSettingsBlockDoesNotMoveWhenTheMachineQualit
     quality.CloudQualityTier  = Common::Settings::CloudQuality::Low;
 
     EXPECT_EQ( rfl::json::write( Desert::Reflection::SerializeReflected( *type, &settings ) ), before );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 8. BOTH HOSTS OPEN IT — which is the only thing that makes it a different file from editor.json
+// ---------------------------------------------------------------------------------------------------
+
+// The argument for a second per-user file is one sentence — the packaged game reads these values and
+// never opens editor.json — and an argument is not a wiring.
+//
+// THE FAILURE THIS CLOSES ALREADY HAPPENED ONCE, from the target nobody looks at. `MSAASamples` was a
+// per-machine field in editor.json, correctly typed and correctly censused, pushed into the renderer by
+// EditorPreferences — which the Runtime does not link. So a shipped game ran at whatever the struct's
+// default said, for ever, with no reader, no dial and no error anywhere. Nothing here could see it,
+// because every census asked about the field and none asked about the HOST.
+//
+// So both ends are asserted rather than argued: the editor opens the store beside editor.json, the game
+// opens it inside the player's own per-product directory, and the game hands the values to its renderer.
+// A text census like the consumer half above; the alternative is launching a fullscreen game in CI.
+TEST( ConfigOwnership, BothHostsOpenTheMachineStoreAndTheGameOpensItsOwnDirectory )
+{
+    using namespace Desert::Tests::ConsumerText;
+
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    struct Host
+    {
+        const char* File;
+        const char* Directory; // the call that says WHERE this host's copy lives
+        const char* Why;
+    };
+    const Host hosts[] = {
+         { "Editor/Source/EditorLayer.cpp", "ConfigDirectory",
+           "the editor keeps its copy in ~/.desertengine, beside editor.json" },
+         { "Runtime/Source/Main.cpp", "GameUserDirectory",
+           "a packaged game keeps its copy in the player's own per-product directory, because a shipped "
+           "game has no engine installation to belong to" },
+    };
+
+    for ( const Host& host : hosts )
+    {
+        SCOPED_TRACE( host.File );
+        const std::string text = StripCommentsAndLiterals( ReadAll( root + host.File ) );
+        ASSERT_FALSE( text.empty() ) << "could not read " << host.File;
+
+        EXPECT_TRUE( CallsFunction( text, "MachineSettings", "Load" ) )
+             << host.File
+             << " never LOADS the machine store, so this host runs at the schema defaults "
+                "whatever its user chose — "
+             << host.Why;
+        EXPECT_TRUE( CallsFunction( text, {}, host.Directory ) )
+             << host.File << " does not call " << host.Directory << "(): " << host.Why;
+    }
+
+    // And the game hands them on, or the file is read and thrown away. The editor's own push is covered
+    // by the consumer census above (EditorLayer is named for DebugView and reaches the same renderer).
+    const std::string layer = StripCommentsAndLiterals( ReadAll( root + "Runtime/Source/RuntimeLayer.cpp" ) );
+    ASSERT_FALSE( layer.empty() );
+    EXPECT_TRUE( CallsFunction( layer, {}, "SetQuality" ) )
+         << "the packaged game loads the machine's quality and never gives it to a renderer";
 }
 
 int main( int argc, char** argv )
