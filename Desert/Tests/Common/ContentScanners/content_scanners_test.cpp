@@ -16,6 +16,19 @@
 //
 // Two instances of one shape is this project's own bar for making a rule enforceable, so here it is.
 //
+// ── AND THE WORST ROW TURNED OUT NOT TO BE ABOUT ENUMERATION AT ALL ────────────────────────────────
+//
+// I8 took the four rows A6-2 left. Three were the plain defect and are fixed. The fourth — the Lua
+// script picker — walked the literal relative path "Resources" from the PROCESS's working directory,
+// and following that thread found something the register could not have said: the six example scripts
+// it offered lived in the ENGINE resource tree (Resources/Scripts/Examples), which is not one of the
+// five trees PackagedContentTrees() builds an archive from. So every .lua this editor has ever offered
+// was UNPACKAGEABLE, three committed scenes named one, and a packaged game would have loaded none of
+// them. The picker's bad path was not sloppiness beside the real defect; it was the only thing making
+// a folder outside the project's content look like content. The scripts were moved under the assets
+// root by the same change, which is what ContentDir::Script has meant all along.
+
+//
 // ── WHAT THE REGISTER SAYS, AND WHY IT HAS TWO KINDS OF ROW ────────────────────────────────────────
 //
 // Not every directory walk is a content scanner, and a census that pretended otherwise would be noise
@@ -52,9 +65,12 @@
 // that lesson is already paid for (its own header lists a character literal that ate hundreds of lines).
 #include "../../Engine/SettingConsumers/setting_consumers_reader.hpp"
 
+#include <Common/Core/Constants.hpp>
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -84,10 +100,26 @@ namespace
         const char* Owner;
     };
 
-    // Filed by A6-2. Six content scanners were found the day this census was written; A6-2 fixed the two
-    // that were its own subject — the scene lists in EditorLayer and BuildSettingsPanel — and left the
-    // four below, which live in other people's files.
-    constexpr const char* kUnassigned = "unassigned - filed by A6-2, awaiting an owner";
+    // Filed by A6-2 with four unassigned rows. I8 took all four and answered each with a NUMBER, taken
+    // from the real assets tree packed into a real .dpak and mounted with nothing loose behind it
+    // (249 files in the archive, 0 on disk). What a raw walk returns in that project, against what the
+    // shared enumeration returns:
+    //
+    //   AssetReferencesScan           every file under the assets root     0  vs 249   -> FIXED
+    //   ComponentEditorRegistrations  .lua the script picker offers        0  vs   6   -> FIXED
+    //   NodeGraphPanel                .dgraph the Load popup offers        0  vs   5   -> FIXED
+    //   FileExplorerPanel             immediate children of the root       0  vs   8   -> MEASURED REFUSAL
+    //
+    // THE ONE THAT STAYS, and why it is not laziness. Swapping the browser's walk would make it LIST
+    // eight folders it can then do nothing with: beside the two enumerations this file makes 24 further
+    // filesystem calls, and every one of them is disk-only — 5 is_directory, 5 exists, 5 absolute,
+    // 2 last_write_time, 1 file_size and 1 status ask questions no pak entry answers, and
+    // 3 create_directories, 2 create_directory, 1 copy_file and 2 permissions WRITE. A browser whose
+    // rows cannot be sized, dated, opened, renamed, moved or deleted is the §1.4 shape one level up: a
+    // listing that looks complete while every operation on it fails. The fix is the panel's disk-shaped
+    // MODEL, not its walk, and that is a task rather than a line.
+    constexpr const char* kBrowserOwner = "I8 measured the refusal (0 vs 8 with a pak mounted); the fix is "
+                                          "the panel's disk-shaped model and needs a task of its own";
 
     constexpr ScannerRow kScanners[] = {
          // ── the one implementation ──────────────────────────────────────────────────────────────────
@@ -126,28 +158,20 @@ namespace
            "finds the .dpak files THEMSELVES. It cannot go through the mount it is about to create.", "" },
 
          // ── debt: these really do walk this project's content ───────────────────────────────────────
-         { "Editor/Source/Editor/Core/AssetReferencesScan.cpp", Verdict::Debt,
-           "walks ASSETS_PATH to index every asset reference. In a mounted project the index would be "
-           "empty and every reference would read as unused.",
-           kUnassigned },
          { "Editor/Source/Editor/Panels/FileExplorer/FileExplorerPanel.cpp", Verdict::Debt,
            "the content browser itself - the editor's own window onto the content world, showing only "
-           "the loose half of it.",
-           kUnassigned },
-         { "Editor/Source/Editor/Panels/NodeGraph/NodeGraphPanel.cpp", Verdict::Debt,
-           "walks ASSETS_PATH/ShaderGraphs for the Load popup; a mounted project would offer no graphs.",
-           kUnassigned },
-         { "Editor/Source/Editor/Panels/SceneProperties/ComponentEditorRegistrations.cpp", Verdict::Debt,
-           "the Lua script picker, and the worst of the set: it walks the literal relative path "
-           "\"Resources\" against the process's working directory, so it bypasses the PROJECT PATH census "
-           "as well as this one and finds nothing at all unless the editor happens to have been started "
-           "from the right folder.",
-           kUnassigned },
+           "the loose half of it. Measured at 0 rows against 8 with a pak mounted; see kBrowserOwner "
+           "above for why swapping the walk alone would make it worse rather than better.",
+           kBrowserOwner },
     };
 
     // PINNED. Point 3: a new content scanner must not be able to make this suite pass by joining the
     // debt list. Moving one to NotContent, or fixing it away, is what makes this number go DOWN.
-    constexpr std::size_t kDebtRowCount = 4;
+    //
+    // 4 -> 1: I8 routed AssetReferencesScan, NodeGraphPanel and the script picker in
+    // ComponentEditorRegistrations through the shared enumeration, so their rows are gone rather than
+    // reworded — a register describes the tree, and those three files no longer walk anything.
+    constexpr std::size_t kDebtRowCount = 1;
 
     // ── FINDING THE TREE AND READING IT ─────────────────────────────────────────────────────────────
 
@@ -367,6 +391,112 @@ TEST( ContentScanners, TheTwoSceneListsGoThroughTheSharedEnumeration )
         EXPECT_NE( source.find( "ListFilesRecursive" ), std::string::npos )
              << file << " stopped using the shared enumeration; a packaged project would lose its levels.";
     }
+}
+
+// AND THE THREE I8 FIXED STAY FIXED, for the same reason and in the same shape as the witness above.
+// Deleting a row is what "fixed" means here, so without this test the register would forget these three
+// files existed and a reverted call site would only be noticed by whoever packaged the game.
+TEST( ContentScanners, TheThreeScannersI8FixedGoThroughTheSharedEnumeration )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    for ( const char* file : { "Editor/Source/Editor/Core/AssetReferencesScan.cpp",
+                               "Editor/Source/Editor/Panels/NodeGraph/NodeGraphPanel.cpp",
+                               "Editor/Source/Editor/Panels/SceneProperties/ComponentEditorRegistrations.cpp" } )
+    {
+        const std::string source = ReadFile( root + file );
+        ASSERT_FALSE( source.empty() ) << file;
+        EXPECT_NE( Desert::Tests::ConsumerText::StripCommentsAndLiterals( source ).find( "ListFilesRecursive" ),
+                   std::string::npos )
+             << file
+             << " stopped using the shared enumeration. Measured with a mounted pak and no loose files, a "
+                "raw walk returns 0 where this one returns 249 / 5 / 6 respectively.";
+    }
+}
+
+// THE SCRIPT PICKER LOOKS UNDER THE CENSUS ROW FOR SCRIPTS, not under a path of its own. This is the
+// SECOND half of that row's defect and the enumeration check above cannot see it: a file can call
+// ListFilesRecursive and still hand it a literal spelled against the working directory, which is what
+// stood here and what four other defects in this engine have been.
+TEST( ContentScanners, TheScriptPickerAsksThePathCensusWhereScriptsAre )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    std::string code = Desert::Tests::ConsumerText::StripCommentsAndLiterals(
+         ReadFile( root + "Editor/Source/Editor/Panels/SceneProperties/ComponentEditorRegistrations.cpp" ) );
+    ASSERT_FALSE( code.empty() );
+
+    // THE TWO NAMES TOGETHER, IN ONE CALL — not each of them somewhere in the file. Written as two
+    // separate searches this test PASSED against a mutation that put the raw literal walk back, because
+    // SCRIPT_PATH was still named a few lines further down in the empty-list message. Both sides were
+    // individually present and the thing they had to say about each other was gone: §4's shape, in the
+    // checker rather than in the engine.
+    std::erase_if( code, []( unsigned char c ) { return std::isspace( c ) != 0; } );
+
+    EXPECT_NE( code.find( "ListFilesRecursive(Common::Constants::Path::SCRIPT_PATH)" ), std::string::npos )
+         << "the script picker must enumerate the scripts root the PATH CENSUS names, in one call: "
+            "Common::Utils::FileSystem::ListFilesRecursive( Common::Constants::Path::SCRIPT_PATH ). The "
+            "census row follows SetProjectRoot; a literal is resolved against the process's working "
+            "directory and does not — measured with a second project open, the literal offered 6 scripts "
+            "belonging to the project that was NOT open and 0 belonging to the one that was.";
+}
+
+// A SCRIPT THE EDITOR NAMES IS A SCRIPT THAT EXISTS.
+//
+// The defect this closes was one literal: the New Project template attached SCRIPT_PATH joined to a
+// lower-case, underscored player-controller file name, and no tree of this project has ever held a
+// file spelled that way. (The old spelling is deliberately not quoted anywhere in this file: this test
+// reads RAW source, so writing it out here would make the suite fail on its own description — the
+// inverted comment-is-not-the-code trap the blanker exists for, in the one test that cannot use it.) The slot was
+// created broken, every time, and said nothing until somebody pressed Play and read the log. Both halves were
+// individually plausible — the join is through the path census, and the file name looks like the file that is
+// there — and the thing they had to say about each other was never checked, which is this project's most-repeated
+// defect shape.
+//
+// Deliberately over the RAW source: the blanker's whole job is to remove literals, and a literal is
+// exactly what this test is about. Extension-only spellings (".lua") carry no file name and are skipped.
+TEST( ContentScanners, EveryLuaFileNamedInTheEditorExists )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    // SCRIPT_PATH is relative to the EDITOR'S working directory, which is Editor/ — that is what
+    // RunEditor.sh cds to and what makes "Resources/..." resolve at all. From the repository root the
+    // same file therefore sits one level deeper.
+    const std::string scriptsRoot = "Editor/" + Common::Constants::Path::SCRIPT_PATH.generic_string();
+
+    std::size_t checked = 0;
+    for ( auto it = std::filesystem::recursive_directory_iterator( root + "Editor/Source" );
+          it != std::filesystem::recursive_directory_iterator(); ++it )
+    {
+        if ( !it->is_regular_file() || it->path().extension() != ".cpp" )
+            continue;
+
+        const std::string source = ReadFile( it->path().string() );
+        for ( std::size_t at = source.find( ".lua\"" ); at != std::string::npos;
+              at             = source.find( ".lua\"", at + 1 ) )
+        {
+            const std::size_t open = source.rfind( '"', at );
+            if ( open == std::string::npos )
+                continue;
+            const std::string named = source.substr( open + 1, at + 4 - open - 1 );
+            if ( named == ".lua" || named.find( '\n' ) != std::string::npos )
+                continue; // an extension test, not a file name
+
+            ++checked;
+            EXPECT_TRUE( std::filesystem::exists( root + scriptsRoot + named ) )
+                 << it->path().filename().string() << " names the script '" << named
+                 << "', and no such file exists under " << scriptsRoot
+                 << ". A slot pointing at a script that is not there is created silently and only "
+                    "reports itself on Play.";
+        }
+    }
+
+    EXPECT_GT( checked, 0u ) << "no .lua file name was found in the editor's sources, which cannot be "
+                                "true while the New Project template attaches one - the scan is broken, "
+                                "not the tree";
 }
 
 int main( int argc, char** argv )

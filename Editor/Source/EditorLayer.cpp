@@ -6120,7 +6120,14 @@ namespace Desert::Editor
             // Movement + mouse-look are now a Lua SCRIPT (engine only executes the physics it asks for).
             {
                 ECS::ScriptSlot slot;
-                slot.ScriptPath = ( Common::Constants::Path::SCRIPT_PATH / "player_controller.lua" ).string();
+                // NAMES THE SCRIPT THAT EXISTS. This joined the scripts root to a lower-case, underscored
+                // player-controller file name that no tree of this project has ever contained, so the
+                // template's player was created with a slot that could only ever log "script not found"
+                // on Play. The two are now held together by
+                // ContentScanners.EveryLuaFileNamedInTheEditorExists rather than by whoever looks next.
+                // (That test reads raw source, so the dead spelling is described here and not quoted.)
+                slot.ScriptPath =
+                     ( Common::Constants::Path::SCRIPT_PATH / "Examples/PlayerController.lua" ).string();
                 player.AddComponent<ECS::ScriptComponent>().Scripts.push_back( std::move( slot ) );
             }
         }
