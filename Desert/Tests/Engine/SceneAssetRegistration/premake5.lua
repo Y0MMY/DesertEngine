@@ -22,6 +22,10 @@ project(test_name)
         "%{wks.location}/Desert/Desert/Source",
     }
 
+    for name, path in pairs(deps.Common.IncludeDir) do
+        externalincludedirs { path }
+    end
+
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
         externalincludedirs { path }
     end
@@ -36,6 +40,17 @@ project(test_name)
         defines { "DESERT_PLATFORM_MACOS" }
     filter "system:linux"
         defines { "DESERT_PLATFORM_LINUX" }
+    filter {}
+
+    -- Common: the logger and UUID that Common/Core/Core.hpp pulls in behind NO_DISCARD, which
+    -- AssetServiceRegistration.hpp uses. NO ENGINE OBJECT IS LINKED — the two functions this suite calls
+    -- (ClassifyMeshReadiness, ExplainMeshReadiness) are inline in that header precisely so that a claim
+    -- about a refusal's wording does not need the renderer to check.
+    links { "Common", "Optick" }
+
+    -- Common contains Objective-C (MacOSFileSystem's file dialog), so the ObjC runtime links too.
+    filter "system:macosx"
+        links { "Cocoa.framework", "Foundation.framework" }
     filter {}
 
     filter "configurations:Debug"

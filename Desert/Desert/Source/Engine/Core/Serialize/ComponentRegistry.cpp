@@ -22,6 +22,7 @@
 #include <Engine/Assets/Prefab/PrefabData.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Runtime/Services/AssetServiceRegistration.hpp>
 
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Reflection/ReflectionSerializer.hpp>
@@ -197,95 +198,14 @@ namespace Desert::Core::Serialize
             return s;
         }
 
-        // ── THE ONE PLACE A SCENE'S MATERIAL REFERENCE IS HANDED TO THE MATERIAL SERVICE ─────────────
+        // THE THREE `Ensure*Registered` HELPERS THAT STOOD HERE NOW LIVE IN
+        // Engine/Runtime/Services/AssetServiceRegistration.hpp, unchanged in behaviour.
         //
-        // There must be exactly one, and Desert/Tests/Engine/SceneAssetRegistration counts them. There
-        // were two — the create-on-miss branch of `FromPath` and the found branch of `FromGuid` — and the
-        // third route, `FromPath`'s FOUND branch, had none at all: a material another scene, the
-        // preloader or an open document had already created resolved to a live handle that the service
-        // could not answer for. The reason nothing was ever seen to break is `AssetPreloader`, which
-        // registers every `.demat` under the project's Materials root before a scene is allowed to load.
-        // That is a safety net and not a guarantee (see AssetReferenceResolve.hpp), and a net the parse
-        // path cannot see is a net somebody removes.
-        //
-        // LAZY, NOT EAGER, and this is a change: `Register` built the runtime material — descriptor sets,
-        // bound textures, a device — for every material the scene named, DURING PARSING. `RegisterAsset`
-        // records the shell and the external->internal map, and `MaterialService::Get` builds on the first
-        // draw that asks. Nothing observable moves, because every material a frame draws is `Get` first;
-        // what moves is that materials on entities the frame never draws stop being built at all.
-        //
-        // The guard is `HasAsset` and not `Get`, for the same reason: `Get` BUILDS on a miss, so the old
-        // `if ( !svc->Get( handle ) )` test did the work it was written to avoid.
-        void EnsureMaterialRegistered( const Assets::Asset<Assets::MaterialAsset>& material,
-                                       const std::string&                          named )
-        {
-            auto* service = Runtime::ResourceRegistry::GetMaterialService();
-            if ( !service || service->HasAsset( material->GetMetadata().Handle ) )
-                return;
-            // The shell must carry its data before it is keyed: RegisterAsset indexes the material by the
-            // EXTERNAL id stored inside the file, and an unparsed shell reports a zero one.
-            if ( !material->IsReadyForUse() )
-                material->Load();
-
-            if ( const auto registered = service->RegisterAsset( material ); !registered )
-            {
-                // DC 1.4: the slot is about to fall back to the default material, and the reason (another
-                // `.demat` already holds this MaterialId) is only knowable here.
-                LOG_ERROR( "[Materials] Material '{}' named by the scene could not be registered: {}", named,
-                           registered.GetError() );
-            }
-        }
-
-        // ── THE ONE PLACE A SCENE'S MESH REFERENCE IS HANDED TO THE MESH SERVICE ─────────────────────
-        //
-        // Same relation, same census, same history as the material helper above — and LAZY for the same
-        // reason, which took a measurement to get right.
-        //
-        // THE FIRST VERSION OF THIS FUNCTION CALLED THE EAGER `Register` AND WAS STILL NOT SELF-SUFFICIENT,
-        // which the 2x2 knockout found and no amount of reading would have. `Register` parses the shell
-        // before it builds (Г15) and the parse goes through `MeshService::EnsureLoaded`, which needs the
-        // REGISTRY — and the registry is bound to the service only by `RegisterAsset`, which only
-        // `AssetPreloader` was in a position to call. So a resolver that registered eagerly still worked
-        // only because the preloader had run first, in a SECOND, different way from the one this task set
-        // out to close. Measured: preloader registration off, `M10_MeshSlot` drew nothing and printed
-        // "needs a deferred load but no AssetManager is bound" once per frame.
-        //
-        // Handing the registry over (`AssetManager` can now produce its own weak reference) fixes both at
-        // once: the shell is recorded, the manager travels with it, `MeshService::Get` parses and builds on
-        // the first draw that asks — and NOTHING is parsed during scene loading. The scene parse now costs
-        // one map lookup per mesh reference.
-        void EnsureMeshRegistered( const Assets::Asset<Assets::MeshAsset>& mesh, const std::string& named,
-                                   Assets::AssetManager& registry )
-        {
-            auto* service = Runtime::ResourceRegistry::GetMeshService();
-            if ( !service || service->HasAsset( mesh->GetMetadata().Handle ) )
-                return;
-            if ( const auto registered = service->RegisterAsset( mesh, registry.weak_from_this() ); !registered )
-            {
-                LOG_ERROR( "[Mesh] '{}' named by the scene could not be registered: {}", named,
-                           registered.GetError() );
-            }
-        }
-
-        // ── THE ONE PLACE A SCENE'S TEXTURE REFERENCE IS HANDED TO THE TEXTURE SERVICE ───────────────
-        //
-        // THE SAME RELATION, A THIRD ASSET TYPE, AND THE HOLE WAS ON THE OTHER SIDE HERE. `FromPath`
-        // registered the shell and `FromGuid` did not register at all — and a HANDLE is the only spelling
-        // a component now uses for a texture, so the branch that skipped it is the one every
-        // MaterialComponent slot goes through. Nothing was ever seen to break for the third time for the
-        // same reason: `AssetPreloader` registers every `.tex` shell it scans before a scene may load.
-        //
-        // The SHELL only, and unconditionally: RegisterAsset is an idempotent map write, while a
-        // `Get`-first guard would BUILD the GPU texture here — during scene parsing, for every slot —
-        // which is exactly the upload AssetPreloader defers to the first draw.
-        void EnsureTextureRegistered( const Assets::AssetManager& mgr, uint64_t handle )
-        {
-            auto* service = Runtime::ResourceRegistry::GetTextureService();
-            if ( !service || handle == 0 )
-                return;
-            if ( auto texture = mgr.FindByHandle<Assets::TextureAsset>( Common::UUID( handle ) ) )
-                service->RegisterAsset( texture );
-        }
+        // They moved because two OTHER files had independently written the same find-else-create and each
+        // got a different part of it wrong (the import's reuse path registered nothing; the thumbnail's
+        // reuse path registered nothing AND then blamed the consequence on the wrong cause). A rule
+        // enforced by three careful copies is the shape Ф5 paid forty-four call sites for; this one is
+        // enforced by there being one implementation to call.
     } // namespace
 
     // Resolves reflected AssetHandle fields to/from on-disk PATHS (backward-compatible with the old
@@ -447,7 +367,7 @@ namespace Desert::Core::Serialize
                               m.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, full ) );
                      },
                      []( const Assets::Asset<Assets::MaterialAsset>& material, ReferenceOrigin )
-                     { EnsureMaterialRegistered( material, material->GetMetadata().Filepath.string() ); } );
+                     { Runtime::EnsureMaterialRegistered( material ); } );
                 return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
             }
             if ( type == "TextureAsset" )
@@ -461,7 +381,7 @@ namespace Desert::Core::Serialize
                 if ( resolved == 0 )
                     return 0;
 
-                EnsureTextureRegistered( mgr, resolved );
+                Runtime::EnsureTextureRegistered( mgr, resolved );
                 return resolved;
             }
             // The read side of the volume branch is gone with the write side above, and for the same
@@ -535,7 +455,7 @@ namespace Desert::Core::Serialize
                                             Assets::AssetPriority::High, path ) );
                      },
                      [&m]( const Assets::Asset<Assets::MeshAsset>& mesh, ReferenceOrigin )
-                     { EnsureMeshRegistered( mesh, mesh->GetMetadata().Filepath.string(), m ); } );
+                     { Runtime::EnsureMeshRegistered( mesh, m ); } );
                 return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
             }
             return 0;
@@ -560,7 +480,7 @@ namespace Desert::Core::Serialize
                 // registered whichever spelling the scene used to make it. This is also where the old
                 // `!svc->Get( handle )` guard lived, which BUILT the runtime material for every material a
                 // scene named, during parsing, to decide whether it needed registering.
-                EnsureMaterialRegistered( a, a->GetMetadata().Filepath.string() );
+                Runtime::EnsureMaterialRegistered( a );
                 return guid;
             }
             if ( type == "TextureAsset" )
@@ -568,7 +488,7 @@ namespace Desert::Core::Serialize
                 if ( mgr.FindByHandle<Assets::TextureAsset>( handle ) )
                 {
                     // The SAME registration the path branch performs. It was absent here entirely.
-                    EnsureTextureRegistered( mgr, guid );
+                    Runtime::EnsureTextureRegistered( mgr, guid );
                     return guid;
                 }
 
@@ -597,8 +517,7 @@ namespace Desert::Core::Serialize
                 // EnsureLoaded before answering — asking "is it registered?" at the price of registering.
                 // The const_cast is the same one `FromPath` makes at its head and for the same reason: a
                 // resolver is handed the registry as const, and registering against it is a write.
-                EnsureMeshRegistered( a, a->GetMetadata().Filepath.string(),
-                                      const_cast<Assets::AssetManager&>( mgr ) );
+                Runtime::EnsureMeshRegistered( a, const_cast<Assets::AssetManager&>( mgr ) );
                 return guid;
             }
             if ( type == "SkyboxAsset" )

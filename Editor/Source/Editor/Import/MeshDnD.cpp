@@ -8,6 +8,7 @@
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Runtime/Services/AssetServiceRegistration.hpp>
 #include <Common/Core/Constants.hpp>
 
 #include <filesystem>
@@ -61,8 +62,9 @@ namespace Desert::Editor::MeshDnD
                     continue;
                 if ( !asset->IsReadyForUse() )
                     asset->Load(); // syncs metadata handle to the .tex handle (material refs key by it)
-                if ( !Runtime::ResourceRegistry::GetTextureService()->Get( asset->GetMetadata().Handle ) )
-                    Runtime::ResourceRegistry::GetTextureService()->Register( asset );
+                // Was `if ( !GetTextureService()->Get( h ) ) Register( a )`: the guard UPLOADED the texture
+                // it was asking about, and the registration behind it uploaded it again. One shell write.
+                Runtime::EnsureTextureRegistered( mgr, static_cast<uint64_t>( asset->GetMetadata().Handle ) );
             }
         }
 
@@ -134,10 +136,11 @@ namespace Desert::Editor::MeshDnD
                     asset = mgr.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, matPath );
                 if ( !asset )
                     continue;
-                if ( !asset->IsReadyForUse() )
-                    asset->Load(); // Load reads MaterialId -> external handle, so Register maps it correctly
-                if ( !Runtime::ResourceRegistry::GetMaterialService()->Get( asset->GetMetadata().Handle ) )
-                    Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
+                // The load is inside EnsureMaterialRegistered now, for the reason the comment that stood
+                // here gave: Load reads MaterialId, which is the key the service maps the material under.
+                // The `!Get( h )` guard is gone with it — it BUILT the runtime material, textures and all,
+                // to decide whether the material needed registering.
+                Runtime::EnsureMaterialRegistered( asset );
             }
         }
     } // namespace
@@ -146,9 +149,16 @@ namespace Desert::Editor::MeshDnD
     {
         const std::string cookedStr = CookedStaticMeshPath( sourcePath ).generic_string();
 
-        // Already cooked + registered? Reuse it.
+        // ALREADY COOKED? Reuse it — and register it, which is what the question mark in the comment that
+        // stood here ("Already cooked + registered?") was standing in for. Finding a record proves the
+        // registry has it; it proves nothing about the mesh SERVICE, and the two are what a drop needs
+        // both of. It never showed because AssetPreloader had registered every cooked mesh before the
+        // editor could accept a drop — a safety net, not a guarantee.
         if ( auto existing = mgr.FindByPath<Assets::MeshAsset>( cookedStr ) )
+        {
+            Runtime::EnsureMeshRegistered( existing, mgr );
             return existing->GetMetadata().Handle;
+        }
 
         // Not cooked yet -> cook the source (Assimp parse -> Cooked/Meshes/*.stmesh).
         if ( !std::filesystem::exists( cookedStr ) )
@@ -162,13 +172,14 @@ namespace Desert::Editor::MeshDnD
         if ( !created )
             return Common::UUID::Null();
 
-        // Register parses first (MeshService.hpp), which is why the `created->Load()` that used to follow
-        // this line is gone: on a re-import `CreateAsset` returns the preloader's unparsed shell, and the
-        // build then happened before the load.
-        if ( const auto registered = Runtime::ResourceRegistry::GetMeshService()->Register( created );
-             !registered )
+        // REGISTER AND BUILD NOW, because a drop must refuse a cook that produced nothing rather than place
+        // an entity that draws air. (The `created->Load()` that used to follow the registration is gone for
+        // the reason MeshService.hpp gives: registration parses before it builds, so a load after it could
+        // only ever run once an empty mesh had been cached.)
+        if ( const auto readiness = Runtime::EnsureMeshDrawable( created, mgr );
+             readiness == Runtime::MeshReadiness::NotRegistered || readiness == Runtime::MeshReadiness::NotBuilt )
         {
-            LOG_ERROR( "[Import] cooked mesh '{}' could not be built: {}", cookedStr, registered.GetError() );
+            LOG_ERROR( "[Import] {}", Runtime::ExplainMeshReadiness( readiness, cookedStr ) );
             return Common::UUID::Null();
         }
 
@@ -207,11 +218,16 @@ namespace Desert::Editor::MeshDnD
             // Rebuild with the resolved skeleton. Reported rather than dropped: the caller receives a handle
             // either way, and a refusal here (the rig still missing, the .skmesh unparsable) is the one
             // moment the reason is knowable.
-            if ( const auto registered = Runtime::ResourceRegistry::GetMeshService()->Register( asset );
-                 !registered )
+            //
+            // `NoSubmeshes` IS NOT A REFUSAL HERE, and that is the whole reason the four states are an enum
+            // rather than a bool: a skinned mesh's STATIC buffer is empty by design, so the state that
+            // makes a thumbnail unphotographable is the ordinary state of the thing being imported.
+            const auto readiness = Runtime::EnsureMeshDrawable( asset, mgr );
+            if ( readiness == Runtime::MeshReadiness::NotRegistered ||
+                 readiness == Runtime::MeshReadiness::NotBuilt )
             {
-                LOG_ERROR( "Skinned mesh '{}' could not be built: {}", asset->GetMetadata().Filepath.string(),
-                           registered.GetError() );
+                LOG_ERROR( "Skinned mesh could not be finalized: {}",
+                           Runtime::ExplainMeshReadiness( readiness, asset->GetMetadata().Filepath.string() ) );
                 return Common::UUID::Null();
             }
             RegisterCookedTextures( mgr );
@@ -230,7 +246,13 @@ namespace Desert::Editor::MeshDnD
         if ( auto existing = mgr.FindByPath<Assets::MeshAsset>( skinnedStr ) )
             return { FinalizeSkinned( mgr, existing, sourcePath ), true };
         if ( auto existing = mgr.FindByPath<Assets::MeshAsset>( staticStr ) )
+        {
+            // The same registration the create path below performs. The skinned twin above already did it
+            // (through FinalizeSkinned); this one did not, and the asymmetry between two adjacent lines is
+            // exactly the shape a single registrar removes.
+            Runtime::EnsureMeshRegistered( existing, mgr );
             return { existing->GetMetadata().Handle, false };
+        }
 
         // Cook on demand if neither cooked form exists yet (the cook decides static vs skinned by the rig).
         if ( !std::filesystem::exists( staticStr ) && !std::filesystem::exists( skinnedStr ) )
@@ -258,10 +280,10 @@ namespace Desert::Editor::MeshDnD
         if ( !created )
             return { Common::UUID::Null(), false };
 
-        if ( const auto registered = Runtime::ResourceRegistry::GetMeshService()->Register( created );
-             !registered )
+        if ( const auto readiness = Runtime::EnsureMeshDrawable( created, mgr );
+             readiness == Runtime::MeshReadiness::NotRegistered || readiness == Runtime::MeshReadiness::NotBuilt )
         {
-            LOG_ERROR( "[Import] cooked mesh '{}' could not be built: {}", staticStr, registered.GetError() );
+            LOG_ERROR( "[Import] {}", Runtime::ExplainMeshReadiness( readiness, staticStr ) );
             return { Common::UUID::Null(), false };
         }
         RegisterCookedTextures( mgr );

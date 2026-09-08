@@ -38,6 +38,7 @@
 #include <gtest/gtest.h>
 
 #include <Engine/Core/Serialize/AssetReferenceResolve.hpp>
+#include <Engine/Runtime/Services/AssetServiceRegistration.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -92,12 +93,60 @@ namespace
         return {};
     }
 
-    std::string ReadAll( const std::filesystem::path& path )
+    // THE CENSUS COUNTS CODE, SO IT HAS TO STOP COUNTING PROSE. Every one of these files now carries a
+    // comment QUOTING the call it used to make ("was `if ( !GetMaterialService()->Get( h ) ) ...`"), which
+    // is exactly the sentence the next reader needs and exactly the text a naive scan reports as a
+    // violation. It caught this suite the first time it ran. String literals are stepped over as well, so
+    // a URL's `//` cannot swallow the rest of a line of real code.
+    std::string WithoutCommentsAndStrings( const std::string& source )
     {
-        std::ifstream      in( path, std::ios::binary );
-        std::ostringstream buffer;
-        buffer << in.rdbuf();
-        return buffer.str();
+        std::string out;
+        out.reserve( source.size() );
+        for ( size_t i = 0; i < source.size(); )
+        {
+            if ( source.compare( i, 2, "//" ) == 0 )
+            {
+                while ( i < source.size() && source[i] != '\n' )
+                    ++i;
+            }
+            else if ( source.compare( i, 2, "/*" ) == 0 )
+            {
+                i = source.find( "*/", i );
+                i = ( i == std::string::npos ) ? source.size() : i + 2;
+            }
+            else if ( source[i] == '"' )
+            {
+                out += ' ';
+                for ( ++i; i < source.size() && source[i] != '"'; ++i )
+                {
+                    if ( source[i] == '\\' )
+                        ++i;
+                }
+                if ( i < source.size() )
+                    ++i;
+            }
+            else
+            {
+                out += source[i++];
+            }
+        }
+        return out;
+    }
+
+    // `MakeAssetResolver` bridges an AssetHandle field BOTH ways, and only one of them resolves a
+    // reference. `ToPath` turns a handle a component already holds into a string for the file; it looks a
+    // record up and registers nothing, correctly, because nothing is being resolved. Slicing it out is
+    // what makes "every lookup is followed by a registration" a true statement rather than a rule with an
+    // exception nobody wrote down. Files without a `ToPath` are returned unchanged.
+    std::string WithoutTheSerializationDirection( const std::string& source )
+    {
+        const size_t begin = source.find( "r.ToPath = " );
+        if ( begin == std::string::npos )
+            return source;
+        const size_t end = source.find( "r.FromPath = ", begin );
+        if ( end == std::string::npos )
+            return source;
+        return source.substr( 0, begin ) + source.substr( end );
     }
 
     size_t CountOccurrences( const std::string& haystack, const std::string& needle )
@@ -108,6 +157,64 @@ namespace
             ++n;
         return n;
     }
+
+    // HOW MANY TIMES A FILE REACHES ONE OF THE THREE SERVICES AT ALL — not how many times it calls a
+    // particular method on one. Counting `->Register(` would pass a file that registered eagerly in one
+    // branch and lazily in another, and it would also pass a `->Get()` used as a guard, which is the shape
+    // this whole line of work removed (the guard BUILT the thing it was asking about).
+    size_t ServiceTouches( const std::string& source, const std::string& accessor )
+    {
+        return CountOccurrences( source, accessor );
+    }
+
+    // Every way a file can ask the registry for a mesh record, and every way it can hand one to the
+    // registrar. The relation asserted below is between these two numbers, in the same file.
+    size_t MeshLookups( const std::string& source )
+    {
+        return CountOccurrences( source, "FindByPath<Assets::MeshAsset>" ) +
+               CountOccurrences( source, "FindByHandle<Assets::MeshAsset>" );
+    }
+
+    size_t MeshRegistrations( const std::string& source )
+    {
+        return CountOccurrences( source, "EnsureMeshRegistered(" ) +
+               CountOccurrences( source, "EnsureMeshDrawable(" );
+    }
+
+    size_t MaterialLookups( const std::string& source )
+    {
+        return CountOccurrences( source, "FindByPath<Assets::MaterialAsset>" ) +
+               CountOccurrences( source, "FindByHandle<Assets::MaterialAsset>" ) +
+               CountOccurrences( source, "FindByPath<Assets::SurfaceMaterialAsset>" );
+    }
+
+    size_t MaterialRegistrations( const std::string& source )
+    {
+        return CountOccurrences( source, "EnsureMaterialRegistered(" );
+    }
+
+    // The three files that resolve an asset reference as find-else-create, and therefore the three that
+    // had independently written the same rule.
+    const std::vector<std::string>& ResolverFiles()
+    {
+        static const std::vector<std::string> files = {
+             "Desert/Desert/Source/Engine/Core/Serialize/ComponentRegistry.cpp",
+             "Editor/Source/Editor/Import/MeshDnD.cpp",
+             "Editor/Source/Editor/Widgets/ThumbnailSubject.cpp",
+        };
+        return files;
+    }
+
+    constexpr const char* kRegistrar = "Desert/Desert/Source/Engine/Runtime/Services/AssetServiceRegistration.cpp";
+
+    std::string ReadAll( const std::filesystem::path& path )
+    {
+        std::ifstream      in( path, std::ios::binary );
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        return buffer.str();
+    }
+
 } // namespace
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -199,65 +306,132 @@ TEST( SceneAssetRegistration, TheRouteNotTakenIsNotRun )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
-// 2. The census: the resolver has ONE registration site per service, so the routes CANNOT disagree.
+// 2 + 3. THE CENSUS. One implementation to be careful in, and every route through it.
+//
+// The scene parse was not the only place with a find-else-create over an asset reference. Two more files
+// had written their own, and each dropped a DIFFERENT part of it: the drag-and-drop import registered
+// nothing on either of its reuse paths (under a comment reading "Already cooked + registered?" — a
+// question mark where a check belongs), and the thumbnail resolver did the same and then reported the
+// consequence with another condition's words.
+//
+// So the assertion is not "each file is careful". It is that there is ONE implementation to be careful in
+// — none of the three touches a service itself — and that inside each file no route escapes it. A rule
+// enforced by repetition is what Ф5 paid forty-four call sites for.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-TEST( SceneAssetRegistration, TheResolverHasExactlyOneRegistrationSitePerService )
+TEST( SceneAssetRegistration, TheThreeServicesAreReachedFromExactlyOnePlace )
 {
     const std::string root = RepoRoot();
-    ASSERT_FALSE( root.empty() ) << "ComponentRegistry.cpp was not found from the test's working directory";
+    ASSERT_FALSE( root.empty() ) << "the repository was not found from the test's working directory";
 
-    const std::string source =
-         ReadAll( root + "Desert/Desert/Source/Engine/Core/Serialize/ComponentRegistry.cpp" );
-    ASSERT_FALSE( source.empty() );
+    const std::string registrar = WithoutCommentsAndStrings( ReadAll( root + kRegistrar ) );
+    ASSERT_FALSE( registrar.empty() );
 
-    // HOW MANY TIMES THIS FILE REACHES EACH SERVICE AT ALL — not how many times it calls a particular
-    // method on one. Counting `->Register(` would pass a file that registered eagerly in one branch and
-    // lazily in another, and it would also pass a branch whose only contact with the service is a
-    // `->Get()` used as a guard, which is the shape this task removed (it BUILT the material it was
-    // asking about). One accessor call is the strongest form of "one site" that a text scan can state,
-    // and it is what the file now looks like: `auto* service = ...GetMeshService();` inside
-    // EnsureMeshRegistered, and nowhere else.
+    for ( const char* accessor : { "GetMeshService()", "GetMaterialService()", "GetTextureService()" } )
+    {
+        EXPECT_EQ( ServiceTouches( registrar, accessor ), 1u )
+             << accessor << " is reached more than once inside the registrar itself";
+
+        for ( const auto& relative : ResolverFiles() )
+        {
+            const std::string source = WithoutCommentsAndStrings( ReadAll( root + relative ) );
+            ASSERT_FALSE( source.empty() ) << relative;
+            EXPECT_EQ( ServiceTouches( source, accessor ), 0u )
+                 << relative << " reaches " << accessor << " itself instead of going through " << kRegistrar;
+        }
+    }
+
+    // MEASURED ON THE TREES THESE TWO TASKS STARTED FROM, and this is the red the suite was shown in:
+    // before Ф6, `ComponentRegistry.cpp` reached the mesh service twice and the material service three
+    // times (a create-branch registration, a `Register` behind a `Get`-as-a-guard, and the guard itself).
+    // Before Ф7, `MeshDnD.cpp` reached them five times and `ThumbnailSubject.cpp` twice, each with its own
+    // copy of the rule and each with a different part of it missing.
     //
-    // MEASURED ON THE TREE THIS TASK STARTED FROM: 2 for the mesh service (FromPath's create branch,
-    // FromGuid's guard) and 3 for the material service (the same two plus FromGuid's `Get`-as-a-guard).
-    // That is the red this suite was shown in.
-    //
-    // THE TEXTURE COUNT WAS ALREADY 1 AND THE TEXTURE RELATION WAS STILL BROKEN, which is exactly what a
-    // count cannot see: the one site was in `FromPath` and `FromGuid` registered NOTHING. So the count
-    // below is only half the census, and the second half — every spelling reaching that one site — is the
-    // assertion after it.
-    const size_t meshSites     = CountOccurrences( source, "GetMeshService()" );
-    const size_t materialSites = CountOccurrences( source, "GetMaterialService()" );
-    const size_t textureSites  = CountOccurrences( source, "GetTextureService()" );
+    // THE TEXTURE COUNT WAS ALREADY 1 IN `ComponentRegistry.cpp` AND THE RELATION WAS STILL BROKEN, which
+    // is exactly what a count cannot see: the one site was in `FromPath` and `FromGuid` registered
+    // nothing. So the count above is only half the census, and the second half is the test below.
+}
 
-    EXPECT_EQ( meshSites, 1u ) << "the mesh reference must reach the service in ONE place, so the found "
-                                  "and created routes cannot drift apart";
-    EXPECT_EQ( materialSites, 1u ) << "the material reference must reach the service in ONE place, so the "
-                                      "found and created routes cannot drift apart";
-    // The texture reference failed the relation in the OPPOSITE direction — FromPath registered and
-    // FromGuid did not register at all — and a handle is the only spelling a component uses for a
-    // texture, so the branch that skipped it was the common one.
-    EXPECT_EQ( textureSites, 1u ) << "the texture reference must reach the service in ONE place, so the "
-                                     "path and handle spellings cannot drift apart";
+// EVERY LOOKUP IS FOLLOWED BY A REGISTRATION — the relation, as an inequality between two counts taken
+// from the SAME file. It is what the site count cannot express: a file may touch the registrar once and
+// still have a second route that quietly does not.
+TEST( SceneAssetRegistration, EveryResolverLooksUpNoMoreOftenThanItRegisters )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
 
-    // BOTH SPELLINGS REACH THAT ONE SITE. A scene names an asset two ways — a path (`FromPath`) and a
-    // stable handle (`FromGuid`) — and the relation is broken the moment one of them registers and the
-    // other does not, whatever the site count says. Each helper is therefore its definition plus at least
-    // the two calls: three occurrences of the name. On the tree before this task all three are ZERO,
-    // because the helpers did not exist and each spelling did its own thing inline.
-    EXPECT_GE( CountOccurrences( source, "EnsureMeshRegistered" ), 3u )
-         << "the mesh reference must register on BOTH the path and the handle spelling";
-    EXPECT_GE( CountOccurrences( source, "EnsureMaterialRegistered" ), 3u )
-         << "the material reference must register on BOTH the path and the handle spelling";
-    EXPECT_GE( CountOccurrences( source, "EnsureTextureRegistered" ), 3u )
-         << "the texture reference must register on BOTH the path and the handle spelling";
+    for ( const auto& relative : ResolverFiles() )
+    {
+        const std::string source =
+             WithoutTheSerializationDirection( WithoutCommentsAndStrings( ReadAll( root + relative ) ) );
+        ASSERT_FALSE( source.empty() ) << relative;
 
-    // And the find-else-create that precedes it is the rule from AssetReferenceResolve.hpp, not a
-    // hand-written one beside it. Two call sites: the mesh reference and the material reference. (A
-    // texture reference has no create-on-miss of its own here — TextureSlot.cpp owns that half — so it
-    // does not appear in this count.)
-    EXPECT_GE( CountOccurrences( source, "ResolveSceneReference(" ), 2u );
+        EXPECT_GE( MeshRegistrations( source ), MeshLookups( source ) )
+             << relative << " resolves a mesh reference on a route that registers nothing";
+        EXPECT_GE( MaterialRegistrations( source ), MaterialLookups( source ) )
+             << relative << " resolves a material reference on a route that registers nothing";
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// 4. Ф7 — A REFUSAL NAMES THE CONDITION THAT HELD.
+//
+// `ThumbnailSubject::ResolveMesh` had ONE message for THREE facts, and the words it chose belonged to the
+// rarest: a mesh nothing had registered was reported as "built no drawable geometry (a skinned mesh's
+// static buffer is empty by design)", which sends the reader to look at rigs. The header's own doc block
+// promised three distinct refusals; the code had one. DC §1.4 in its soft form — the answer is not empty,
+// it is misdirecting, and a misdirecting answer is followed.
+//
+// The classification is now a pure function of three facts, so the mapping is a thing a test can hold to.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+using Desert::Runtime::ClassifyMeshReadiness;
+using Desert::Runtime::ExplainMeshReadiness;
+using Desert::Runtime::MeshReadiness;
+
+TEST( SceneAssetRegistration, EachUndrawableMeshHasItsOwnReason )
+{
+    EXPECT_EQ( ClassifyMeshReadiness( /*registered=*/false, /*built=*/false, 0 ), MeshReadiness::NotRegistered );
+    EXPECT_EQ( ClassifyMeshReadiness( true, /*built=*/false, 0 ), MeshReadiness::NotBuilt );
+    EXPECT_EQ( ClassifyMeshReadiness( true, true, /*submeshes=*/0 ), MeshReadiness::NoSubmeshes );
+    EXPECT_EQ( ClassifyMeshReadiness( true, true, /*submeshes=*/1 ), MeshReadiness::Drawable );
+
+    // THE ONE THAT WOULD HAVE CAUGHT THE DEFECT. An unregistered mesh is also unbuilt and also has no
+    // submeshes, so every fact the old message asserted was *true of it* — and the message was still
+    // wrong, because it named the last cause instead of the first. Asserting the ORDER of the three is
+    // what makes "names the condition that held" a testable claim rather than a wish.
+    EXPECT_EQ( ClassifyMeshReadiness( false, false, 0 ), MeshReadiness::NotRegistered );
+    EXPECT_NE( ClassifyMeshReadiness( false, false, 0 ), MeshReadiness::NoSubmeshes );
+}
+
+TEST( SceneAssetRegistration, NoTwoReadinessStatesShareASentence )
+{
+    const std::vector<MeshReadiness> all = { MeshReadiness::Drawable, MeshReadiness::NotRegistered,
+                                             MeshReadiness::NotBuilt, MeshReadiness::NoSubmeshes };
+
+    std::vector<std::string> sentences;
+    for ( const auto state : all )
+    {
+        const std::string sentence = ExplainMeshReadiness( state, "Cooked/Meshes/probe.stmesh" );
+        // Every refusal carries the file. A message a human cannot search for is a message that costs the
+        // next person the same investigation.
+        EXPECT_NE( sentence.find( "Cooked/Meshes/probe.stmesh" ), std::string::npos ) << sentence;
+        sentences.push_back( sentence );
+    }
+
+    for ( size_t i = 0; i < sentences.size(); ++i )
+    {
+        for ( size_t j = i + 1; j < sentences.size(); ++j )
+        {
+            EXPECT_NE( sentences[i], sentences[j] )
+                 << "two readiness states report themselves with the same words: " << sentences[i];
+        }
+    }
+
+    // And the sentence that misled: it belongs to NoSubmeshes and to nothing else.
+    EXPECT_NE( ExplainMeshReadiness( MeshReadiness::NoSubmeshes, "m" ).find( "skinned mesh" ), std::string::npos );
+    EXPECT_EQ( ExplainMeshReadiness( MeshReadiness::NotRegistered, "m" ).find( "skinned mesh" ),
+               std::string::npos );
 }
 
 int main( int argc, char** argv )
