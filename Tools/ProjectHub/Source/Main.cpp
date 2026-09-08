@@ -18,15 +18,14 @@
 // budget), Launch.hpp (the argv the Editor is started with), Files.hpp (the two file primitives),
 // FileDialog.hpp (native panels).
 //
-// STILL OPENGL2, and deliberately: R2 makes Vulkan the only supported backend, but porting the
-// window is L3 — it needs the shared VulkanWindow and the MoltenVK ICD environment, and doing it
-// here would collide with the repository move. The port is contained ON PURPOSE: the four GL calls
-// at the bottom of the frame loop, and the twenty lines of `MakeTextureBackend` below. Nothing else
-// in the launcher — not the thumbnail cache, not a screen — names a graphics API.
+// VULKAN, and it is the ONLY backend — R2 says the engine has one graphics API and the launcher is
+// now on it too (L3). This file still names none: the window is created with no client API and
+// every device call lives in VulkanHost.cpp, which is also where the thumbnail upload went. What
+// used to be four GL calls at the bottom of the frame loop is `vulkan.BeginFrame()` and
+// `vulkan.Present(...)`.
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
-#include <backends/imgui_impl_opengl2.h>
 
 #include <GLFW/glfw3.h>
 
@@ -40,29 +39,7 @@
 #include "Projects.hpp"
 #include "Theme.hpp"
 #include "Thumbnails.hpp"
-
-#ifdef __APPLE__
-#include <OpenGL/gl.h>
-#elif defined( _WIN32 )
-#include <windows.h>
-#include <GL/gl.h>
-#else
-#include <GL/gl.h>
-#endif
-
-// WINDOWS' <GL/gl.h> IS FROZEN AT OPENGL 1.1 and Microsoft has never shipped a newer one; every
-// other platform's header carries the modern enums, which is why this compiles everywhere except
-// the one place nobody builds locally. `GL_CLAMP_TO_EDGE` arrived in OpenGL 1.2 (1998), so the
-// launcher's thumbnail upload was a Windows-only C2065 that cost a full CI cycle to see.
-//
-// The value, not a loader, is the right fix HERE and only here: this tool draws through ImGui's
-// fixed-function GL2 backend, so it needs exactly one 1.2-era constant and no 1.2-era *functions* —
-// and a constant is an ABI number, identical in every driver since. Pulling in glad or GLEW to
-// learn one integer would be a third-party dependency (§1.5) bought for nothing. If this file ever
-// needs a post-1.1 ENTRY POINT, that is the moment the trade flips and a loader becomes correct.
-#ifndef GL_CLAMP_TO_EDGE
-#define GL_CLAMP_TO_EDGE 0x812F
-#endif
+#include "VulkanHost.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -1575,42 +1552,20 @@ namespace
         }
     }
 
-    // ────────────────────────────────────────────────────────────── the graphics seam
-
-    // THE ONLY graphics-API code outside the frame loop, and the reason nothing else in this
-    // launcher names one. Replacing this function is the whole of what porting the thumbnails to
-    // Vulkan (L3) costs.
-    Hub::TextureBackend MakeTextureBackend()
-    {
-        Hub::TextureBackend backend;
-        backend.Upload = []( const std::uint8_t* rgba, int width, int height ) -> Hub::TextureHandle
-        {
-            GLuint texture = 0;
-            glGenTextures( 1, &texture );
-            if ( texture == 0 )
-                return nullptr;
-            glBindTexture( GL_TEXTURE_2D, texture );
-            glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
-            glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-            glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
-            glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
-            glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba );
-            return reinterpret_cast<Hub::TextureHandle>( static_cast<std::uintptr_t>( texture ) );
-        };
-        backend.Destroy = []( Hub::TextureHandle handle )
-        {
-            const GLuint texture = static_cast<GLuint>( reinterpret_cast<std::uintptr_t>( handle ) );
-            if ( texture )
-                glDeleteTextures( 1, &texture );
-        };
-        return backend;
-    }
 } // namespace
 
 int main()
 {
     if ( !glfwInit() )
+    {
+        std::fprintf( stderr, "ProjectHub: GLFW could not be initialised.\n" );
         return 1;
+    }
+
+    // NO CLIENT API: the window carries a Metal/Win32 surface that VulkanHost turns into a
+    // VkSurfaceKHR. Without this hint GLFW still creates an OpenGL context beside it, which on
+    // macOS costs a second driver and makes glfwCreateWindowSurface fail on some ICDs.
+    glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
 
     // The design size, and the design minimum. At 860 wide the content column is 582 px, which the
     // column rule floors to exactly 2 — the rule's floor and the window's minimum agree rather than
@@ -1618,12 +1573,11 @@ int main()
     GLFWwindow* window = glfwCreateWindow( 1280, 800, "DesertEngine Launcher", nullptr, nullptr );
     if ( !window )
     {
+        std::fprintf( stderr, "ProjectHub: the launcher window could not be created.\n" );
         glfwTerminate();
         return 1;
     }
     glfwSetWindowSizeLimits( window, 860, 520, GLFW_DONT_CARE, GLFW_DONT_CARE );
-    glfwMakeContextCurrent( window );
-    glfwSwapInterval( 1 );
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -1656,9 +1610,23 @@ int main()
             st.Registry = projects.ExtractValue();
     }
 
-    ImGui_ImplGlfw_InitForOpenGL( window, true );
-    ImGui_ImplOpenGL2_Init();
-    st.Thumbnails.SetBackend( MakeTextureBackend() );
+    // AFTER Theme::LoadFonts, and that ORDER is now load-bearing. The GL2 backend built its font
+    // atlas lazily on the first NewFrame, so a font loaded later still made it in; the Vulkan
+    // backend uploads the atlas once, here, and a font added after this line would never be drawn.
+    ImGui_ImplGlfw_InitForVulkan( window, true );
+    Hub::VulkanHost vulkan;
+    if ( const auto ready = vulkan.Init( window ); !ready.IsSuccess() )
+    {
+        // No window can say this: there is no device to draw the message with. stderr and a
+        // non-zero exit, with the step that refused named — see VulkanHost::Init.
+        std::fprintf( stderr, "ProjectHub: %s\n", ready.GetError().c_str() );
+        ImGui_ImplGlfw_Shutdown();
+        ImGui::DestroyContext();
+        glfwDestroyWindow( window );
+        glfwTerminate();
+        return 1;
+    }
+    st.Thumbnails.SetBackend( vulkan.MakeTextureBackend() );
 
     if ( const char* home = std::getenv( "HOME" ) )
         std::snprintf( st.NewLocation, sizeof( st.NewLocation ), "%s/DesertProjects", home );
@@ -1681,7 +1649,7 @@ int main()
     while ( !glfwWindowShouldClose( window ) )
     {
         glfwPollEvents();
-        ImGui_ImplOpenGL2_NewFrame();
+        vulkan.BeginFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
         ImGui::PushFont( Hub::Theme::Regular );
@@ -1715,21 +1683,17 @@ int main()
         ImGui::PopFont();
         ImGui::Render();
 
-        int framebufferWidth = 0, framebufferHeight = 0;
-        glfwGetFramebufferSize( window, &framebufferWidth, &framebufferHeight );
-        glViewport( 0, 0, framebufferWidth, framebufferHeight );
-        const ImVec4 clear = V4( Hub::Theme::kCanvas );
-        glClearColor( clear.x, clear.y, clear.z, 1.0f );
-        glClear( GL_COLOR_BUFFER_BIT );
-        ImGui_ImplOpenGL2_RenderDrawData( ImGui::GetDrawData() );
-        glfwSwapBuffers( window );
+        const ImVec4 canvas   = V4( Hub::Theme::kCanvas );
+        const float  clear[4] = { canvas.x, canvas.y, canvas.z, 1.0f };
+        vulkan.Present( ImGui::GetDrawData(), clear );
     }
 
-    // Released while the GL context is still current. A cache destroyed at process exit would be
-    // handing a dead context its textures to free.
+    // Released while the device is still alive. A cache destroyed at process exit would be handing
+    // a dead device its textures to free. Order matters the other way too: this hands every
+    // thumbnail to VulkanHost's graveyard, which Shutdown() below is what actually drains.
     st.Thumbnails.Shutdown();
+    vulkan.Shutdown();
 
-    ImGui_ImplOpenGL2_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
     glfwDestroyWindow( window );
