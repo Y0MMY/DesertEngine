@@ -664,8 +664,8 @@ namespace Desert::Graphic::API::Vulkan
     Common::BoolResultStr VulkanImageCube::RT_ClearToColor( float r, float g, float b, float a )
     {
         if ( m_Resource.Image == VK_NULL_HANDLE )
-            return Common::MakeFormattedError<bool>(
-                 "ImageCube '{}': RT_ClearToColor before the image exists", m_Specification.Tag );
+            return Common::MakeFormattedError<bool>( "ImageCube '{}': RT_ClearToColor before the image exists",
+                                                     m_Specification.Tag );
 
         const auto cmdAlloc = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
         if ( !cmdAlloc.IsSuccess() )
@@ -680,7 +680,7 @@ namespace Desert::Graphic::API::Vulkan
         const VkImageLayout restore = m_Resource.Layout;
         TransitionLayout( cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL );
 
-        const VkClearColorValue      colour = { { r, g, b, a } };
+        const VkClearColorValue       colour = { { r, g, b, a } };
         const VkImageSubresourceRange range  = { .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
                                                  .baseMipLevel   = 0,
                                                  .levelCount     = m_Resource.MipLevels,

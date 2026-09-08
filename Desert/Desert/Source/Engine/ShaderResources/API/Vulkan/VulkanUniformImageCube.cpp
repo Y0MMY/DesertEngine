@@ -32,11 +32,11 @@ namespace Desert::ShaderResources::API::Vulkan
         // SECOND time bit-identical by construction rather than by luck.
         // RGBA8F is the format the set-creation seed uses (VulkanMaterialBackend's SampledCube arm), so
         // this points at the very same VkImageView the descriptor was born holding.
-        const Graphic::ImageCube* bound =
-             imageCube ? imageCube
-                       : Graphic::FallbackTextures::Get()
-                              .GetFallbackTextureCube( Core::Formats::ImageFormat::RGBA8F )
-                              .get();
+        const Graphic::ImageCube* bound = imageCube
+                                               ? imageCube
+                                               : Graphic::FallbackTextures::Get()
+                                                      .GetFallbackTextureCube( Core::Formats::ImageFormat::RGBA8F )
+                                                      .get();
 
         const auto& res              = ( (Graphic::API::Vulkan::VulkanImageCube*)bound )->GetResource();
         m_DescriptorInfo.imageView   = res.ImageView;
