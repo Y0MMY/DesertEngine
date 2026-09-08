@@ -121,6 +121,7 @@
 #include <algorithm> // std::sort / std::transform (scene list)
 #include <span>      // the View menu's groups, declared as data rather than as control flow
 #include <cctype>    // std::tolower (scene filter)
+#include <chrono>    // per-stage startup timing (see the staged boot in OnUpdate)
 
 namespace Desert::Editor
 {
@@ -844,8 +845,36 @@ namespace Desert::Editor
             if ( m_StartupFramesRendered >= 1 )
             {
                 DESERT_PROFILE_SCOPE( "Startup stage" );
+
+                // EVERY STAGE IS TIMED, and the reason is a question nobody could answer. A client
+                // watching a fresh editor over this project saw the command palette's 'Open' group stay
+                // empty for five minutes and had no way to say WHICH of eight stages was spending them:
+                // the only startup line the log ever carried was the shader preload's, which runs in
+                // OnAttach and is not one of these at all. So "the preload finished" was read as "the
+                // startup finished", and the two are minutes apart. Measured here, on an otherwise idle
+                // machine, the eight stages cost 6.0 s of a 51 s boot — the other 45 s is OnAttach's
+                // shader preload, which is exactly the phase the one existing line already reports.
+                //
+                // A phase nobody can name is a phase every brief guesses at, and three of this project's
+                // timed investigations went looking in the wrong one.
+                const auto stageStart = std::chrono::steady_clock::now();
                 m_StartupStages[m_StartupNext].Run();
+                const auto stageMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          std::chrono::steady_clock::now() - stageStart )
+                                          .count();
+                m_StartupElapsedMs += stageMs;
                 ++m_StartupNext;
+
+                LOG_INFO( "[Startup] stage {}/{} '{}' took {} ms ({} ms into the staged boot)", m_StartupNext,
+                          m_StartupStages.size(), m_StartupStages[m_StartupNext - 1].Label, stageMs,
+                          m_StartupElapsedMs );
+
+                if ( !StartupLoading() )
+                {
+                    LOG_INFO( "[Startup] all {} stage(s) done in {} ms; the editor is now answering about a "
+                              "project it has actually read.",
+                              m_StartupStages.size(), m_StartupElapsedMs );
+                }
             }
             SampleFrameQuiescence();
             return BOOLSUCCESS;

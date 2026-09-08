@@ -530,6 +530,11 @@ namespace Desert::Editor
         std::vector<StartupStage> m_StartupStages;
         size_t                    m_StartupNext           = 0;
         int                       m_StartupFramesRendered = 0;
+        // How long the stages run so far have cost, in milliseconds. Accumulated rather than derived from
+        // a start timestamp: a stage runs one per FRAME, so wall clock between the first and the last also
+        // counts the frames in between, and the number that answers "which stage is spending the boot" is
+        // the sum of the stages themselves.
+        long long m_StartupElapsedMs = 0;
         bool                      StartupLoading() const
         {
             return m_StartupNext < m_StartupStages.size();
