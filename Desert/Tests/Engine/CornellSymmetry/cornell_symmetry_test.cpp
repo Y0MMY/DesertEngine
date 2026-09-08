@@ -25,6 +25,33 @@
 // assertion is the AGREEMENT, and it is stated on the shipped shader maths rather than on a CPU model
 // that could be right while the GPU is wrong.
 //
+// HOW THE CAUSE WAS PINNED, because "the material" was a hypothesis and not a reading. Every frame
+// below is `--camera 0,300,1400 --look 0,-0.1,-1 --shot-frames 90` at 715x764, and the noise floor was
+// MEASURED rather than quoted: the same command run twice differs by 0 pixels of 546260. The numbers
+// are the mean sRGB luminance of two rectangles that are mirror images of one another about the image
+// centre — LEFT (30,100)-(130,500) and RIGHT (585,100)-(685,500):
+//
+//     knocked out        left    right   ratio
+//     ---------------------------------------
+//     nothing            0.010   0.563    56
+//     EnableShadows      0.010   0.565    57   <- not the shadow map
+//     EnableSSAO         0.010   0.563    56   <- not screen-space occlusion
+//     GlobalIllumination 0.009   0.562    62   <- not the SSGI gather
+//     RenderingPath -> 0 0.009   0.562    62   <- REPRODUCES IN THE FORWARD PATH; not a path divergence
+//     CB_Sun             0.012   0.503    42   <- the asymmetry SURVIVES with only the symmetric light
+//     CB_BackLight       0.007   0.185    26
+//
+// The `CB_Sun` row is the decisive one: with the only off-axis source deleted, what remains is a point
+// light on the walls' mid-plane, and the two walls still differ by a factor of 42. Note also that the
+// left wall got BRIGHTER when the sun was removed (0.010 -> 0.012) — a diffuse wall cannot do that, and
+// a mirror can, because all it was ever showing was the environment cube's specular reflection, and
+// deleting the sun changed the sky that cube is baked from.
+//
+// And then the instrumented frame, which is the argument no code reading produces: the deferred
+// composite's own Metallic G-buffer channel (DeferredDebugMode::Metallic) renders the ENTIRE left wall
+// white and every other surface in the box black — left rect mean 0.800, right rect mean 0.000. The
+// Roughness channel says the same thing the other way: left 0.125, right 0.783.
+//
 // WHAT IS DELIBERATELY NOT ASSERTED. The scene's OTHER light, CB_Sun, is a directional light whose
 // travel direction is normalize(0.6, -1, 0.2) — it is NOT on the symmetry plane, and it lights the
 // right wall's inner face at N·L = 0.507 while missing the left wall's entirely. That asymmetry is
