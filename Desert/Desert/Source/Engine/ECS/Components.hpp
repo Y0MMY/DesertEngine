@@ -185,8 +185,15 @@ namespace Desert::ECS
         std::optional<Geometry::PrimitiveType>    Primitive;
         std::shared_ptr<DynamicMesh>              RuntimeMesh;
         std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances;
-        bool                                      InstancesDirty       = true;
         uint32_t                                  SeenMaterialsVersion = 0; // see StaticMeshComponent
+
+        // `InstancesDirty` STOOD HERE, WRITTEN BY FIVE PLACES AND READ BY NONE. Every one of the five was
+        // an authoring site raising it after editing InstanceTransforms; nothing downstream ever asked.
+        // A8-3 declined to key the snapshot below off it — a stale picture would then have depended on
+        // every future mutation site remembering to raise a flag — which left it with no possible
+        // consumer at all, and a write-only field is a dead setting by §1.3 of the contract. Deleted with
+        // its five writes rather than wired: the thing it would have driven is already driven by a
+        // comparison that cannot drift.
 
         // The render path's CO-OWNED snapshot of InstanceTransforms above. The draw command used to carry
         // `&InstanceTransforms` — the address of a vector member of an ECS component — and the same two
@@ -194,11 +201,9 @@ namespace Desert::ECS
         // pool changes, and Lua running between the record and the read can destroy this entity outright.
         // See Graphic::MaterialSlotBinding for the full account (A8-3).
         //
-        // REBUILT BY COMPARING, NOT BY A FLAG. `InstancesDirty` beside it is set by four authoring sites
-        // and read by nobody, so keying the snapshot off it would have made a stale picture depend on
-        // every future mutation site remembering to raise it. Comparing the snapshot with the authored
-        // vector cannot drift: an edit that changes the contents rebuilds it, an unchanged frame costs one
-        // comparison and no allocation.
+        // REBUILT BY COMPARING, NOT BY A FLAG — see the note above on the flag that used to sit beside
+        // it. Comparing the snapshot with the authored vector cannot drift: an edit that changes the
+        // contents rebuilds it, an unchanged frame costs one comparison and no allocation.
         std::shared_ptr<const std::vector<glm::mat4>> RuntimeInstanceSnapshot;
     };
 

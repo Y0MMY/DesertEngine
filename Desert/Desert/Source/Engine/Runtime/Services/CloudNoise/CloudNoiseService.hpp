@@ -44,10 +44,12 @@ namespace Desert::Runtime
 
         /// Bumped whenever any registered volume is re-uploaded. The renderer compares it to decide
         /// whether the descriptor it bound last frame still points at the same image.
-        uint32_t GetGeneration() const
-        {
-            return m_Generation;
-        }
+        // `GetGeneration()` STOOD HERE with no caller anywhere in the tree — the same declared-and-
+        // unconnected guard that A8-2 removed from CloudModellingService next door, and it is removed for
+        // the same reason: the one service whose generation IS read (CloudTypeService) is read at
+        // VolumetricCloudRenderer.cpp, and neither of the other two ever was. A guard nobody asks is not
+        // protection, it is a claim. Whoever needs one here should take a handle on the image instead, as
+        // the modelling atlas now does.
 
         void Clear();
 
@@ -60,7 +62,6 @@ namespace Desert::Runtime
 
         std::unordered_map<Assets::AssetHandle, Entry> m_Volumes;
         Assets::AssetHandle                            m_Default{ 0 };
-        uint32_t                                       m_Generation             = 0;
         bool                                           m_ReportedMissingDefault = false;
     };
 } // namespace Desert::Runtime
