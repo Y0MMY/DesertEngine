@@ -221,8 +221,7 @@ namespace
 
             const std::string key = name.value().to_string().value();
             if ( key == "AlbedoColor" && components.size() >= 3 )
-                material.Albedo = { Scalar( components[0] ), Scalar( components[1] ),
-                                    Scalar( components[2] ) };
+                material.Albedo = { Scalar( components[0] ), Scalar( components[1] ), Scalar( components[2] ) };
             else if ( key == "MetallicFactor" )
                 material.Metallic = Scalar( components[0] );
             else if ( key == "RoughnessFactor" )
@@ -286,9 +285,8 @@ namespace
         const float     distance = glm::length( toLight );
         const glm::vec3 L        = glm::normalize( toLight );
 
-        const float attenuation =
-             LightFalloffFactor( distance, light.MinRadius, light.Radius, light.Falloff );
-        const glm::vec3 radiance = light.Color * light.Intensity * attenuation;
+        const float     attenuation = LightFalloffFactor( distance, light.MinRadius, light.Radius, light.Falloff );
+        const glm::vec3 radiance    = light.Color * light.Intensity * attenuation;
 
         const glm::vec3 view = glm::normalize( kCameraPosition - surface );
         const glm::vec3 F0   = glm::mix( kDielectricF0, material.Albedo, material.Metallic );
@@ -313,7 +311,7 @@ namespace
         PointLightPayload    Light;
         Material             LeftMaterial;
         Material             RightMaterial;
-        glm::vec3            LeftFace{ 0.0f };  // a point on the inner face, at wall centre height
+        glm::vec3            LeftFace{ 0.0f }; // a point on the inner face, at wall centre height
         glm::vec3            RightFace{ 0.0f };
         glm::vec3            LeftNormal{ 0.0f };
         glm::vec3            RightNormal{ 0.0f };
@@ -388,15 +386,13 @@ TEST( CornellSymmetry, BothInnerFacesSeeThePointLightIdentically )
     EXPECT_NEAR( glm::dot( fixture.LeftNormal, glm::normalize( toLeft ) ),
                  glm::dot( fixture.RightNormal, glm::normalize( toRight ) ), 1e-5f );
 
-    EXPECT_NEAR( LightFalloffFactor( distanceLeft, fixture.Light.MinRadius, fixture.Light.Radius,
-                                     fixture.Light.Falloff ),
-                 LightFalloffFactor( distanceRight, fixture.Light.MinRadius, fixture.Light.Radius,
-                                     fixture.Light.Falloff ),
-                 1e-6f );
+    EXPECT_NEAR(
+         LightFalloffFactor( distanceLeft, fixture.Light.MinRadius, fixture.Light.Radius, fixture.Light.Falloff ),
+         LightFalloffFactor( distanceRight, fixture.Light.MinRadius, fixture.Light.Radius, fixture.Light.Falloff ),
+         1e-6f );
 
     EXPECT_NEAR( glm::dot( fixture.LeftNormal, glm::normalize( kCameraPosition - fixture.LeftFace ) ),
-                 glm::dot( fixture.RightNormal, glm::normalize( kCameraPosition - fixture.RightFace ) ),
-                 1e-5f );
+                 glm::dot( fixture.RightNormal, glm::normalize( kCameraPosition - fixture.RightFace ) ), 1e-5f );
 }
 
 // THE RELATION. Same light, same geometry, same albedo — the two walls must reflect the same radiance.
@@ -414,15 +410,15 @@ TEST( CornellSymmetry, TheTwoWallsReflectThePointLightEquallyOnceColourIsHeldCom
     // A neutral mid-grey: not a value either wall carries, so neither is favoured.
     const glm::vec3 commonAlbedo{ 0.5f };
 
-    Material left     = fixture.LeftMaterial;
-    Material right    = fixture.RightMaterial;
-    left.Albedo       = commonAlbedo;
-    right.Albedo      = commonAlbedo;
+    Material left  = fixture.LeftMaterial;
+    Material right = fixture.RightMaterial;
+    left.Albedo    = commonAlbedo;
+    right.Albedo   = commonAlbedo;
 
-    const float lit = Luminance( PointLightResponse( fixture.Light, fixture.RightFace,
-                                                     fixture.RightNormal, right ) );
-    const float dark = Luminance( PointLightResponse( fixture.Light, fixture.LeftFace,
-                                                      fixture.LeftNormal, left ) );
+    const float lit =
+         Luminance( PointLightResponse( fixture.Light, fixture.RightFace, fixture.RightNormal, right ) );
+    const float dark =
+         Luminance( PointLightResponse( fixture.Light, fixture.LeftFace, fixture.LeftNormal, left ) );
 
     ASSERT_GT( lit, 0.0f ) << "the point light lights neither wall — the fixture, not the walls, changed";
     EXPECT_NEAR( dark, lit, 0.02f * lit )
@@ -479,7 +475,7 @@ TEST( CornellSymmetry, TheOrangeCubesFrontFaceIsTurnedAwayFromBothLights )
 
     const glm::vec3 frontFace = cube.Translation + glm::vec3( 0.0f, 0.0f, kCubeHalfExtent * cube.Scale.z );
     const glm::vec3 frontNormal{ 0.0f, 0.0f, 1.0f };
-    const glm::vec3 topFace    = cube.Translation + glm::vec3( 0.0f, kCubeHalfExtent * cube.Scale.y, 0.0f );
+    const glm::vec3 topFace = cube.Translation + glm::vec3( 0.0f, kCubeHalfExtent * cube.Scale.y, 0.0f );
     const glm::vec3 topNormal{ 0.0f, 1.0f, 0.0f };
 
     const PointLightPayload light = LoadPointLight( scene, "CB_BackLight" );
