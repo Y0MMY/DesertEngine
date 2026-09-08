@@ -1,9 +1,11 @@
 #pragma once
 
 #include <Common/Core/Constants.hpp>
+#include <Common/Project/ProjectFormat.hpp>
 
 #include <array>
 #include <filesystem>
+#include <string>
 
 namespace Desert::Editor
 {
@@ -42,5 +44,29 @@ namespace Desert::Editor
              { &P::FONTS_PATH, "Resources/Fonts", false },
              { &P::ICONS_PATH, "Resources/Icons", false },
         } };
+    }
+
+    // THE DESCRIPTOR A PACKAGE SHIPS, derived from the project's own rather than copied verbatim: the
+    // packed content lives under `kPackagedAssetsRoot` whatever the dev tree called it, so a
+    // DefaultScene that pointed inside the OLD assets root has to be rebased onto the new one or the
+    // shipped game boots to a path that is not in the archive.
+    //
+    // Everything else travels UNCHANGED, and that is a fix rather than an incidental: this used to
+    // build a fresh ProjectFile out of three fields, so Description, EngineVersion and every key
+    // another build owns (ForeignKeys) were dropped by the act of packaging. A package is the same
+    // product, not a reduced one.
+    //
+    // Pure — a ProjectFile in, a ProjectFile out, no filesystem — so the rebasing rule is assertable
+    // without building a package (Desert/Tests/Editor/PackagedContent).
+    inline Common::Project::ProjectFile PackagedDescriptor( const Common::Project::ProjectFile& source )
+    {
+        Common::Project::ProjectFile packaged = source;
+        packaged.AssetsRoot                   = kPackagedAssetsRoot;
+        if ( !packaged.DefaultScene.empty() && !source.AssetsRoot.empty() &&
+             packaged.DefaultScene.rfind( source.AssetsRoot, 0 ) == 0 )
+        {
+            packaged.DefaultScene = kPackagedAssetsRoot + packaged.DefaultScene.substr( source.AssetsRoot.size() );
+        }
+        return packaged;
     }
 } // namespace Desert::Editor

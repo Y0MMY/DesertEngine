@@ -95,6 +95,34 @@ namespace Desert::Editor
                     ch = '_';
             return name.empty() ? std::string( "Game" ) : name;
         }
+
+        // THE DESCRIPTOR GOES INTO THE ARCHIVE, under the one name the player looks for
+        // (Project::kPackagedDescriptorName). That is what makes a package "a binary and one .dpak"
+        // and nothing else: no loose file beside the archive for a copy, a zip or an installer to
+        // leave behind, and the descriptor travels with the content it describes rather than beside
+        // it. Both entry points below go through this, so the archive is a GAME whichever one built
+        // it — an archive that describes no game is the thing П5 had to fix.
+        //
+        // The empty-serialization check is not defensive noise: `WriteProjectFile` answers with a
+        // string, so a failure there is an EMPTY SUCCESS, and an empty descriptor packed under the
+        // right key produces a game that reaches "could not be read" on the player's machine instead
+        // of failing here where somebody can act on it (DC §1.4).
+        bool AddDescriptorToPak( Common::Utils::PakWriter& pak, const Common::Project::ProjectFile& project,
+                                 std::string& error )
+        {
+            const std::string json = Common::Project::WriteProjectFile( PackagedDescriptor( project ) );
+            if ( json.empty() )
+            {
+                error = "the project descriptor for '" + project.Name + "' serialized to nothing";
+                return false;
+            }
+            if ( !pak.AddData( Project::kPackagedDescriptorName, json.data(), json.size() ) )
+            {
+                error = std::string( "pak write failed for " ) + Project::kPackagedDescriptorName;
+                return false;
+            }
+            return true;
+        }
     } // namespace
 
     PackageResult PackageGame( const PackageOptions& options )
@@ -141,14 +169,20 @@ namespace Desert::Editor
             bundle = false;
         }
 
+        // THE CONTENT SITS BESIDE THE PLAYER BINARY, IN BOTH LAYOUTS (П5). The Runtime has exactly one
+        // rule for finding a game — look in its own executable's directory — and a bundle that put the
+        // archive in Contents/Resources could not satisfy it, so the launcher had to cd there and hand
+        // the descriptor over as `--project`. That flag is what made the package unstartable by hand:
+        // a player who ran the binary directly got "No game to run". Removing the flag means removing
+        // the reason it was needed, which is this split. Contents/Resources is simply not produced —
+        // macOS requires no such directory, and a second place the player has to be told about is
+        // exactly the knowledge a shipped game must not depend on.
         const fs::path root    = fs::path( options.OutputDir ) / ( bundle ? safeName + ".app" : safeName );
-        const fs::path binDir  = bundle ? root / "Contents" / "MacOS" : root;
-        const fs::path resDir  = bundle ? root / "Contents" / "Resources" : root;
+        const fs::path gameDir = bundle ? root / "Contents" / "MacOS" : root;
         const fs::path fwDir   = root / "Contents" / "Frameworks"; // bundle only
-        const char*    binName = bundle ? "Runtime-bin" : host.RuntimeBinary;
+        const char*    binName = bundle ? kBundlePlayerBinary : host.RuntimeBinary;
 
-        fs::create_directories( binDir, ec );
-        fs::create_directories( resDir, ec );
+        fs::create_directories( gameDir, ec );
         if ( ec )
             return { false, "Cannot create output dir " + root.string() + ": " + ec.message(), "" };
 
@@ -164,10 +198,10 @@ namespace Desert::Editor
         };
 
         // 2) Player binary.
-        fs::copy_file( runtimeBin, binDir / binName, fs::copy_options::overwrite_existing, ec );
+        fs::copy_file( runtimeBin, gameDir / binName, fs::copy_options::overwrite_existing, ec );
         if ( ec )
             return { false, "Cannot copy the Runtime binary: " + ec.message(), "" };
-        makeExecutable( binDir / binName );
+        makeExecutable( gameDir / binName );
         ++stats.Files;
 
         // 3) Cook BEFORE packing: every deterministic startup cost — shader SPIR-V, font atlases,
@@ -177,46 +211,29 @@ namespace Desert::Editor
         // Release game must produce Release cache keys or the shipped cache never hits.
         const CookStats cook = CookContentCaches( Core::SpirvDebugInfoForConfigName( options.Config ) );
 
-        // ALL content goes into ONE Content.dpak (UE .pak model), tree by tree out of the shared
-        // census (PackagedContentTrees.hpp) — assets, cooked cache, shaders, fonts, icons. The Runtime
-        // mounts the archive at startup; every content read resolves through the VFS.
+        // 4) ALL content AND the descriptor go into ONE Content.dpak (UE .pak model), tree by tree out
+        // of the shared census (PackagedContentTrees.hpp) — assets, cooked cache, shaders, fonts,
+        // icons — with the regenerated .deproj at the archive ROOT under the one name the player looks
+        // for. The Runtime mounts the archive beside its own binary, opens that descriptor out of the
+        // VFS, and every content read resolves through the same mount. Nothing loose, no flag.
         {
-            Common::Utils::PakWriter pak( resDir / "Content.dpak" );
+            Common::Utils::PakWriter pak( gameDir / "Content.dpak" );
             if ( !pak.IsOpen() )
-                return { false, "Cannot create Content.dpak in " + resDir.string(), "" };
+                return { false, "Cannot create Content.dpak in " + gameDir.string(), "" };
 
             for ( const PackagedTree& tree : PackagedContentTrees() )
                 if ( !AddTreeToPak( pak, *tree.Tree, tree.PakKey, tree.StripRawMeshSources, stats, error ) )
                     return { false, error, "" };
 
+            // FAILS THE PACKAGE, like every other step in this function: an archive without the
+            // descriptor is a folder of content the player cannot identify as a game, and the
+            // failure would land on somebody who has no sources.
+            if ( !AddDescriptorToPak( pak, ProjectContext::Current(), error ) )
+                return { false, error, "" };
+            ++stats.Files;
+
             if ( pak.Finalize() == 0 )
                 return { false, "Failed to finalize Content.dpak (no entries?)", "" };
-        }
-
-        // 4) Regenerated .deproj: content now lives under Assets/ next to the pak. The DefaultScene
-        // moves with it when it pointed inside the old assets root.
-        {
-            std::string defaultScene = ProjectContext::Current().DefaultScene;
-            const std::string oldRoot = ProjectContext::Current().AssetsRoot;
-            if ( !defaultScene.empty() && !oldRoot.empty() && defaultScene.rfind( oldRoot, 0 ) == 0 )
-                defaultScene = kPackagedAssetsRoot + defaultScene.substr( oldRoot.size() );
-
-            // Through the shared serializer (ProjectFormat.hpp) — this used to be the fourth
-            // hand-spliced copy of the .deproj format, and a project name with a quote in it
-            // shipped a package the Runtime could not open.
-            Common::Project::ProjectFile deproj;
-            deproj.Name         = projectName;
-            deproj.AssetsRoot   = kPackagedAssetsRoot;
-            deproj.DefaultScene = defaultScene;
-            // FAILS THE PACKAGE, like every other step in this function. The .deproj is the file the
-            // Runtime is handed on the command line by the launcher below; without it the shipped
-            // build starts, finds no project and exits. Package() already refuses on a missing pak, a
-            // bad tree and a failed finalize — these five writes were the only steps outside that.
-            const fs::path deprojPath = resDir / ( safeName + ".deproj" );
-            if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic(
-                      deprojPath, Common::Project::WriteProjectFile( deproj ) );
-                 !written )
-                return { false, "Could not write " + deprojPath.string() + ": " + written.GetError(), "" };
         }
 
         // 5) Bundle only: MoltenVK + the Vulkan loader travel INSIDE Contents/Frameworks so the player
@@ -277,6 +294,13 @@ namespace Desert::Editor
 
         // 6) Launcher + (bundle) Info.plist. The launcher script is the bundle's CFBundleExecutable:
         // dyld reads DYLD_* only at process start, so the env MUST be set before the real binary execs.
+        //
+        // WHAT THE LAUNCHER IS STILL FOR, now that it no longer names the project (П5): the Vulkan
+        // environment, and only that. Finder gives a double-clicked .app no VK_ICD_FILENAMES and no
+        // DYLD_FALLBACK_LIBRARY_PATH, and both must exist BEFORE the image is loaded, so no amount of
+        // work inside the player can replace this. It is therefore not a second way to start the game
+        // — running the binary directly works and is tested — it is the environment the host does not
+        // provide.
         if ( bundle )
         {
             std::ostringstream run;
@@ -286,15 +310,22 @@ namespace Desert::Editor
                 << "DIR=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\n"
                 << "if [ -f \"$DIR/../Frameworks/MoltenVK_icd.json\" ]; then\n"
                 << "  export VK_ICD_FILENAMES=\"$DIR/../Frameworks/MoltenVK_icd.json\"\n"
-                << "  export DYLD_FALLBACK_LIBRARY_PATH=\"$DIR/../Frameworks${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}\"\n"
+                << "  export "
+                   "DYLD_FALLBACK_LIBRARY_PATH=\"$DIR/../"
+                   "Frameworks${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}\"\n"
                 << "else\n"
                 << "  BREW_PREFIX=\"${HOMEBREW_PREFIX:-$(brew --prefix 2>/dev/null || echo /opt/homebrew)}\"\n"
-                << "  export VK_ICD_FILENAMES=\"${VK_ICD_FILENAMES:-$BREW_PREFIX/etc/vulkan/icd.d/MoltenVK_icd.json}\"\n"
-                << "  export DYLD_FALLBACK_LIBRARY_PATH=\"$BREW_PREFIX/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}\"\n"
+                << "  export "
+                   "VK_ICD_FILENAMES=\"${VK_ICD_FILENAMES:-$BREW_PREFIX/etc/vulkan/icd.d/MoltenVK_icd.json}\"\n"
+                << "  export "
+                   "DYLD_FALLBACK_LIBRARY_PATH=\"$BREW_PREFIX/"
+                   "lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}\"\n"
                 << "fi\n"
-                << "cd \"$DIR/../Resources\"\n"
-                << "exec \"$DIR/Runtime-bin\" --project " << safeName << ".deproj \"$@\"\n";
-            const fs::path launcher = binDir / "Runtime";
+                // The game directory IS this script's own directory now, so the cd is only about where
+                // engine_log.txt lands — the player finds its content from its executable path.
+                << "cd \"$DIR\"\n"
+                << "exec \"$DIR/" << kBundlePlayerBinary << "\" \"$@\"\n";
+            const fs::path launcher = gameDir / kBundleLauncherName;
             // This script IS the bundle's CFBundleExecutable — without it macOS reports the app as
             // damaged, which is the least diagnosable failure in this whole function.
             if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic( launcher, run.str() );
@@ -309,7 +340,7 @@ namespace Desert::Editor
                      "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
                   << "<plist version=\"1.0\"><dict>\n"
                   << "  <key>CFBundleName</key><string>" << projectName << "</string>\n"
-                  << "  <key>CFBundleExecutable</key><string>Runtime</string>\n"
+                  << "  <key>CFBundleExecutable</key><string>" << kBundleLauncherName << "</string>\n"
                   << "  <key>CFBundleIdentifier</key><string>com.desertengine." << safeName << "</string>\n"
                   << "  <key>CFBundlePackageType</key><string>APPL</string>\n"
                   << "  <key>CFBundleShortVersionString</key><string>1.0</string>\n"
@@ -334,7 +365,7 @@ namespace Desert::Editor
                 run << "@echo off\r\n"
                     << "REM Launches " << projectName << " (packaged by the Desert Editor).\r\n"
                     << "cd /d \"%~dp0\"\r\n"
-                    << "\"" << host.RuntimeBinary << "\" --project " << safeName << ".deproj %*\r\n";
+                    << "\"" << host.RuntimeBinary << "\" %*\r\n";
             }
             else
             {
@@ -349,7 +380,7 @@ namespace Desert::Editor
                     << "export "
                        "DYLD_FALLBACK_LIBRARY_PATH=\"$BREW_PREFIX/"
                        "lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}\"\n"
-                    << "exec ./" << host.RuntimeBinary << " --project " << safeName << ".deproj \"$@\"\n";
+                    << "exec ./" << host.RuntimeBinary << " \"$@\"\n";
             }
             const fs::path launcher = root / host.LauncherName;
             if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic( launcher, run.str() );
@@ -404,6 +435,14 @@ namespace Desert::Editor
         for ( const PackagedTree& tree : PackagedContentTrees() )
             if ( !AddTreeToPak( pak, *tree.Tree, tree.PakKey, tree.StripRawMeshSources, stats, error ) )
                 return { false, error, "" };
+
+        // ...and the same descriptor, so "a .dpak this tree produced" means ONE thing rather than two.
+        // A dev pak that carried content but no identity was an archive only the other entry point's
+        // output could be started from, and the difference between the two would be discovered by
+        // whoever dropped a Runtime beside this one and got "No game to run".
+        if ( !AddDescriptorToPak( pak, ProjectContext::Current(), error ) )
+            return { false, error, "" };
+        ++stats.Files;
 
         if ( pak.Finalize() == 0 )
             return { false, "Failed to finalize " + pakPath.string() + " (no entries?)", "" };

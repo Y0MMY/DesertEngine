@@ -29,6 +29,14 @@ namespace Desert::Project
     // it is written once, by the launcher, at creation, and means the engine the project was created with.
     using ProjectFile = Common::Project::ProjectFile;
 
+    // THE NAME A SHIPPED GAME'S DESCRIPTOR HAS, and it is one symbol rather than two string literals in
+    // two targets because the two ends live in different binaries and a disagreement between them is
+    // invisible until a player double-clicks (П5). The packager writes this key into the archive root;
+    // the player opens exactly this name beside its own executable. A dev project's descriptor is still
+    // named after the project — that file is opened by path, never discovered, so it has no such
+    // relation to keep.
+    inline constexpr const char* kPackagedDescriptorName = "Game.deproj";
+
     class ProjectContext final
     {
     public:

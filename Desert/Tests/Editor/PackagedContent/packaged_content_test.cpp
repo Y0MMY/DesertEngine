@@ -31,6 +31,9 @@
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Utilities/VFS.hpp>
 
+// The Runtime's own startup discovery — the other end of the relation П5 closes.
+#include <PackagedContent.hpp>
+
 #include <gtest/gtest.h>
 
 #include <cstdlib>
@@ -165,13 +168,15 @@ TEST( PackagedContent, BuildContentPakPacksWhatTheScannersFind )
     // no loose content at all, exactly what a player's machine has.
     fs::create_directories( pkg );
     fs::copy_file( proj / "Content.dpak", pkg / "Content.dpak" );
-    WriteFile( pkg / "Game.deproj", std::string( "{\"Name\":\"T\",\"AssetsRoot\":\"" ) +
-                                         Desert::Editor::kPackagedAssetsRoot + "\",\"DefaultScene\":\"\"}" );
+    // The descriptor is NOT written here: it comes out of the archive, which is where the packer put
+    // it. This block used to hand-splice one, which is exactly how the packer and the player managed
+    // to disagree about its name for as long as they did (П5).
 
     fs::current_path( pkg );
     const auto mounted = Common::Utils::VFS::MountPak( pkg / "Content.dpak" );
     ASSERT_TRUE( mounted.IsSuccess() ) << mounted.GetError();
-    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( pkg / "Game.deproj" ).string() ) );
+    ASSERT_TRUE(
+         Desert::Project::ProjectContext::Open( ( pkg / Desert::Project::kPackagedDescriptorName ).string() ) );
 
     // The scanners' own enumeration: roots from ServiceScanRoots, both halves via ListFilesRecursive.
     const auto findByExt = []( const std::array<const fs::path*, 2>& roots, const char* ext )
@@ -268,13 +273,15 @@ TEST( PackagedContent, AScriptReferenceResolvesToTheSameFileLooseAndPackaged )
 
     fs::create_directories( pkg );
     fs::copy_file( proj / "Content.dpak", pkg / "Content.dpak" );
-    WriteFile( pkg / "Game.deproj", std::string( "{\"Name\":\"T\",\"AssetsRoot\":\"" ) +
-                                         Desert::Editor::kPackagedAssetsRoot + "\",\"DefaultScene\":\"\"}" );
+    // The descriptor is NOT written here: it comes out of the archive, which is where the packer put
+    // it. This block used to hand-splice one, which is exactly how the packer and the player managed
+    // to disagree about its name for as long as they did (П5).
 
     fs::current_path( pkg );
     const auto mounted = Common::Utils::VFS::MountPak( pkg / "Content.dpak" );
     ASSERT_TRUE( mounted.IsSuccess() ) << mounted.GetError();
-    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( pkg / "Game.deproj" ).string() ) );
+    ASSERT_TRUE(
+         Desert::Project::ProjectContext::Open( ( pkg / Desert::Project::kPackagedDescriptorName ).string() ) );
 
     const fs::path packagedPath = Common::AssetHandle::PathForStableKey( stored );
     ASSERT_TRUE( Common::Utils::FileSystem::Exists( packagedPath ) )
@@ -400,13 +407,15 @@ TEST( PackagedContent, AServiceAssetReferenceResolvesToTheSameFileLooseAndPackag
 
     fs::create_directories( pkg );
     fs::copy_file( proj / "Content.dpak", pkg / "Content.dpak" );
-    WriteFile( pkg / "Game.deproj", std::string( "{\"Name\":\"T\",\"AssetsRoot\":\"" ) +
-                                         Desert::Editor::kPackagedAssetsRoot + "\",\"DefaultScene\":\"\"}" );
+    // The descriptor is NOT written here: it comes out of the archive, which is where the packer put
+    // it. This block used to hand-splice one, which is exactly how the packer and the player managed
+    // to disagree about its name for as long as they did (П5).
 
     fs::current_path( pkg );
     const auto mounted = Common::Utils::VFS::MountPak( pkg / "Content.dpak" );
     ASSERT_TRUE( mounted.IsSuccess() ) << mounted.GetError();
-    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( pkg / "Game.deproj" ).string() ) );
+    ASSERT_TRUE(
+         Desert::Project::ProjectContext::Open( ( pkg / Desert::Project::kPackagedDescriptorName ).string() ) );
 
     for ( std::size_t i = 0; i < cases.size(); ++i )
     {
@@ -562,12 +571,14 @@ TEST( PackagedContent, CookedArtifactsTravelFromThePackagerToTheRuntimeLookup )
     // The packaged side: pak + descriptor, nothing loose.
     fs::create_directories( pkg );
     fs::copy_file( proj / "Content.dpak", pkg / "Content.dpak" );
-    WriteFile( pkg / "Game.deproj", std::string( "{\"Name\":\"T\",\"AssetsRoot\":\"" ) +
-                                         Desert::Editor::kPackagedAssetsRoot + "\",\"DefaultScene\":\"\"}" );
+    // The descriptor is NOT written here: it comes out of the archive, which is where the packer put
+    // it. This block used to hand-splice one, which is exactly how the packer and the player managed
+    // to disagree about its name for as long as they did (П5).
     fs::current_path( pkg );
     const auto mounted = Common::Utils::VFS::MountPak( pkg / "Content.dpak" );
     ASSERT_TRUE( mounted.IsSuccess() ) << mounted.GetError();
-    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( pkg / "Game.deproj" ).string() ) );
+    ASSERT_TRUE(
+         Desert::Project::ProjectContext::Open( ( pkg / Desert::Project::kPackagedDescriptorName ).string() ) );
 
     // The runtime's own lookups, byte for byte, with no loose Cooked/ anywhere.
     const auto loadedSpirv = Desert::Core::TryLoadCachedSpirv( spirvKey );
@@ -820,6 +831,250 @@ TEST( PackagedContent, AMissingRuntimeIsRefusedByNamingThisHostsOwnBuildScript )
          << "the refusal does not name a script this host can run: " << result.Message;
     EXPECT_NE( result.Message.find( host.RuntimeBinary ), std::string::npos )
          << "the refusal does not say which file was missing: " << result.Message;
+}
+
+// ── A PACKAGE STARTS BY ITSELF (П5) ───────────────────────────────────────────────────────────────
+//
+// THE DEFECT. The Runtime carried a zero-config branch — mount the archive beside the executable, open
+// the descriptor at its root — and NOTHING in this repository produced that descriptor. PackageGame
+// wrote `<Name>.deproj` LOOSE beside the archive and generated a launcher script carrying
+// `--project <Name>.deproj`, so the branch had never once selected a real game and a player who ran the
+// binary directly got "No game to run". Both ends were individually correct: the packager really did
+// write a descriptor, the player really did look for one. What was wrong is the RELATION — the name the
+// packager wrote and the name the player looked for were different, and they live in two different
+// binaries, so nothing anywhere could compare them.
+//
+// SO THE RELATION IS WHAT THESE TWO TESTS ASSERT, and they assert it by REPLAYING the player's own
+// sequence over the packager's own output rather than by checking that a file exists: a file existing
+// under a name nobody looks for is precisely the state that shipped. `Runtime/Source/PackagedContent.cpp`
+// is compiled into this suite for that reason (see its premake5.lua) — it is the real discovery, not a
+// mirror of it.
+namespace
+{
+    // EXACTLY WHAT Runtime/Source/Main.cpp DOES, in its order, with nothing added: find the archives
+    // beside the executable, mount them, open the descriptor at the archive root under the one shared
+    // name. No arguments are involved anywhere, which is the whole claim.
+    struct PlayerStartup
+    {
+        int         MountExit = Desert::Player::kContentOk;
+        std::string MountMessage;
+        bool        Opened = false;
+    };
+
+    PlayerStartup StartTheGameLikeThePlayerDoes( const fs::path& playerBinary )
+    {
+        PlayerStartup  out;
+        const fs::path baseDir = playerBinary.parent_path();
+
+        const auto content = Desert::Player::MountPackagedContent( baseDir, playerBinary.stem().string() );
+        out.MountExit      = content.ExitCode;
+        out.MountMessage   = content.Message;
+        if ( out.MountExit != Desert::Player::kContentOk )
+            return out;
+
+        out.Opened = Desert::Project::ProjectContext::Open(
+             ( baseDir / Desert::Project::kPackagedDescriptorName ).string(),
+             Desert::Project::ProjectContext::RecordInRecent::No );
+        return out;
+    }
+
+    // Every loose `.deproj` anywhere under `root`. A package must contain NONE: the descriptor travels
+    // inside the archive, and a loose copy beside it is a second source of truth that a zip, a copy or
+    // an installer can drop while leaving the archive perfectly intact.
+    std::vector<fs::path> LooseDescriptors( const fs::path& root )
+    {
+        std::vector<fs::path> found;
+        std::error_code       ec;
+        for ( auto it = fs::recursive_directory_iterator( root, ec ); it != fs::recursive_directory_iterator();
+              it.increment( ec ) )
+        {
+            if ( ec )
+                break;
+            if ( it->is_regular_file( ec ) && it->path().extension() == ".deproj" )
+                found.push_back( it->path() );
+        }
+        return found;
+    }
+
+    // A project whose startup scene sits inside its own (deliberately not "Assets") content root, plus
+    // the Runtime binary the packager copies. Returns the project directory.
+    fs::path WriteProjectToPackage( const fs::path& base, const char* runtimeBinaryName )
+    {
+        const fs::path proj = base / "proj";
+        WriteFile( proj / "GameAssets" / "Scenes" / "level.desce", "scene-body" );
+        WriteFile( proj / "Resources" / "Fonts" / "fake.ttf", "font-body" );
+        WriteFile( proj / "T.deproj", "{\"Name\":\"T\",\"AssetsRoot\":\"GameAssets\",\"DefaultScene\":"
+                                      "\"GameAssets/Scenes/level.desce\"}" );
+        // The packager looks one directory ABOVE the editor's cwd for it.
+        WriteFile( base / "build" / "Bin" / "Release" / runtimeBinaryName, "not really a binary" );
+        return proj;
+    }
+} // namespace
+
+TEST( PackagedContent, APackagedGameIsABinaryAndAnArchiveThatStartWithNoArguments )
+{
+    EnvironmentGuard guard;
+
+    const Desert::Editor::TargetPlatformInfo& host = Desert::Editor::HostPlatformInfo();
+
+    const fs::path base = fs::temp_directory_path() / "desert_pkg_zeroconfig";
+    fs::remove_all( base );
+    const fs::path proj = WriteProjectToPackage( base, host.RuntimeBinary );
+
+    SetEnv( "HOME", base.string() );
+    fs::current_path( proj );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( proj / "T.deproj" ).string() ) );
+
+    // The PLAIN layout, because it is the one every host has.
+    Desert::Editor::PackageOptions options;
+    options.OutputDir    = ( base / "out" ).string();
+    options.Config       = "Release";
+    options.MacAppBundle = false;
+
+    const auto result = Desert::Editor::PackageGame( options );
+    ASSERT_TRUE( result.Success ) << result.Message;
+
+    const fs::path root = fs::path( result.PackageDir );
+    const fs::path exe  = root / host.RuntimeBinary;
+
+    ASSERT_TRUE( fs::exists( exe ) ) << "no player binary in " << root.string();
+    EXPECT_TRUE( fs::exists( root / "Content.dpak" ) )
+         << "the archive is not in the same directory as the binary, so the player's one rule for finding "
+            "its content - look beside myself - cannot be satisfied without being told where to look";
+
+    const std::vector<fs::path> loose = LooseDescriptors( root );
+    EXPECT_TRUE( loose.empty() )
+         << "the package carries a loose descriptor (" << ( loose.empty() ? std::string{} : loose[0].string() )
+         << "). The descriptor belongs INSIDE the archive: a loose second copy is a file an installer can "
+            "drop while the archive survives, and then the game says its content is damaged.";
+
+    const auto launcherRead = Common::Utils::FileSystem::ReadFileContent( root / host.LauncherName );
+    ASSERT_TRUE( launcherRead.IsSuccess() ) << launcherRead.GetError();
+    EXPECT_EQ( launcherRead.GetValue().find( "--project" ), std::string::npos )
+         << "the generated launcher still names a project on the command line. That flag is the DEV door; "
+            "a shipped game that needs it is a game that only starts when started the one blessed way:\n"
+         << launcherRead.GetValue();
+
+    // ── THE ACCEPTANCE: the player's own sequence, no arguments anywhere in it.
+    fs::current_path( root );
+    const PlayerStartup started = StartTheGameLikeThePlayerDoes( exe );
+    ASSERT_EQ( started.MountExit, Desert::Player::kContentOk ) << started.MountMessage;
+    ASSERT_TRUE( started.Opened )
+         << "the archive mounted and the player found no game in it - the packager and the discovery "
+            "disagree about what a package contains, which is the whole of П5";
+
+    EXPECT_EQ( Desert::Project::ProjectContext::Current().Name, "T" );
+    EXPECT_EQ( Desert::Project::ProjectContext::Current().AssetsRoot,
+               std::string( Desert::Editor::kPackagedAssetsRoot ) );
+
+    // ...and the scene it boots to is really in the archive. This is the assertion that makes the
+    // descriptor's REBASING load-bearing rather than cosmetic: DefaultScene named "GameAssets/..." in
+    // the dev tree, the content is packed under "Assets/", and a descriptor that shipped the dev
+    // spelling would open, look healthy, and boot to nothing.
+    const std::string scene = Desert::Project::ProjectContext::DefaultScenePath();
+    ASSERT_FALSE( scene.empty() ) << "the shipped descriptor names no startup scene";
+    DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( scene ), "scene-body" );
+}
+
+// The same property under the OTHER layout, and it is one test rather than a macOS-only one because the
+// claim is host-independent: whatever this host produces when a bundle is asked for, the archive is in
+// the directory the player binary is in. On a bundle host that is Contents/MacOS and Contents/Resources
+// is not produced at all — that split is what forced the launcher to pass `--project`, and it is gone
+// with it. Everywhere else the request is refused and the plain layout comes back, which satisfies the
+// same claim by a different route.
+TEST( PackagedContent, TheArchiveSitsBesideThePlayerBinaryInWhicheverLayoutTheHostProduces )
+{
+    EnvironmentGuard guard;
+
+    const Desert::Editor::TargetPlatformInfo& host = Desert::Editor::HostPlatformInfo();
+
+    const fs::path base = fs::temp_directory_path() / "desert_pkg_bundlelayout";
+    fs::remove_all( base );
+    const fs::path proj = WriteProjectToPackage( base, host.RuntimeBinary );
+
+    SetEnv( "HOME", base.string() );
+    fs::current_path( proj );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( proj / "T.deproj" ).string() ) );
+
+    Desert::Editor::PackageOptions options;
+    options.OutputDir    = ( base / "out" ).string();
+    options.Config       = "Release";
+    options.MacAppBundle = true;
+
+    const auto result = Desert::Editor::PackageGame( options );
+    ASSERT_TRUE( result.Success ) << result.Message;
+
+    const fs::path root = fs::path( result.PackageDir );
+    EXPECT_EQ( root.extension() == ".app", host.SupportsAppBundle )
+         << "the layout produced and the host description disagree about whether a .app exists here";
+
+    const fs::path exe = host.SupportsAppBundle ? root / "Contents" / "MacOS" / Desert::Editor::kBundlePlayerBinary
+                                                : root / host.RuntimeBinary;
+    ASSERT_TRUE( fs::exists( exe ) ) << "no player binary at " << exe.string();
+
+    EXPECT_TRUE( fs::exists( exe.parent_path() / "Content.dpak" ) )
+         << "the archive is not beside the player binary (" << exe.parent_path().string() << ")";
+
+    if ( host.SupportsAppBundle )
+    {
+        EXPECT_FALSE( fs::exists( root / "Contents" / "Resources" ) )
+             << "Contents/Resources is still produced. Nothing on macOS requires it, and holding the "
+                "payload there is exactly what made the launcher hand the descriptor over on the command "
+                "line - a second place the player has to be told about.";
+
+        // The plist and the disk must agree about which file macOS starts. They were two independent
+        // literals; when they disagree macOS says "damaged application" and nothing else, which is the
+        // least diagnosable failure this packager can produce.
+        const auto plist = Common::Utils::FileSystem::ReadFileContent( root / "Contents" / "Info.plist" );
+        ASSERT_TRUE( plist.IsSuccess() ) << plist.GetError();
+        EXPECT_NE( plist.GetValue().find( std::string( "<key>CFBundleExecutable</key><string>" ) +
+                                          Desert::Editor::kBundleLauncherName + "</string>" ),
+                   std::string::npos )
+             << "Info.plist does not declare " << Desert::Editor::kBundleLauncherName
+             << " as the bundle executable";
+        EXPECT_TRUE( fs::exists( root / "Contents" / "MacOS" / Desert::Editor::kBundleLauncherName ) )
+             << "the file Info.plist names as the bundle executable is not in Contents/MacOS";
+    }
+
+    fs::current_path( exe.parent_path() );
+    const PlayerStartup started = StartTheGameLikeThePlayerDoes( exe );
+    ASSERT_EQ( started.MountExit, Desert::Player::kContentOk ) << started.MountMessage;
+    EXPECT_TRUE( started.Opened ) << "the bundled game does not start from its own directory";
+}
+
+// The rebasing rule on its own, without building anything — the half of the descriptor that a package
+// cannot be right without and that costs a whole cook to reach through PackageGame.
+TEST( PackagedContent, TheShippedDescriptorRebasesTheStartupSceneAndKeepsEverythingElse )
+{
+    Common::Project::ProjectFile dev;
+    dev.Name          = "T";
+    dev.AssetsRoot    = "GameAssets";
+    dev.DefaultScene  = "GameAssets/Scenes/level.desce";
+    dev.Description   = "a sentence the launcher shows";
+    dev.EngineVersion = "0.1.2";
+
+    const Common::Project::ProjectFile shipped = Desert::Editor::PackagedDescriptor( dev );
+
+    EXPECT_EQ( shipped.AssetsRoot, std::string( Desert::Editor::kPackagedAssetsRoot ) );
+    EXPECT_EQ( shipped.DefaultScene, "Assets/Scenes/level.desce" );
+
+    // Everything that is not about WHERE the content sits travels unchanged. This used to be rebuilt
+    // from three fields, so Description and EngineVersion were dropped by the act of packaging - a
+    // package described less of the product than the project did.
+    EXPECT_EQ( shipped.Name, dev.Name );
+    EXPECT_EQ( shipped.Description, dev.Description );
+    EXPECT_EQ( shipped.EngineVersion, dev.EngineVersion );
+
+    // A startup scene OUTSIDE the assets root is not rewritten - there is nothing to rebase it onto,
+    // and inventing a path would be the silent substitution §1.4 forbids.
+    Common::Project::ProjectFile elsewhere = dev;
+    elsewhere.DefaultScene                 = "Somewhere/else.desce";
+    EXPECT_EQ( Desert::Editor::PackagedDescriptor( elsewhere ).DefaultScene, "Somewhere/else.desce" );
+
+    // No startup scene stays no startup scene rather than becoming the assets root itself.
+    Common::Project::ProjectFile none = dev;
+    none.DefaultScene                 = "";
+    EXPECT_EQ( Desert::Editor::PackagedDescriptor( none ).DefaultScene, "" );
 }
 
 // ── EVERY DECLARED ROOT SHIPS, OR SAYS OUT LOUD WHY IT IS NOT CONTENT ─────────────────────────────
