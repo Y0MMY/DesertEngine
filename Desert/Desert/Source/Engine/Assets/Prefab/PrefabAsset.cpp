@@ -24,7 +24,7 @@ namespace Desert::Assets
 
         // The version gate (Д28): a prefab is the scene's own entity payloads in a different container,
         // so it is held to the same generation the scene loader requires. An old file is refused BY NAME
-        // — file, found versions, required versions, and the PrefabMigrator command that converts it —
+        // — file, found versions, required versions, and the SceneMigrator command that converts it —
         // instead of being read into whatever the current parser happens to make of it.
         //
         // The argument is raw.GetValue() and not raw because Ф3 made the read primitive return a

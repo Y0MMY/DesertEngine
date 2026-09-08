@@ -23,6 +23,10 @@ project(test_name)
         "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionSerializer.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionRegistry.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp",
+        -- The loop raises `.deprefab` files too (И11), and the bytes it writes for one come from the
+        -- ENGINE'S own writer, gate-checked by the ENGINE'S own loader gate — so a suite that compiles
+        -- the loop has to bring that pair with it, for the same reason it brings the reflection table.
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/Prefab/PrefabFormat.cpp",
     }
 
     -- Reflection.gen.cpp is emitted by DesertHeaderTool as a prebuild step of `Desert`.

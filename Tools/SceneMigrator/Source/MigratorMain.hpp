@@ -46,9 +46,16 @@ namespace Desert::Migration
     // as for one that exists, and it cannot change under a concurrent run.
     std::filesystem::path SceneOutputRoot( const std::filesystem::path& scenePath );
 
-    // `args` is the command line without argv[0]: any mix of "--check" and paths (a .desce file or a
-    // directory searched recursively). Returns the process exit code: 0 = nothing to do or all
-    // raised and written; 1 = a file failed (unreadable, unparseable, or its write failed — the
-    // original is left untouched), or --check found work; 2 = usage / nothing found.
+    // The same sentence for a `.deprefab`, read off the census row for `Prefabs/` instead of `Scenes/`.
+    // A prefab needs one for the same two reasons a scene does: the v16 -> v17 step measures references
+    // against the assets root, and the v11 -> v12 step can produce a `.demat` that has to land under the
+    // root the file it is named from actually lives beneath.
+    std::filesystem::path PrefabOutputRoot( const std::filesystem::path& prefabPath );
+
+    // `args` is the command line without argv[0]: any mix of "--check" and paths (a .desce, .demat or
+    // .deprefab file, or a directory searched recursively). Returns the process exit code: 0 = nothing
+    // to do or all raised and written; 1 = a file failed (unreadable, unparseable, at a generation this
+    // build has no route from, or its write failed — the original is left untouched in every case), or
+    // --check found work; 2 = usage / nothing found.
     int RunSceneMigrator( const std::vector<std::string>& args, std::ostream& out, std::ostream& err );
 } // namespace Desert::Migration

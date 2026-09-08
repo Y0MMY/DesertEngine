@@ -2157,158 +2157,221 @@ namespace Desert::Migration
         return report;
     }
 
-    SceneMigrationReport MigrateScene( SceneSerialized& scene, const std::filesystem::path& assetsRoot )
+    namespace
     {
-        SceneMigrationReport report;
-
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionSky )
-        {
-            report.SkyRaised = true;
-            report.Sky       = MigrateSkyV0ToV1( scene.Entities );
-        }
-
-        if ( scene.UnitVersion.value_or( 0 ) < kUnitVersion )
-        {
-            report.UnitsRaised = true;
-            report.Units       = MigrateMetresToUnits( scene.Entities, scene.Settings );
-        }
-
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionTonemap )
-        {
-            report.TonemapperRaised = true;
-            report.Tonemap          = MigrateTonemapperV1ToV2( scene.Settings );
-        }
-
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionCloudNoise )
-        {
-            report.CloudNoiseRaised = true;
-            report.CloudNoise       = MigrateCloudNoiseV2ToV3( scene.Entities );
-        }
-
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionCloudSpecies )
-        {
-            report.CloudSpeciesRaised = true;
-            report.CloudSpecies       = MigrateCloudSpeciesV3ToV4( scene.Entities );
-        }
-
-        // AFTER the step above and not beside it: v3 -> v4 WRITES the "Species" key that this one reads.
-        // The two are the only pair in this function with an order that matters, and it is stated here
-        // rather than left to the sequence they happen to be written in.
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionCloudType )
-        {
-            report.CloudTypeRaised = true;
-            report.CloudType       = MigrateCloudTypeV4ToV5( scene.Entities );
-        }
-
-        // AFTER the step above for the same reason that one follows its own: v4 -> v5 WRITES the
-        // "CloudType" key that this one renames. Three of the six steps in this function now form one
-        // chain — Species integer, then CloudType path, then CloudType1 slot — and each is gated on its own
-        // version integer precisely so that a file entering at any point along it comes out at the end.
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionCloudSet )
-        {
-            report.CloudSetRaised = true;
-            report.CloudSet       = MigrateCloudSetV5ToV6( scene.Entities );
-        }
-
-        // Independent of the cloud chain above it and of everything else in this function: no terrain field
-        // is a length the unit migration scales, and no sky or cloud step reads either of the two keys this
-        // one pairs. It sits last because it is newest, not because anything requires it to.
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionTerrainMaterial )
-        {
-            report.TerrainMaterialRaised = true;
-            report.TerrainMaterial       = MigrateTerrainMaterialV6ToV7( scene.Entities );
-        }
-
-        // AFTER the step above, and this pair's order does matter: v6 -> v7 REMOVES the inline Material
-        // component from terrain entities, and this step reads `Terrain.Material` - a different key on a
-        // different payload, but running it first would rewrite paths inside a component that is about to
-        // be deleted and report work that did not survive.
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionMaterialPath )
-        {
-            report.MaterialPathRaised = true;
-            report.MaterialPath       = MigrateMaterialPathV7ToV8( scene.Entities, assetsRoot );
-        }
-
-        // Independent of every step above: it touches the scene-wide Settings block and no entity payload,
-        // and no earlier step reads or writes Gravity. Order is irrelevant here; it sits last because it is
-        // newest.
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionGravityUnits )
-        {
-            report.GravityUnitsRaised = true;
-            report.GravityUnits       = MigrateGravityUnitsV8ToV9( scene.Settings );
-        }
-
-        // Independent of every step above: no earlier step reads or writes a "UILayout" payload, and none
-        // of the three keys this one touches is a length the unit migration scales. It sits last because
-        // it is newest.
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionUIVisibility )
-        {
-            report.UIVisibilityRaised = true;
-            report.UIVisibility       = MigrateUIVisibilityV9ToV10( scene.Entities );
-        }
-
-        // Independent of every step above: it touches one key of the scene-wide Settings block and no
-        // entity payload, and no earlier step reads or writes SSRMaxDistance. The gravity step scales the
-        // same block but a different key, so their order is irrelevant; this sits last because it is
-        // newest.
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionSSRUnits )
-        {
-            report.SSRUnitsRaised = true;
-            report.SSRUnits       = MigrateSSRUnitsV10ToV11( scene.Settings );
-        }
-
-        // AFTER the cloud chain above (v3 -> v6 write and rename the very keys this one moves out) and
-        // independent of everything since: no other step reads a VolumetricCloud payload. The material
-        // files it returns are the TOOL's to write - this function stays pure.
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionCloudMaterial )
-        {
-            report.CloudMaterialRaised = true;
-            report.CloudMaterial       = MigrateCloudMaterialV11ToV12( scene.Entities, scene.SceneName );
-        }
-
-        // Touches only the Settings block, so it is independent of every step above and of the two that
-        // also edit Settings (gravity v8->v9, SSR v10->v11) - those rewrite one key each and this one
-        // removes ten others.
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionDebugView )
-        {
-            report.DebugViewRaised = true;
-            report.DebugView       = MigrateDebugViewV12ToV13( scene.Settings );
-        }
-
-        // Touches only "Script" payloads, which no step above reads or writes, so it is independent of
-        // all of them and sits here because it is newest.
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionScriptRoot )
-        {
-            report.ScriptRootRaised = true;
-            report.ScriptRoot       = MigrateScriptRootV15ToV16( scene.Entities );
-        }
-
-        // Touches four component payloads that no step above reads or writes, so it is independent of
-        // all of them and sits here because it is newest. It takes the SCENE'S OWN assets root, like the
-        // v7 -> v8 material step, because the project's assets-root NAME is the only per-project fact the
-        // tagging needs and it cannot be read from a global in a pure function.
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionServiceAssetRoot )
-        {
-            report.ServiceAssetRootRaised = true;
-            report.ServiceAssetRoot       = MigrateServiceAssetRootV16ToV17( scene.Entities, assetsRoot );
-        }
-
-        // LAST, and it has to be: every step above may WRITE keys, and this one is the statement of which
-        // keys must not be in the finished file. Running it earlier would let a later step reintroduce a
-        // retired name and leave the tool reporting a removal that did not survive its own run.
+        // THE STEP CHAIN, AND THERE IS EXACTLY ONE OF IT IN THIS REPOSITORY (И11).
         //
-        // AND GATED ON THE HEAD, not on a step number of its own. It used to read
-        // `< kSceneVersionRetiredKeys` (14), which was right for the day it landed and wrong for the day
-        // a row was ADDED: K3's five rows would then never have fired on a corpus already stamped 14, and
-        // the tool would have reported every file up to date while five dead keys sat in each one. The
-        // pass reads only the table, never the values, so re-running it on a file it has already cleaned
-        // removes nothing and leaves the tree byte-identical — which is what makes this gate safe here
-        // and unsafe for every step above. See the note over MigrateRetiredKeys in the header.
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersion )
+        // `settings` is the file's scene-wide Settings block, or NULL for a `.deprefab`, which has no
+        // such block at all. That single pointer is what lets one chain serve both file classes without
+        // a flag anywhere: the four settings-only steps are skipped because the block does not exist,
+        // and the two that take entities AND settings (units, retired keys) are handed a stand-in that
+        // stays empty - which is precisely what those two already see for a scene whose file states no
+        // settings. A prefab therefore gets every ENTITY-level step, forever, including the ones added
+        // after this was written, because there is no second list to remember to update.
+        //
+        // The caller owns the version gating decision that comes BEFORE this (refusals, the prefab's
+        // stamp-only case) and the stamping that comes after; this function only runs steps.
+        void RunSteps( std::vector<Assets::EntityData>& entities, std::optional<rfl::Generic>* settings,
+                       const std::string& name, int statedSceneVersion, int statedUnitVersion,
+                       const std::filesystem::path& assetsRoot, FileMigrationReport& report )
         {
-            report.RetiredKeysRaised = true;
-            report.RetiredKeys       = MigrateRetiredKeys( scene.Settings, scene.Entities );
+            // Stands in for the block a prefab does not have. Never read back by the caller: the two
+            // steps below that take it are both guarded on has_value(), so an absent block is a no-op
+            // for them, and no step may be added here that would WRITE into it - the settings-only ones
+            // are gated on the pointer instead, exactly so a created block cannot be silently dropped.
+            std::optional<rfl::Generic>  absentSettings;
+            std::optional<rfl::Generic>& settingsRef = settings != nullptr ? *settings : absentSettings;
+            const bool                   hasSettings = settings != nullptr;
+
+            if ( statedSceneVersion < kSceneVersionSky )
+            {
+                report.SkyRaised = true;
+                report.Sky       = MigrateSkyV0ToV1( entities );
+            }
+
+            if ( statedUnitVersion < kUnitVersion )
+            {
+                report.UnitsRaised = true;
+                report.Units       = MigrateMetresToUnits( entities, settingsRef );
+            }
+
+            if ( hasSettings && statedSceneVersion < kSceneVersionTonemap )
+            {
+                report.TonemapperRaised = true;
+                report.Tonemap          = MigrateTonemapperV1ToV2( settingsRef );
+            }
+
+            if ( statedSceneVersion < kSceneVersionCloudNoise )
+            {
+                report.CloudNoiseRaised = true;
+                report.CloudNoise       = MigrateCloudNoiseV2ToV3( entities );
+            }
+
+            if ( statedSceneVersion < kSceneVersionCloudSpecies )
+            {
+                report.CloudSpeciesRaised = true;
+                report.CloudSpecies       = MigrateCloudSpeciesV3ToV4( entities );
+            }
+
+            // AFTER the step above and not beside it: v3 -> v4 WRITES the "Species" key that this one
+            // reads. The two are the only pair in this function with an order that matters, and it is
+            // stated here rather than left to the sequence they happen to be written in.
+            if ( statedSceneVersion < kSceneVersionCloudType )
+            {
+                report.CloudTypeRaised = true;
+                report.CloudType       = MigrateCloudTypeV4ToV5( entities );
+            }
+
+            // AFTER the step above for the same reason that one follows its own: v4 -> v5 WRITES the
+            // "CloudType" key that this one renames. Three of the steps in this function now form one
+            // chain — Species integer, then CloudType path, then CloudType1 slot — and each is gated on
+            // its own version integer precisely so that a file entering at any point along it comes out
+            // at the end.
+            if ( statedSceneVersion < kSceneVersionCloudSet )
+            {
+                report.CloudSetRaised = true;
+                report.CloudSet       = MigrateCloudSetV5ToV6( entities );
+            }
+
+            // Independent of the cloud chain above it and of everything else in this function: no terrain
+            // field is a length the unit migration scales, and no sky or cloud step reads either of the
+            // two keys this one pairs.
+            if ( statedSceneVersion < kSceneVersionTerrainMaterial )
+            {
+                report.TerrainMaterialRaised = true;
+                report.TerrainMaterial       = MigrateTerrainMaterialV6ToV7( entities );
+            }
+
+            // AFTER the step above, and this pair's order does matter: v6 -> v7 REMOVES the inline
+            // Material component from terrain entities, and this step reads `Terrain.Material` - a
+            // different key on a different payload, but running it first would rewrite paths inside a
+            // component that is about to be deleted and report work that did not survive.
+            if ( statedSceneVersion < kSceneVersionMaterialPath )
+            {
+                report.MaterialPathRaised = true;
+                report.MaterialPath       = MigrateMaterialPathV7ToV8( entities, assetsRoot );
+            }
+
+            // Independent of every step above: it touches the scene-wide Settings block and no entity
+            // payload, and no earlier step reads or writes Gravity.
+            if ( hasSettings && statedSceneVersion < kSceneVersionGravityUnits )
+            {
+                report.GravityUnitsRaised = true;
+                report.GravityUnits       = MigrateGravityUnitsV8ToV9( settingsRef );
+            }
+
+            // Independent of every step above: no earlier step reads or writes a "UILayout" payload, and
+            // none of the three keys this one touches is a length the unit migration scales.
+            if ( statedSceneVersion < kSceneVersionUIVisibility )
+            {
+                report.UIVisibilityRaised = true;
+                report.UIVisibility       = MigrateUIVisibilityV9ToV10( entities );
+            }
+
+            // Independent of every step above: it touches one key of the scene-wide Settings block and no
+            // entity payload, and no earlier step reads or writes SSRMaxDistance. The gravity step scales
+            // the same block but a different key, so their order is irrelevant.
+            if ( hasSettings && statedSceneVersion < kSceneVersionSSRUnits )
+            {
+                report.SSRUnitsRaised = true;
+                report.SSRUnits       = MigrateSSRUnitsV10ToV11( settingsRef );
+            }
+
+            // AFTER the cloud chain above (v3 -> v6 write and rename the very keys this one moves out)
+            // and independent of everything since: no other step reads a VolumetricCloud payload. The
+            // material files it returns are the TOOL's to write - this function stays pure.
+            if ( statedSceneVersion < kSceneVersionCloudMaterial )
+            {
+                report.CloudMaterialRaised = true;
+                report.CloudMaterial       = MigrateCloudMaterialV11ToV12( entities, name );
+            }
+
+            // Touches only the Settings block, so it is independent of every step above and of the two
+            // that also edit Settings (gravity v8->v9, SSR v10->v11) - those rewrite one key each and
+            // this one removes ten others.
+            if ( hasSettings && statedSceneVersion < kSceneVersionDebugView )
+            {
+                report.DebugViewRaised = true;
+                report.DebugView       = MigrateDebugViewV12ToV13( settingsRef );
+            }
+
+            // Touches only "Script" payloads, which no step above reads or writes, so it is independent
+            // of all of them.
+            if ( statedSceneVersion < kSceneVersionScriptRoot )
+            {
+                report.ScriptRootRaised = true;
+                report.ScriptRoot       = MigrateScriptRootV15ToV16( entities );
+            }
+
+            // Touches four component payloads that no step above reads or writes, so it is independent of
+            // all of them. It takes the FILE'S OWN assets root, like the v7 -> v8 material step, because
+            // the project's assets-root NAME is the only per-project fact the tagging needs and it cannot
+            // be read from a global in a pure function.
+            if ( statedSceneVersion < kSceneVersionServiceAssetRoot )
+            {
+                report.ServiceAssetRootRaised = true;
+                report.ServiceAssetRoot       = MigrateServiceAssetRootV16ToV17( entities, assetsRoot );
+            }
+
+            // LAST, and it has to be: every step above may WRITE keys, and this one is the statement of
+            // which keys must not be in the finished file. Running it earlier would let a later step
+            // reintroduce a retired name and leave the tool reporting a removal that did not survive its
+            // own run.
+            //
+            // AND GATED ON THE HEAD, not on a step number of its own. It used to read
+            // `< kSceneVersionRetiredKeys` (14), which was right for the day it landed and wrong for the
+            // day a row was ADDED: K3's five rows would then never have fired on a corpus already stamped
+            // 14, and the tool would have reported every file up to date while five dead keys sat in each
+            // one. The pass reads only the table, never the values, so re-running it on a file it has
+            // already cleaned removes nothing and leaves the tree byte-identical — which is what makes
+            // this gate safe here and unsafe for every step above. See the note over MigrateRetiredKeys
+            // in the header.
+            //
+            // It runs for a prefab too, on the entity half of the table: a retired COMPONENT key is dead
+            // in a `.deprefab` for exactly the reasons it is dead in a `.desce`, and the saver preserves
+            // it in both.
+            if ( statedSceneVersion < kSceneVersion )
+            {
+                report.RetiredKeysRaised = true;
+                report.RetiredKeys       = MigrateRetiredKeys( settingsRef, entities );
+            }
         }
+
+        // The refusal a file gets when its stated pair is one this tool has no route from: the numbers it
+        // states, the numbers this tool knows, and what to do instead. Built here rather than at each
+        // site so a scene and a prefab are refused in the same words.
+        std::string RefuseGeneration( const char* what, int statedSceneVersion, int statedUnitVersion,
+                                      const char* why )
+        {
+            return std::string( "states " ) + what + " schema v" + std::to_string( statedSceneVersion ) +
+                   " / world units v" + std::to_string( statedUnitVersion ) + ", and this tool raises files to v" +
+                   std::to_string( kSceneVersion ) + "/v" + std::to_string( kUnitVersion ) + ". " + why;
+        }
+    } // namespace
+
+    FileMigrationReport MigrateScene( SceneSerialized& scene, const std::filesystem::path& assetsRoot )
+    {
+        FileMigrationReport report;
+
+        const int statedSceneVersion = scene.SceneVersion.value_or( 0 );
+        const int statedUnitVersion  = scene.UnitVersion.value_or( 0 );
+
+        // A file from a LATER build is refused, not stamped down. Every gate in RunSteps is
+        // `stated < step`, so a v18 tree matched no step and fell through to the unconditional stamp
+        // below: this function wrote v17 over a v18 number while the payloads stayed v18, and the tool
+        // then printed "already at scene v17" about a file it had just mis-labelled — a successful-looking
+        // answer over a substitution (§1.4). The prefab migrator refused this case from the day it was
+        // written; scenes now get the same guard from the same place.
+        if ( statedSceneVersion > kSceneVersion || statedUnitVersion > kUnitVersion )
+        {
+            report.Refused = RefuseGeneration( "scene", statedSceneVersion, statedUnitVersion,
+                                               "A file at a LATER generation was written by a build this "
+                                               "tool predates - convert it with THAT build's SceneMigrator." );
+            return report;
+        }
+
+        RunSteps( scene.Entities, &scene.Settings, scene.SceneName, statedSceneVersion, statedUnitVersion,
+                  assetsRoot, report );
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,
         // and leaving it unstamped is how every load ends up re-running a migration that already happened.
@@ -2316,6 +2379,59 @@ namespace Desert::Migration
         scene.UnitVersion  = kUnitVersion;
 
         return report;
+    }
+
+    PrefabMigrationOutcome MigratePrefab( Assets::PrefabData& prefab, const std::filesystem::path& assetsRoot )
+    {
+        PrefabMigrationOutcome outcome;
+        outcome.FoundSceneVersion = prefab.SceneVersion.value_or( 0 );
+        outcome.FoundUnitVersion  = prefab.UnitVersion.value_or( 0 );
+
+        if ( Assets::PrefabIsAtCurrentVersion( prefab ) )
+        {
+            outcome.AlreadyCurrent = true;
+            return outcome;
+        }
+
+        if ( outcome.FoundSceneVersion > kSceneVersion || outcome.FoundUnitVersion > kUnitVersion )
+        {
+            outcome.Refused = RefuseGeneration( "prefab", outcome.FoundSceneVersion, outcome.FoundUnitVersion,
+                                                "A file at a LATER generation was written by a build this "
+                                                "tool predates - convert it with THAT build's SceneMigrator." );
+            return outcome;
+        }
+
+        // The unstamped pre-Д28 file: STAMP ONLY. The header says at length why the chain must not run on
+        // it — a `.deprefab` at v0 could be from any generation up to the one Д28 landed in, and the sky
+        // and unit steps are not safe to re-run.
+        if ( outcome.FoundSceneVersion == 0 && outcome.FoundUnitVersion == 0 )
+        {
+            prefab.SceneVersion = kSceneVersion;
+            prefab.UnitVersion  = kUnitVersion;
+            outcome.StampOnly   = true;
+            return outcome;
+        }
+
+        // Half-stamped: one integer stated and the other not, or a unit version that is neither 0 nor the
+        // head. Assets::WritePrefabJson stamps both together, so no build produces this, and the version
+        // the chain would be entered at is unknowable. Refused rather than guessed at.
+        if ( outcome.FoundSceneVersion == 0 || outcome.FoundUnitVersion != kUnitVersion )
+        {
+            outcome.Refused = RefuseGeneration(
+                 "prefab", outcome.FoundSceneVersion, outcome.FoundUnitVersion,
+                 "Both integers are stamped together by the one writer of prefab text, so a file stating "
+                 "one and not the other was hand-edited and the generation its payloads are at cannot be "
+                 "known. Nothing was changed." );
+            return outcome;
+        }
+
+        RunSteps( prefab.Entities, nullptr, prefab.Name, outcome.FoundSceneVersion, outcome.FoundUnitVersion,
+                  assetsRoot, outcome.Steps );
+
+        prefab.SceneVersion = kSceneVersion;
+        prefab.UnitVersion  = kUnitVersion;
+
+        return outcome;
     }
 
 } // namespace Desert::Migration

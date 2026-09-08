@@ -26,6 +26,11 @@
 // input is the engine's own struct so the file this tool writes is the file the engine reads.
 #include <Engine/Assets/MaterialData.hpp>
 
+// The `.deprefab` payload and its gate. A prefab's entities ARE Core::SceneSerialized::Entities - the
+// same struct, written by the same ComponentRegistry - so it is raised by the SAME step chain rather
+// than by a second one that would have to be kept in step by hand (И11). See MigratePrefab.
+#include <Engine/Assets/Prefab/PrefabFormat.hpp>
+
 #include <Common/Core/Constants.hpp>
 
 #include <filesystem>
@@ -960,9 +965,26 @@ namespace Desert::Migration
     ServiceAssetRootMigrationReport MigrateServiceAssetRootV16ToV17( std::vector<Assets::EntityData>& entities,
                                                                      const std::filesystem::path&     assetsRoot );
 
-    // Everything that ran, so the caller can say which scene moved and how far.
-    struct SceneMigrationReport
+    // Everything that ran, so the caller can say which FILE moved and how far.
+    //
+    // `File` and not `Scene` since И11: the same report comes back from MigratePrefab, because a
+    // `.deprefab` is raised by the same chain. A prefab has no scene-wide Settings block, so the
+    // settings-only steps below simply do not run for one and their flags stay false - that is a
+    // property of the file, stated once in MigrateFileTree, not a second report shape.
+    struct FileMigrationReport
     {
+        // Non-empty: the tree states a generation ABOVE the head this tool knows, so it was written by a
+        // build this one predates. NOTHING was run and NOTHING was stamped - the caller must report the
+        // refusal and leave the file alone.
+        //
+        // WHY A REFUSAL AND NOT A NO-OP. Every gate below is `stated < step`, so a v18 tree entering a
+        // v17 tool matches no step and used to fall through to the unconditional stamp at the bottom:
+        // the tool wrote v17 over a v18 number while the payloads stayed v18, and printed "already at
+        // scene v17" over a file it had just mis-labelled. That is §1.4's silent substitution with the
+        // successful-looking answer attached. The pair is the file's identity, so a pair this tool
+        // cannot place is named rather than guessed at.
+        std::string Refused;
+
         bool                        SkyRaised = false; // the sky schema was below kSceneVersionSky
         SkyMigrationReport          Sky;
         bool                        UnitsRaised = false; // the world unit was below kUnitVersion
@@ -1030,8 +1052,68 @@ namespace Desert::Migration
     // content root so that the loader, the migrator tool and the six suites that already call this need no
     // change. The default is evaluated at the call site, which is the only place that knows whether a
     // project has been opened; the step underneath it takes the root explicitly and is tested that way.
-    SceneMigrationReport
+    FileMigrationReport
     MigrateScene( SceneSerialized&             scene,
                   const std::filesystem::path& assetsRoot = Common::Constants::Path::ASSETS_PATH );
+
+    // What MigratePrefab did to one `.deprefab`, on top of the chain's own report.
+    struct PrefabMigrationOutcome
+    {
+        FileMigrationReport Steps; // what the shared chain did; all-false for the two cases below
+
+        bool AlreadyCurrent = false; // both integers already at the head; nothing to do
+        bool StampOnly      = false; // the unstamped pre-Д28 case: stamped, entities deliberately untouched
+
+        // Non-empty: this pair is one no build of this engine writes, or is above the head. Nothing was
+        // changed. Distinct from Steps.Refused only in that it also covers the half-stamped pairs below.
+        std::string Refused;
+
+        int FoundSceneVersion = 0; // what the tree stated before the step (absent = 0), for the report
+        int FoundUnitVersion  = 0;
+    };
+
+    // Raises a parsed `.deprefab` to the current generation and stamps it - through the SAME step chain
+    // MigrateScene runs, which is the whole point of И11.
+    //
+    // WHY ONE CHAIN AND NOT A PREFAB ONE. A prefab's payload is `std::vector<Assets::EntityData>` - the
+    // scene's own Entities, written by the same ComponentRegistry - so every entity-level schema step is
+    // literally the same step. Before this, prefabs shared the scene's two integers but had a migrator
+    // with ONE stamp-only step, so raising Core::kSceneVersion left every existing prefab at the old
+    // number with no route forward: the loader refused it and so did its migrator. A second numbering
+    // scheme would have removed the coupling and replaced it with a second table of steps to keep in
+    // hand-sync with the first, for payloads that are the same payloads. So: shared number, shared chain,
+    // and adding a step to MigrateFileTree covers both file classes at once.
+    //
+    // THE FOUR THINGS THE PAIR (SceneVersion, UnitVersion) CAN BE, and what each gets:
+    //
+    //   (head, head)      current - nothing runs.
+    //   (0, 0)            UNSTAMPED, i.e. pre-Д28, when no prefab stated a version at all. STAMP ONLY,
+    //                     and this is the one place prefabs and scenes legitimately differ: a `.desce`
+    //                     at v0 provably predates v1, because scenes were stamped from the beginning,
+    //                     while a `.deprefab` at v0 could be from ANY generation up to the one Д28
+    //                     landed in. Running the chain on it would be guessing which - and the sky and
+    //                     unit steps are the two that cannot be re-run safely, so the guess costs a
+    //                     hundred-fold scale error rather than a wasted pass. The file is stamped and
+    //                     the report says stamp-only, so an operator whose prefab then looks wrong knows
+    //                     exactly which assumption to disbelieve.
+    //   (1..head-1, kUnitVersion)  a stamped older generation: the chain raises it, step by step.
+    //   anything else     refused by its own numbers - see below.
+    //
+    // WHY A UnitVersion THAT IS NOT THE HEAD IS REFUSED RATHER THAN MIGRATED. Both integers are stamped
+    // together by the one writer of prefab text (Assets::WritePrefabJson), so a pair stating one and not
+    // the other is a file no build produces. The static_assert under this comment is what stops that
+    // reasoning from silently outliving the fact it rests on.
+    //
+    // PURE - no GPU, no filesystem, no global state, like every step it calls. Any `.demat` the v11 ->
+    // v12 step produces comes back inside `Steps` for the caller to write, exactly as it does for a
+    // scene: a prefab can carry a VolumetricCloud entity like any other.
+    static_assert( kUnitVersion == 1,
+                   "the world unit has moved: a prefab can now legitimately state a UnitVersion below the "
+                   "head, so MigratePrefab must run the unit step instead of refusing the pair - and the "
+                   "(0,0) stamp-only case has to be re-argued at the same time" );
+
+    PrefabMigrationOutcome
+    MigratePrefab( Assets::PrefabData&          prefab,
+                   const std::filesystem::path& assetsRoot = Common::Constants::Path::ASSETS_PATH );
 
 } // namespace Desert::Migration

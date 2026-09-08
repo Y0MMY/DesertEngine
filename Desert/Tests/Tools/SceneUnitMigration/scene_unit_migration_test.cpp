@@ -23,11 +23,11 @@
 #include <vector>
 
 using Desert::Assets::EntityData;
+using Desert::Migration::FileMigrationReport;
 using Desert::Migration::kSceneVersion;
 using Desert::Migration::kUnitVersion;
 using Desert::Migration::MigrateMetresToUnits;
 using Desert::Migration::MigrateScene;
-using Desert::Migration::SceneMigrationReport;
 using Desert::Migration::SceneSerialized;
 using Desert::Migration::UnitMigrationReport;
 
@@ -137,7 +137,7 @@ TEST( SceneUnitMigration, StampedSceneIsLeftByteIdentical )
     scene.SceneVersion = kSceneVersion;
 
     const std::string          before = Json( scene );
-    const SceneMigrationReport report = MigrateScene( scene );
+    const FileMigrationReport  report = MigrateScene( scene );
 
     EXPECT_FALSE( report.UnitsRaised ) << "a stamped scene must not be migrated again";
     EXPECT_FALSE( report.SkyRaised );
@@ -152,7 +152,7 @@ TEST( SceneUnitMigration, UnstampedSceneIsMigratedExactlyOnce )
 {
     SceneSerialized scene = Parse( kUnstampedScene );
 
-    const SceneMigrationReport first = MigrateScene( scene );
+    const FileMigrationReport first = MigrateScene( scene );
     EXPECT_TRUE( first.UnitsRaised );
     EXPECT_EQ( first.Units.Rejected, 0 );
     EXPECT_EQ( scene.UnitVersion.value_or( 0 ), kUnitVersion ) << "the migration did not stamp the file";
@@ -176,7 +176,7 @@ TEST( SceneUnitMigration, UnstampedSceneIsMigratedExactlyOnce )
 
     // ...and now the whole point: running it again changes nothing at all.
     const std::string          afterFirst = Json( scene );
-    const SceneMigrationReport second     = MigrateScene( scene );
+    const FileMigrationReport  second     = MigrateScene( scene );
 
     EXPECT_FALSE( second.UnitsRaised );
     EXPECT_FALSE( second.Changed() );
@@ -234,7 +234,7 @@ TEST( SceneUnitMigration, AbsentKeysAreNotInvented )
     // would turn this assertion into a test of the wrong migration.
     scene.SceneVersion = kSceneVersion;
 
-    const SceneMigrationReport report = MigrateScene( scene );
+    const FileMigrationReport report = MigrateScene( scene );
 
     EXPECT_TRUE( report.UnitsRaised );
     EXPECT_EQ( report.Units.Entities, 0 );
@@ -278,7 +278,7 @@ TEST( SceneUnitMigration, MalformedValuesAreRejectedNotGuessed )
 
     scene.Entities.push_back( std::move( bad ) );
 
-    const SceneMigrationReport report = MigrateScene( scene );
+    const FileMigrationReport report = MigrateScene( scene );
 
     EXPECT_EQ( report.Units.Rejected, 2 );
     EXPECT_EQ( report.Units.Values, 1 ); // HeightScale still went through
@@ -330,7 +330,7 @@ TEST( SceneUnitMigration, BothVersionsAreRaisedIndependently )
     sky.Components["Skybox"] = rfl::Generic( skybox );
     old.Entities.push_back( std::move( sky ) );
 
-    const SceneMigrationReport report = MigrateScene( old );
+    const FileMigrationReport report = MigrateScene( old );
 
     EXPECT_TRUE( report.SkyRaised );
     EXPECT_TRUE( report.UnitsRaised );
