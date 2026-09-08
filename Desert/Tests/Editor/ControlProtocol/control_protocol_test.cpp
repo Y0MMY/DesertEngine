@@ -37,12 +37,16 @@ using Desert::Editor::Control::FormatResponse;
 using Desert::Editor::Control::IsShot;
 using Desert::Editor::Control::kOps;
 using Desert::Editor::Control::kStateSections;
+using Desert::Editor::Control::kSubjects;
+using Desert::Editor::Control::NeedsReadyEditor;
 using Desert::Editor::Control::Op;
 using Desert::Editor::Control::ParseRequest;
 using Desert::Editor::Control::PendingWork;
 using Desert::Editor::Control::PropertiesToJson;
 using Desert::Editor::Control::Request;
+using Desert::Editor::Control::RequiresReady;
 using Desert::Editor::Control::Response;
+using Desert::Editor::Control::Subject;
 using Desert::Editor::Control::ToJson;
 using Desert::Editor::Control::ValidateSections;
 
@@ -119,6 +123,97 @@ TEST( ControlProtocol, EveryKnownOperationParses )
         EXPECT_EQ( static_cast<int>( request.Operation ), static_cast<int>( spec.Operation ) )
              << "'" << spec.Name << "' parsed as a different operation from the one the table pairs it with";
     }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// WHICH OPERATIONS NEED AN EDITOR THAT HAS FINISHED COMING UP.
+//
+// `commands` used to be answered the instant it arrived, from whatever the editor held at that moment --
+// and it holds almost nothing for the first twenty seconds of a session. Measured on this repository's own
+// project: the palette's `Open` group goes 0 -> 106 -> 130 as five separate startup stages fill the asset
+// cache, and the 106-entry answer is a SUCCESSFUL reply that stands for 3.3 s of every boot.
+//
+// The two exemptions are the load-bearing part, so they are pinned BY NAME. Both are about being able to
+// deal with an editor that is not fine: `state` is how readiness is observed at all, and `quit` is what
+// ends a session whose boot has wedged. An exemption that quietly grew a third member would put some other
+// answer back on the wrong side of the boot.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( ControlProtocol, OnlyTheTwoOperationsThatMustSurviveABootAreExemptFromWaitingForOne )
+{
+    EXPECT_FALSE( NeedsReadyEditor( Op::State ) ) << "'state' is how a client WATCHES the boot; blocking it "
+                                                     "makes readiness inferable only from silence";
+    EXPECT_FALSE( NeedsReadyEditor( Op::Quit ) ) << "a wedged boot is exactly when ending the session matters";
+
+    for ( const auto& spec : kOps )
+    {
+        if ( spec.Operation == Op::State || spec.Operation == Op::Quit )
+            continue;
+        EXPECT_TRUE( NeedsReadyEditor( spec.Operation ) )
+             << "'" << spec.Name << "' would answer about a project the editor has not read yet";
+    }
+}
+
+// The table and the function are one answer, not two. A `switch` beside the table is the shape that drifts;
+// this asserts that the function really is the table's own field and not a second copy of the decision.
+TEST( ControlProtocol, TheReadinessRuleComesFromTheTableAndNotFromASecondList )
+{
+    for ( const auto& spec : kOps )
+    {
+        EXPECT_EQ( NeedsReadyEditor( spec.Operation ), spec.Readiness == RequiresReady::Yes )
+             << "'" << spec.Name << "'";
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// WHOSE PROPERTIES. The category was written for the focused document; A6-1 gave it a second subject —
+// the editor's own view — because placing the camera was wired to `--camera`/`--look`, which are read
+// only inside `shot.Active()`. A developer who wanted a viewpoint and no capture had to launch with a
+// fictitious `--shot --shot-frames 1000000` to unlock it.
+// ---------------------------------------------------------------------------------------------------
+
+// EVERY OLDER CLIENT KEEPS WORKING BY CONSTRUCTION. A request with no `subject` is the focused document,
+// which is what the category has always meant — so the field is additive and not a migration.
+TEST( ControlProtocol, ARequestThatNamesNoSubjectMeansTheFocusedDocument )
+{
+    EXPECT_EQ( ParseOk( R"({"id":1,"op":"properties"})" ).Whose, Subject::Document );
+    EXPECT_EQ( ParseOk( R"({"id":1,"op":"set","property":"RoughnessFactor","value":[0.25]})" ).Whose,
+               Subject::Document );
+    // An explicitly empty subject is the same as none: absent and empty-string are not distinguished
+    // anywhere else in this parser, and a client that sent "" has failed to name a subject either way.
+    EXPECT_EQ( ParseOk( R"({"id":1,"op":"properties","subject":""})" ).Whose, Subject::Document );
+}
+
+TEST( ControlProtocol, EveryKnownSubjectParses )
+{
+    for ( const auto& spec : kSubjects )
+    {
+        const std::string line = std::string( R"({"id":1,"op":"properties","subject":")" ) + spec.Name + R"("})";
+        EXPECT_EQ( static_cast<int>( ParseOk( line ).Whose ), static_cast<int>( spec.Which ) )
+             << "'" << spec.Name << "' parsed as a different subject from the one the table pairs it with";
+    }
+}
+
+// An unknown subject is REFUSED naming the known ones, for the reason an unknown state section is: a
+// subject quietly ignored would answer about the focused document while the client believed it had
+// addressed the viewport, and the two replies are indistinguishable.
+TEST( ControlProtocol, AnUnknownSubjectIsRefusedAndTheKnownOnesListed )
+{
+    const std::string message = ParseError( R"({"id":1,"op":"properties","subject":"viewpoint"})" );
+
+    EXPECT_NE( message.find( "viewpoint" ), std::string::npos );
+    for ( const auto& spec : kSubjects )
+        EXPECT_NE( message.find( spec.Name ), std::string::npos ) << spec.Name;
+}
+
+// The refusal comes before anything else the request got right or wrong: a `set` with a bad subject AND a
+// bad value must complain about the subject, because the value belongs to whatever the subject turns out
+// to be and cannot be judged until that is known.
+TEST( ControlProtocol, AnUnknownSubjectIsRefusedBeforeTheValueIsJudged )
+{
+    const std::string message =
+         ParseError( R"({"id":1,"op":"set","subject":"nowhere","property":"X","value":[1,2,3,4,5]})" );
+    EXPECT_NE( message.find( "nowhere" ), std::string::npos );
 }
 
 TEST( ControlProtocol, AnUnknownOperationIsNamedAndListsTheKnownOnes )
@@ -483,10 +578,10 @@ TEST( ControlProtocol, ThePropertyCensusCarriesTheShapeOfEveryPropertyAndNamesIt
 
     const auto payload = PropertiesToJson( "M_Crate", { roughness, albedoMap } );
 
-    // THE DOCUMENT IS NAMED, because "the focused document" moves. A client that asked for properties and
-    // then set one has to be able to see WHICH document answered, or a focus change between the two
-    // requests is invisible in both replies.
-    EXPECT_EQ( StringField( payload, "document" ), "M_Crate" );
+    // THE SUBJECT IS NAMED, because both of them move: the focus changes, and so does whether the editor's
+    // own camera is the view being driven. A client that asked for properties and then set one has to be
+    // able to see WHICH thing answered, or a change between the two requests is invisible in both replies.
+    EXPECT_EQ( StringField( payload, "subject" ), "M_Crate" );
 
     const auto entries = payload.get( "properties" );
     ASSERT_TRUE( entries );

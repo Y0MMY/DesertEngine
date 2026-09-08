@@ -322,6 +322,53 @@ TEST( CommandLine, WithNoSceneFlagTheRuleSaysNothing )
     EXPECT_TRUE( ValidateSceneForCapture( options.Shot, /*sceneExists=*/false ).IsSuccess() );
 }
 
+// ---------------------------------------------------------------------------------------------------
+// IS ANYBODY SITTING AT THIS EDITOR?
+//
+// Three consequences used to ask `shot.Active()` and mean this: the recent-projects registry, the
+// engine-install registry, and the project tile written on exit. Their own comments are all about
+// throwaway worktrees and none about capture — so a CONTROL-CHANNEL run, which is the unattended path
+// that no longer needs `--shot` at all, escaped every one of them and filed a worktree that would be
+// reclaimed within the hour in the developer's registries. A capture flag must not be the switch for
+// things that are not capture (A6-1 point 5).
+// ---------------------------------------------------------------------------------------------------
+
+TEST( CommandLine, AControlChannelRunIsUnattendedEvenWithNoCaptureFlagAtAll )
+{
+    const CommandLineOptions options = ParseOk( { "--control-socket", "/tmp/desert.sock" } );
+
+    ASSERT_FALSE( options.Shot.Active() ) << "this run takes no capture; that is the whole point of it";
+    EXPECT_TRUE( IsUnattendedSession( options.Shot, !options.ControlSocket.empty() ) );
+}
+
+// The two originals still count, including `--shot-sequence` alone — a motion study is as unattended as
+// a single capture, and it was already the case the capture flag covered.
+TEST( CommandLine, EitherFlavourOfCaptureIsStillUnattended )
+{
+    for ( const Args& argv : { Args{ "--shot", "/tmp/out.png" }, Args{ "--shot-sequence", "/tmp/seq" } } )
+    {
+        const CommandLineOptions options = ParseOk( argv );
+        EXPECT_TRUE( IsUnattendedSession( options.Shot, !options.ControlSocket.empty() ) );
+    }
+}
+
+// AND A PERSON'S SESSION IS STILL A PERSON'S SESSION. This is the direction that would go wrong quietly:
+// an over-eager predicate would stop filing real projects in the recent list and stop registering the
+// engine the launcher needs, and nothing would say so until somebody opened the launcher.
+TEST( CommandLine, AnOrdinaryInteractiveRunIsNotUnattended )
+{
+    for ( const Args& argv :
+          { Args{}, Args{ "--project", "Desert.deproj" },
+            Args{ "--scene", "Resources/Assets/Scenes/Starter.desce" },
+            // `--camera`/`--look` without a capture: a pose asked for by a person, which is exactly the
+            // case that used to be unreachable and is now the control channel's `set Camera.Position`.
+            Args{ "--camera", "0,200,0", "--look", "0,0,-1" } } )
+    {
+        const CommandLineOptions options = ParseOk( argv );
+        EXPECT_FALSE( IsUnattendedSession( options.Shot, !options.ControlSocket.empty() ) );
+    }
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );

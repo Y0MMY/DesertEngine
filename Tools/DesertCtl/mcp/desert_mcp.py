@@ -50,16 +50,28 @@ class ChannelError(RuntimeError):
 class Channel:
     """One `desertctl` invocation per call. No connection is held between calls, and that is not a
     simplification — the editor answers a command only after a frame that already reflects it, so the reply
-    IS the synchronisation, and a held connection would buy nothing but a state to get wrong."""
+    IS the synchronisation, and a held connection would buy nothing but a state to get wrong.
+
+    AND THERE IS NO RETRY LOOP HERE EITHER, which used to be impossible. A request that arrives before the
+    editor has finished coming up is HELD by the editor until a presented frame proves it has, then run —
+    so one call is already the wait. Before that, `list_commands` was answered from a half-built editor:
+    measured at 0, then 106, then 130 of one project's openable assets as the startup stages filled the
+    asset cache, with nothing in the reply to say which it was. Every client had to guess how long to wait
+    and ask again. `get_state` is the exception and deliberately so — it answers throughout the boot,
+    because its `quiescence` section is how readiness is OBSERVED."""
 
     def __init__(self, binary: str, socket_path: str):
         self.binary = binary
         self.socket_path = socket_path
 
-    def call(self, *args: str, wait: float = 0.0) -> dict:
+    def call(self, *args: str, wait: float = 0.0, subject: str = "") -> dict:
         command = [self.binary, "--socket", self.socket_path]
         if wait:
             command += ["--wait", str(wait)]
+        # Passed through unvalidated, exactly as the tool passes it to the editor: the closed set of
+        # subjects belongs to the protocol, and a copy of it here would be the list that falls behind.
+        if subject:
+            command += ["--subject", subject]
         command += list(args)
 
         try:
@@ -127,14 +139,25 @@ TOOLS = [
     {
         "name": "list_properties",
         "description": (
-            "The properties the FOCUSED document exposes, with the value each one is showing right now, "
-            "its type, how many numbers it takes and any declared range. This is the other half of what a "
-            "person can do: run_command covers everything with a name, this covers everything a mouse "
-            "does by DRAGGING. The list is derived from the document's own declaration — for a material, "
-            "its shader's Properties block — so it is never out of date with the window. Rows that cannot "
-            "be written (texture slots, asset references) are listed with a reason rather than omitted."
+            "The properties a subject exposes, with the value each one is showing right now, its type, "
+            "how many numbers it takes and any declared range. This is the other half of what a person "
+            "can do: run_command covers everything with a name, this covers everything a mouse does by "
+            "DRAGGING. The default subject is the FOCUSED DOCUMENT, whose list is derived from its own "
+            "declaration — for a material, its shader's Properties block — so it is never out of date "
+            "with the window. Rows that cannot be written (texture slots, asset references) are listed "
+            "with a reason rather than omitted. Subject 'viewport' is the editor's own view: "
+            "Camera.Position and Camera.Direction, which is how the camera is placed for a capture "
+            "without any --shot flag."
         ),
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "subject": {
+                    "type": "string",
+                    "description": "'document' (the focused one, the default) or 'viewport'",
+                },
+            },
+        },
     },
     {
         "name": "set_property",
@@ -145,11 +168,18 @@ TOOLS = [
             "count, an unknown name, a value outside the declared range and a texture slot are all "
             "refused with a reason rather than half-written. For a STAGED document (a material) the write "
             "lands in the working copy and the scene does not change until you run its Apply command. "
+            "With subject 'viewport' this places the EDITOR CAMERA — Camera.Position and "
+            "Camera.Direction, three numbers each, world units of one centimetre — through the editor's "
+            "own view-axis-gizmo and F-focus, the same path a person's hands take. "
             "Returns once a rendered frame already reflects the write."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
+                "subject": {
+                    "type": "string",
+                    "description": "'document' (the focused one, the default) or 'viewport'",
+                },
                 "name": {"type": "string", "description": "the property name exactly as list_properties reports it"},
                 "value": {
                     "type": "array",
@@ -212,7 +242,7 @@ def dispatch(channel: Channel, name: str, arguments: dict) -> dict:
             raise ValueError("run_command needs both a group and a label; ask list_commands for the pairs.")
         return channel.call("run", group, label)
     if name == "list_properties":
-        return channel.call("properties", wait=120)
+        return channel.call("properties", wait=120, subject=arguments.get("subject", ""))
     if name == "set_property":
         prop = arguments.get("name", "")
         value = arguments.get("value", [])
@@ -225,7 +255,9 @@ def dispatch(channel: Channel, name: str, arguments: dict) -> dict:
             )
         # Formatted here rather than passed as a list, because the transport is one desertctl argument.
         # No padding and no truncation: a wrong count must reach the editor as a wrong count.
-        return channel.call("set", prop, ",".join(repr(float(v)) for v in value))
+        return channel.call(
+            "set", prop, ",".join(repr(float(v)) for v in value), subject=arguments.get("subject", "")
+        )
     if name == "get_state":
         return channel.call("state", *arguments.get("sections", []), wait=120)
     if name == "capture_window":

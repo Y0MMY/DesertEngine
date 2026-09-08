@@ -2,6 +2,8 @@
 
 #include <Common/Core/Logger.hpp>
 
+#include <algorithm> // std::find, deduplicating the claimed extensions
+
 namespace Desert::Editor
 {
     void SubjectEditorRegistry::Register( SubjectTypeKey type, Registration editor )
@@ -134,7 +136,7 @@ namespace Desert::Editor
         return fallback;
     }
 
-    void SubjectEditorRegistry::RegisterPathOpener( PathOpener opener )
+    void SubjectEditorRegistry::RegisterPathOpener( std::vector<std::string> extensions, PathOpener opener )
     {
         if ( !opener )
         {
@@ -142,17 +144,62 @@ namespace Desert::Editor
                        "through it silently and a double-click would do nothing." );
             return;
         }
-        m_PathOpeners.push_back( std::move( opener ) );
+
+        if ( extensions.empty() )
+        {
+            LOG_ERROR( "[SubjectEditorRegistry] refusing a path opener that claims no extension. It would "
+                       "still open files through OpenPath and would appear in NO enumeration of the "
+                       "project's openable content, so its formats would be reachable by double-clicking "
+                       "them and by nothing else — which is exactly the reachable-only-by-hand state the "
+                       "command palette exists to abolish." );
+            return;
+        }
+
+        for ( const std::string& extension : extensions )
+        {
+            // NAMED rather than normalised. Lower-casing it here would make the registration and the
+            // filter agree by accident while every OTHER reader of this list — a log line, a refusal that
+            // quotes the formats — still printed the spelling nobody meant.
+            if ( extension.empty() || extension.front() != '.' )
+            {
+                LOG_ERROR( "[SubjectEditorRegistry] a path opener claims '{}', which is not an extension: "
+                           "they are written with the dot and in lower case ('.demat'), because that is the "
+                           "form the content filter compares against.",
+                           extension );
+                return;
+            }
+        }
+
+        m_PathOpeners.push_back( RegisteredOpener{ std::move( extensions ), std::move( opener ) } );
+    }
+
+    std::vector<std::string> SubjectEditorRegistry::ClaimedExtensions() const
+    {
+        std::vector<std::string> claimed;
+        for ( const RegisteredOpener& opener : m_PathOpeners )
+        {
+            for ( const std::string& extension : opener.Extensions )
+            {
+                if ( std::find( claimed.begin(), claimed.end(), extension ) == claimed.end() )
+                    claimed.push_back( extension );
+            }
+        }
+        return claimed;
     }
 
     SubjectEditorRegistry::PathOpenOutcome SubjectEditorRegistry::OpenPath( const std::string& path ) const
     {
-        for ( const PathOpener& opener : m_PathOpeners )
+        for ( const RegisteredOpener& opener : m_PathOpeners )
         {
             // The FIRST opener that claims the path wins, and the rest are not consulted. Registration
             // order is therefore load-bearing only if two openers claim one extension, which is a
             // programming error either way — extensions are what they dispatch on and they are disjoint.
-            if ( const PathOpenOutcome outcome = opener( path ); outcome != PathOpenOutcome::NotMine )
+            //
+            // ASKED OF THE OPENER, not of its declared extension list, and the difference is deliberate:
+            // the opener also checks that the FILE IS THERE, and "this path names a format I handle" and
+            // "this path names something that exists" are different questions. Filtering on the list here
+            // would turn a missing file into NotMine — the answer that means "nothing was wrong".
+            if ( const PathOpenOutcome outcome = opener.Open( path ); outcome != PathOpenOutcome::NotMine )
                 return outcome;
         }
         return PathOpenOutcome::NotMine;

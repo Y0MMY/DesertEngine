@@ -94,6 +94,8 @@
 #include "Editor/Panels/Clouds/CloudsPanel.hpp"
 #include "Editor/Panels/Animation/AnimLayersPanel.hpp"
 #include "Editor/Core/ToastManager.hpp"
+#include "Editor/Core/OpenableAssets.hpp"
+#include "Editor/Core/ViewportCameraProperties.hpp"
 #include "Editor/Core/SubjectEditorRegistry.hpp"
 #include "Editor/Core/SubjectOpenRequest.hpp"
 
@@ -122,6 +124,7 @@
 #include <algorithm> // std::sort / std::transform (scene list)
 #include <span>      // the View menu's groups, declared as data rather than as control flow
 #include <cctype>    // std::tolower (scene filter)
+#include <chrono>    // per-stage startup timing (see the staged boot in OnUpdate)
 
 namespace Desert::Editor
 {
@@ -752,34 +755,41 @@ namespace Desert::Editor
         // per kind of document, and this file carried a second copy of the same chain. Registered here
         // instead, beside the editors they feed, so the browser asks once and a new format is a line in
         // this block rather than an edit in two files somebody has to remember exist.
-        m_SubjectEditors.RegisterPathOpener(
-             [this]( const std::string& path )
-             {
-                 switch ( RequestMaterialDocument( m_AssetManager.get(), path ) )
-                 {
-                     case MaterialDocumentRequest::NotAMaterialPath:
-                         return SubjectEditorRegistry::PathOpenOutcome::NotMine;
-                     case MaterialDocumentRequest::Failed:
-                         return SubjectEditorRegistry::PathOpenOutcome::Failed;
-                     case MaterialDocumentRequest::Requested:
-                         return SubjectEditorRegistry::PathOpenOutcome::Requested;
-                 }
-                 return SubjectEditorRegistry::PathOpenOutcome::NotMine;
-             } );
-        m_SubjectEditors.RegisterPathOpener(
-             [this]( const std::string& path )
-             {
-                 switch ( RequestCloudDocument( m_AssetManager.get(), path ) )
-                 {
-                     case CloudDocumentRequest::NotACloudPath:
-                         return SubjectEditorRegistry::PathOpenOutcome::NotMine;
-                     case CloudDocumentRequest::Failed:
-                         return SubjectEditorRegistry::PathOpenOutcome::Failed;
-                     case CloudDocumentRequest::Requested:
-                         return SubjectEditorRegistry::PathOpenOutcome::Requested;
-                 }
-                 return SubjectEditorRegistry::PathOpenOutcome::NotMine;
-             } );
+        //
+        // AND WHICH EXTENSIONS EACH ONE ANSWERS FOR. Taken from the format's own constant, never spelled
+        // again here: the palette ENUMERATES the project's openable files against this list, so a literal
+        // that drifted from the resolver's would produce a list of entries the resolver then refuses.
+        m_SubjectEditors.RegisterPathOpener( { std::string( Common::Constants::Extensions::MATERIAL_EXTENSION ) },
+                                             [this]( const std::string& path )
+                                             {
+                                                 switch ( RequestMaterialDocument( m_AssetManager.get(), path ) )
+                                                 {
+                                                     case MaterialDocumentRequest::NotAMaterialPath:
+                                                         return SubjectEditorRegistry::PathOpenOutcome::NotMine;
+                                                     case MaterialDocumentRequest::Failed:
+                                                         return SubjectEditorRegistry::PathOpenOutcome::Failed;
+                                                     case MaterialDocumentRequest::Requested:
+                                                         return SubjectEditorRegistry::PathOpenOutcome::Requested;
+                                                 }
+                                                 return SubjectEditorRegistry::PathOpenOutcome::NotMine;
+                                             } );
+        m_SubjectEditors.RegisterPathOpener( { std::string( Assets::kCloudNoiseVolumeExtension ),
+                                               std::string( Assets::kCloudTypeExtension ),
+                                               std::string( Assets::kCloudModellingVolumeExtension ),
+                                               std::string( Assets::kCloudLayoutExtension ) },
+                                             [this]( const std::string& path )
+                                             {
+                                                 switch ( RequestCloudDocument( m_AssetManager.get(), path ) )
+                                                 {
+                                                     case CloudDocumentRequest::NotACloudPath:
+                                                         return SubjectEditorRegistry::PathOpenOutcome::NotMine;
+                                                     case CloudDocumentRequest::Failed:
+                                                         return SubjectEditorRegistry::PathOpenOutcome::Failed;
+                                                     case CloudDocumentRequest::Requested:
+                                                         return SubjectEditorRegistry::PathOpenOutcome::Requested;
+                                                 }
+                                                 return SubjectEditorRegistry::PathOpenOutcome::NotMine;
+                                             } );
 
         // NOTHING OPENS A PANEL AT BOOT ANY MORE, and the absence is the point.
         //
@@ -826,6 +836,14 @@ namespace Desert::Editor
             sky.RequestBake = true;
         }
 
+        // THE FIRST SAMPLE IS TAKEN BEFORE THE FIRST FRAME, and without it the readiness gate is wrong in
+        // the one case it exists for. ServiceControlChannel runs at the TOP of OnUpdate and judges the
+        // sample from the frame before; on frame zero there is no frame before, so a default-constructed
+        // EditorQuiescence would answer Settled() — every flag false — and the very first request of a
+        // session, which is the one a client sends while the editor is still cooking, would be answered
+        // from an editor that has read nothing. An unsampled census must not read as a settled editor.
+        SampleFrameQuiescence();
+
         return BOOLSUCCESS;
     }
 
@@ -851,8 +869,36 @@ namespace Desert::Editor
             if ( m_StartupFramesRendered >= 1 )
             {
                 DESERT_PROFILE_SCOPE( "Startup stage" );
+
+                // EVERY STAGE IS TIMED, and the reason is a question nobody could answer. A client
+                // watching a fresh editor over this project saw the command palette's 'Open' group stay
+                // empty for five minutes and had no way to say WHICH of eight stages was spending them:
+                // the only startup line the log ever carried was the shader preload's, which runs in
+                // OnAttach and is not one of these at all. So "the preload finished" was read as "the
+                // startup finished", and the two are minutes apart. Measured here, on an otherwise idle
+                // machine, the eight stages cost 6.0 s of a 51 s boot — the other 45 s is OnAttach's
+                // shader preload, which is exactly the phase the one existing line already reports.
+                //
+                // A phase nobody can name is a phase every brief guesses at, and three of this project's
+                // timed investigations went looking in the wrong one.
+                const auto stageStart = std::chrono::steady_clock::now();
                 m_StartupStages[m_StartupNext].Run();
+                const auto stageMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          std::chrono::steady_clock::now() - stageStart )
+                                          .count();
+                m_StartupElapsedMs += stageMs;
                 ++m_StartupNext;
+
+                LOG_INFO( "[Startup] stage {}/{} '{}' took {} ms ({} ms into the staged boot)", m_StartupNext,
+                          m_StartupStages.size(), m_StartupStages[m_StartupNext - 1].Label, stageMs,
+                          m_StartupElapsedMs );
+
+                if ( !StartupLoading() )
+                {
+                    LOG_INFO( "[Startup] all {} stage(s) done in {} ms; the editor is now answering about a "
+                              "project it has actually read.",
+                              m_StartupStages.size(), m_StartupElapsedMs );
+                }
             }
             SampleFrameQuiescence();
             return BOOLSUCCESS;
@@ -1108,14 +1154,14 @@ namespace Desert::Editor
         if ( auto& shot = ShotOptions::Get(); shot.Active() && shot.HasCamera && !m_SceneLoadRequested &&
                                               !StartupLoading() && ( !m_ShotCameraPlaced || shot.HasMotion() ) )
         {
-            if ( auto* cam = dynamic_cast<::Desert::Core::EditorCamera*>( m_MainScene->GetActiveCamera().get() ) )
+            if ( ::Desert::Core::EditorCamera* cam = ActiveEditorCamera() )
             {
-                const ShotCamera view    = shot.CameraAt( shot.Parameter( m_ShotFrame ) );
-                const glm::vec3  forward = glm::normalize( view.Forward );
-                cam->SnapToDirection( forward );
-                // Focus keeps the orientation and re-frames, so aiming at a point one framing distance
-                // ahead lands the camera exactly on the position asked for.
-                cam->Focus( view.Position + forward * 500.0f, 500.0f );
+                // THE SAME PLACEMENT THE CONTROL CHANNEL USES. It used to be spelled out here, with the
+                // framing distance written twice on one line as a bare 500.0f — and it was the ONLY way to
+                // place the camera at all, so a developer who wanted a viewpoint and no capture had to
+                // launch with `--shot --shot-frames 1000000` to reach it. See ViewportCameraProperties.hpp.
+                const ShotCamera view = shot.CameraAt( shot.Parameter( m_ShotFrame ) );
+                PlaceEditorCamera( *cam, view.Position, view.Forward );
                 cam->SetInputEnabled( false ); // nothing may nudge it between here and the capture
             }
             m_ShotCameraPlaced = true;
@@ -1371,7 +1417,29 @@ namespace Desert::Editor
         // hand the ordering guarantee to whoever wrote the client: two commands in flight cannot both be
         // "the command the next settled frame proves".
         if ( m_ControlInFlight )
+        {
+            // THE CONNECTION IS STILL SERVICED, THE SOCKET IS JUST NOT READ FROM. A second request must
+            // not be taken while one is in flight — that is the whole of the ordering guarantee — but a
+            // readiness wait can last a whole boot, and a peer that has GONE is only ever detected by
+            // reading from it. Without this the editor would hold the channel open for a client that is no
+            // longer there and refuse every new one until the wait ended by itself.
+            m_ControlSocket.ServiceConnection();
+            if ( AbandonControlRequestIfItsAskerIsGone() )
+                return;
+
+            // ONE STATE MEANS ONE THING: a request in flight with an IDLE gate is a request the readiness
+            // wait has just released and that has not run yet. Every other combination clears itself in
+            // OnFramePresented, so this is the only way to be here. Running it at the top of OnUpdate and
+            // not at the point of release keeps ONE execution site for control commands — the same point
+            // in the frame a request that never had to wait is run at.
+            if ( m_ControlGate.IsArmed() || m_ControlPendingReply )
+                return;
+
+            const Control::Request held = *m_ControlInFlight;
+            m_ControlInFlight.reset();
+            RunControlRequest( held );
             return;
+        }
 
         const std::optional<std::string> line = m_ControlSocket.PollRequestLine();
         if ( !line )
@@ -1387,15 +1455,60 @@ namespace Desert::Editor
             return;
         }
 
-        const Control::Request request  = parsed.GetValue();
-        Control::Response      response = ExecuteControlRequest( request );
+        const Control::Request request = parsed.GetValue();
+
+        // AN EDITOR THAT HAS NOT READ THE PROJECT DOES NOT ANSWER ABOUT IT.
+        //
+        // This is the whole of A6-1's second half, and it is one branch because the mechanism it needs
+        // already existed: PendingWork::StartupLoading has been in the quiescence census since the channel
+        // landed, and the gate has always been able to hold something until a presented frame proves the
+        // census empty. What was missing is that the READS never asked. `commands` was answered from the
+        // asset cache the moment it arrived, and the cache is filled by five separate startup stages — so
+        // for 3.3 s of every boot the palette successfully offers 106 of this project's 130 openable
+        // assets, and for the seconds before that, none of them. Neither answer says which it is.
+        //
+        // Held, not refused, because a refusal only moves the problem: the client would have to guess how
+        // long to wait and ask again, which is the polling loop this channel exists to delete. The refusal
+        // still exists — it is what a gate timeout produces, and it names what never finished.
+        //
+        // WHICH operations need this is the protocol's decision, not this file's: `state` and `quit` are
+        // exempt, for reasons written where the table is (Control/ControlProtocol.hpp). EditorLayer.cpp is
+        // compiled by no test suite, so a rule stated here is a rule nothing can show going red.
+        if ( Control::NeedsReadyEditor( request.Operation ) && !m_FrameQuiescence.Settled() )
+        {
+            LOG_INFO( "[Control] request {} is waiting for the editor to finish coming up: {}.", request.Id,
+                      m_FrameQuiescence.Describe() );
+            m_ControlInFlight       = request;
+            m_ControlInFlightClient = m_ControlSocket.ClientGeneration();
+            m_ControlGate.ArmForReadiness( m_FrameIndex );
+            return;
+        }
+
+        RunControlRequest( request );
+    }
+
+    // Execute one request and decide whether its reply leaves now or waits for the frame that proves it.
+    //
+    // Split out of ServiceControlChannel because there are now two ways to ARRIVE at a request — read from
+    // the socket, or released by the readiness gate a few frames later — and exactly one way to RUN one.
+    // Two execution sites for one thing is the shape this codebase spends its days removing.
+    void EditorLayer::RunControlRequest( const Control::Request& request )
+    {
+        Control::Response response = ExecuteControlRequest( request );
 
         // READS ANSWER NOW; ANYTHING THAT CAN CHANGE THE PICTURE WAITS FOR ONE.
         //
-        // `commands`, `properties` and `state` observe and change nothing, so making them wait would buy
-        // latency and no guarantee at all. `run`, `set` and the two shots are the ones the promise is
-        // about — and a shot does not merely wait for the settled frame, it IS taken on it, which is why
-        // its response is finished in OnFramePresented rather than here.
+        // `commands`, `properties` and `state` observe and change nothing, so making them wait for a
+        // FURTHER frame would buy latency and no guarantee at all. `run`, `set` and the two shots are the
+        // ones the promise is about — and a shot does not merely wait for the settled frame, it IS taken
+        // on it, which is why its response is finished in OnFramePresented rather than here.
+        //
+        // NOT TO BE CONFUSED WITH THE READINESS WAIT ABOVE, which the reads DO take part in. The two are
+        // different questions about different moments: "has the editor finished coming up, so that this
+        // answer is about the real project?" is asked BEFORE a request runs, of every operation but the
+        // two exemptions; "has a frame been presented that shows what this command did?" is asked AFTER,
+        // and only of the commands that did something. By the time execution reaches this line the editor
+        // is settled either way, so a read answers from a state it has actually finished building.
         //
         // `set` is in the list for exactly the reason `run` is: it moves the preview, and a client that
         // set a value and captured immediately would photograph the frame BEFORE it. That failure is the
@@ -1414,7 +1527,40 @@ namespace Desert::Editor
 
         m_ControlInFlight     = request;
         m_ControlPendingReply = std::move( response );
+        m_ControlInFlightClient = m_ControlSocket.ClientGeneration();
         m_ControlGate.ArmAfterExecution( m_FrameIndex );
+    }
+
+    /**
+     * @brief Is the connection that asked still the connection on the other end? Abandon the request if
+     *        not, and say whether it did.
+     *
+     * A REPLY MUST REACH THE CLIENT THAT ASKED FOR IT, and "somebody is connected" does not say that.
+     * Measured while building the readiness wait: client A parked a `commands` during the boot and was
+     * killed; the editor noticed the loss and, in the SAME service call, accepted client B into the freed
+     * slot — the accept loop runs immediately after the read that detects a disconnect. HasClient() was
+     * true again, the parked request went on, and A's answer of 311 commands was written to B's socket.
+     * B had also sent id 1, so the reply was indistinguishable from its own at both ends.
+     *
+     * The generation is what makes the question answerable. Nothing is sent to the vanished client — there
+     * is nobody to tell — and nothing is sent to its successor either, which is the whole point.
+     */
+    bool EditorLayer::AbandonControlRequestIfItsAskerIsGone()
+    {
+        if ( !m_ControlInFlight )
+            return false;
+        if ( m_ControlSocket.HasClient() && m_ControlSocket.ClientGeneration() == m_ControlInFlightClient )
+            return false;
+
+        LOG_INFO( "[Control] the client that asked for request {} is gone (generation {} -> {}); abandoning "
+                  "it unanswered rather than replying to whoever holds the channel now.",
+                  m_ControlInFlight->Id, m_ControlInFlightClient, m_ControlSocket.ClientGeneration() );
+
+        m_ControlGate.Disarm();
+        m_ControlInFlight.reset();
+        m_ControlPendingReply.reset();
+        m_ControlInFlightClient = 0;
+        return true;
     }
 
     void EditorLayer::SampleFrameQuiescence()
@@ -1453,8 +1599,18 @@ namespace Desert::Editor
             return;
         }
 
-        if ( !m_ControlInFlight || !m_ControlPendingReply )
+        if ( !m_ControlInFlight )
             return;
+
+        // A reply must reach the client that ASKED. Checked here as well as in ServiceControlChannel
+        // because a shot's capture and its answer both happen on this side of the frame, and writing
+        // either to a successor connection would hand one client another's picture.
+        if ( AbandonControlRequestIfItsAskerIsGone() )
+            return;
+
+        // WHICH OF THE TWO WAITS this frame is being judged for, sampled BEFORE the verdict: a discharge
+        // clears the subject, so asking afterwards would always answer "nothing".
+        const Control::GateSubject holding = m_ControlGate.Holding();
 
         // The frame just presented is judged by the quiescence sampled while it was being BUILT. The gate
         // uses m_FrameIndex - 1 because the counter was advanced above: the frame that has just gone out
@@ -1464,6 +1620,36 @@ namespace Desert::Editor
 
         if ( verdict == Control::GateVerdict::Waiting || verdict == Control::GateVerdict::Idle )
             return;
+
+        // THE READINESS HALF. The request has not run; this frame says whether it may.
+        //
+        // A discharge does nothing here on purpose: it leaves the request parked with an idle gate, which
+        // is the one state ServiceControlChannel reads as "run this at the top of the next update". That
+        // costs one frame and buys a single execution site for every control command — a request released
+        // by this wait runs at exactly the point in the frame a request that never waited runs at.
+        if ( holding == Control::GateSubject::Readiness )
+        {
+            if ( verdict == Control::GateVerdict::TimedOut )
+            {
+                m_ControlSocket.SendResponseLine( Control::FormatResponse( Control::Response::Failure(
+                     m_ControlInFlight->Id,
+                     Control::DescribeReadinessTimeout( m_FrameQuiescence, m_ControlGate.FramesWaited() ) ) ) );
+                m_ControlInFlight.reset();
+            }
+            return;
+        }
+
+        // Unreachable while the two arms above are the only ways to arm the gate, and stated rather than
+        // dereferenced: an Effect wait without a reply to release would be a request that ran and produced
+        // nothing, which is the silent failure Response exists to make impossible.
+        if ( !m_ControlPendingReply )
+        {
+            m_ControlSocket.SendResponseLine( Control::FormatResponse( Control::Response::Failure(
+                 m_ControlInFlight->Id, "the channel held a reply-less request past its frame; that is a "
+                                        "defect in the control channel, not in the request." ) ) );
+            m_ControlInFlight.reset();
+            return;
+        }
 
         Control::Response reply = *m_ControlPendingReply;
 
@@ -1548,13 +1734,29 @@ namespace Desert::Editor
 
             case Control::Op::Properties:
             {
+                if ( request.Whose == Control::Subject::Viewport )
+                {
+                    ::Desert::Core::EditorCamera* camera = ActiveEditorCamera();
+                    if ( !camera )
+                        return Control::Response::Failure( request.Id, NoEditorCameraReason() );
+
+                    return Control::Response::Success(
+                         request.Id,
+                         Control::PropertiesToJson(
+                              Control::kSubjects[static_cast<std::size_t>( Control::Subject::Viewport )].Name,
+                              DescribeViewportCamera( camera->GetPosition(), camera->GetDirection() ) ) );
+                }
+
+                // `m_Documents` here on А6-1's side; О9-2 moved document OWNERSHIP out of the well into
+                // Editor/Core/OpenDocuments.hpp and renamed the member, so the merged line asks the owner.
                 ISubjectDocument* focused = m_OpenDocuments.Find( m_FocusedDocument );
                 if ( !focused )
                 {
                     return Control::Response::Failure(
                          request.Id,
                          "no document has the focus, so there is nothing whose properties could be listed. "
-                         "Open one — 'commands' offers an entry per openable asset under the group 'Open'." );
+                         "Open one — 'commands' offers an entry per openable asset under the group 'Open'. "
+                         "The editor's own view is a subject of its own: ask with subject 'viewport'." );
                 }
                 return Control::Response::Success(
                      request.Id, Control::PropertiesToJson( DocumentDisplayName( focused->GetName() ),
@@ -1563,6 +1765,9 @@ namespace Desert::Editor
 
             case Control::Op::Set:
             {
+                if ( request.Whose == Control::Subject::Viewport )
+                    return SetViewportCameraProperty( request );
+
                 // THE FOCUSED DOCUMENT AND NO OTHER. A property named without a document would have to be
                 // searched for across every open window, and the first match would win — which is a
                 // different document from the one the person or the capture is looking at, on any frame
@@ -1610,6 +1815,77 @@ namespace Desert::Editor
         return Control::Response::Failure( request.Id,
                                            "this operation parsed but has no implementation; that is a "
                                            "defect in the control channel." );
+    }
+
+    // ── THE EDITOR'S OWN VIEW, AS SOMETHING THE CHANNEL CAN ADDRESS ────────────────────────────────────
+    //
+    // The scene's active camera, IF it is the editor's fly camera. Null in Play, where the view belongs to
+    // the scene's own CameraComponent — and null is the honest answer there rather than a pinned override,
+    // because "the editor camera" is not what is being looked through.
+
+    ::Desert::Core::EditorCamera* EditorLayer::ActiveEditorCamera() const
+    {
+        if ( !m_MainScene )
+            return nullptr;
+        return dynamic_cast<::Desert::Core::EditorCamera*>( m_MainScene->GetActiveCamera().get() );
+    }
+
+    std::string EditorLayer::NoEditorCameraReason() const
+    {
+        if ( !m_MainScene )
+            return "there is no scene, so there is no view to address.";
+        return "the active view is not the editor's fly camera — the scene is in Play and its own "
+               "CameraComponent is driving. Leave Play ('Action' / 'Stop' in the palette) and ask again; "
+               "moving the editor camera now would change a view nobody is looking through.";
+    }
+
+    // THE ONE PLACEMENT. Both the `--camera`/`--look` capture path and the control channel's
+    // `set Camera.Position` land here, which is the rule the protocol states for a property write: the
+    // value goes into the same setter the widget calls, so there is one route into the camera and two ways
+    // to reach it. Two copies of this would drift the day one of them learned about roll.
+    //
+    // SnapToDirection + Focus are the EDITOR'S OWN gestures — the clickable view-axis gizmo and F-focus —
+    // and that is what makes this the same path a person's hands take rather than a private back door.
+    // Focus backs the camera off along the current view direction by the framing distance, so aiming one
+    // framing distance ahead is what lands it exactly on the position asked for; the two uses of that
+    // distance are one named constant for that reason.
+    void EditorLayer::PlaceEditorCamera( ::Desert::Core::EditorCamera& camera, const glm::vec3& position,
+                                         const glm::vec3& forward )
+    {
+        camera.SnapToDirection( glm::normalize( forward ) );
+        camera.Focus( ViewportCameraFocalPoint( position, forward ), kViewportCameraFramingDistance );
+    }
+
+    Control::Response EditorLayer::SetViewportCameraProperty( const Control::Request& request )
+    {
+        ::Desert::Core::EditorCamera* camera = ActiveEditorCamera();
+        if ( !camera )
+            return Control::Response::Failure( request.Id, NoEditorCameraReason() );
+
+        const auto which = ValidateViewportCameraWrite( request.Property, request.Value );
+        if ( !which )
+            return Control::Response::Failure( request.Id, which.GetError() );
+
+        // THE OTHER HALF OF THE POSE IS READ BACK FROM THE CAMERA, not remembered here. A client that sets
+        // only the direction means "look that way from where you are", and a copy of the position kept on
+        // this side would be the second answer to where the camera is — wrong the first time a person
+        // dragged it.
+        const glm::vec3 position = ( which.GetValue() == ViewportCameraWrite::Position )
+                                        ? glm::vec3( request.Value[0], request.Value[1], request.Value[2] )
+                                        : camera->GetPosition();
+        const glm::vec3 forward  = ( which.GetValue() == ViewportCameraWrite::Direction )
+                                        ? glm::vec3( request.Value[0], request.Value[1], request.Value[2] )
+                                        : camera->GetDirection();
+
+        PlaceEditorCamera( *camera, position, forward );
+
+        // INPUT IS NOT DISABLED, and the difference from the capture path is deliberate. `--shot` turns it
+        // off because nothing may nudge the camera between the placement and the readback, and there is no
+        // one at the keyboard anyway. A channel client may well be driving an editor a person is also
+        // sitting at, and taking their camera away for the rest of the session would be a side effect they
+        // never asked for and could not undo. The ordering guarantee already covers the capture case: the
+        // reply is released only after a frame rendered from this pose.
+        return Control::Response::Success( request.Id );
     }
 
     Control::EditorSnapshot EditorLayer::TakeEditorSnapshot() const
@@ -1733,6 +2009,13 @@ namespace Desert::Editor
         // So the editor asks the gate, before the submit, whether THIS frame is the one the reply waits
         // for — the same question, on the same inputs, that OnFramePresented will answer afterwards.
         if ( !m_ControlInFlight || m_ControlInFlight->Operation != Control::Op::ShotWindow )
+            return;
+        // THE EFFECT WAIT AND NOT THE READINESS ONE. A shot parked behind the readiness gate has not been
+        // taken yet — its `run`-like half is precisely this capture — so recording on the frame that
+        // merely proves the editor came up would photograph the boot instead of the thing asked for, and
+        // it would still be released as the answer to the request. The gate's two subjects are what keep
+        // "the editor is ready" and "the command has landed" from being read as one fact.
+        if ( m_ControlGate.Holding() != Control::GateSubject::Effect )
             return;
         if ( !m_ControlGate.WouldDischarge( m_FrameIndex, m_FrameQuiescence ) )
             return;
@@ -3035,26 +3318,53 @@ namespace Desert::Editor
                                       Editor::ViewportPanel::ToggleUIMode( *m_MainScene );
                               } } );
 
+        // THE PALETTE'S OWN DOOR. Ctrl+P is the only other way to it and a keystroke is not available to
+        // this machine, so the command palette was the single window in this editor that no unattended run
+        // could put on screen — and therefore the one whose appearance no change to it could ever be
+        // checked against. Г14's rule reaches its own instrument: a capability reachable only by hand does
+        // not exist for the channel. Found by needing it, exactly as the snap steps and the entity delete
+        // were: A6-1 changed WHEN this list is built and could not photograph the result.
+        commands.push_back( { "View", "Open the command palette", [this] { m_OpenPaletteRequested = true; } } );
+
         // OPENABLE ASSETS. This is where `--open-panel <path-to-asset>` went — the half of that flag that
         // opened a DOCUMENT rather than a tool, and the only way a document has ever been put on screen
         // unattended, since a document does not exist until something opens its asset and therefore has
         // no name to be reached by.
         //
-        // The list is the project's registered assets filtered by "does an editor open this kind", which
-        // is m_SubjectEditors and not a hand-written type list — so a new document type appears here the
-        // moment its factory is registered.
-        if ( m_AssetManager )
+        // ENUMERATED FROM THE PROJECT'S FILES, NOT FROM THE ASSET MANAGER'S CACHE. This loop used to walk
+        // `RegisteredAssets()` — whatever the startup preloader had got round to registering — which is a
+        // container whose contents are derived from the same source as the question being asked of it.
+        // Measured through the control channel, once per frame: the group goes 0 -> 106 -> 130 entries,
+        // because FIVE separate startup stages fill that cache, so for 3.3 s of every boot the palette
+        // successfully offered every material in this project and none of its twenty-four cloud assets.
+        //
+        // The entity half above never had that problem, and the reason is the shape: it walks the SCENE,
+        // which is what says which entities exist. The equivalent for files is the content enumeration —
+        // ListFilesRecursive, which is also what the preloader walks to build the cache in the first
+        // place, and which covers a mounted .dpak as well as loose files. Reading it one step earlier
+        // removes the window rather than shortening it.
+        //
+        // Nothing is loaded to build this list, which is the other half of the argument: a project with
+        // ten thousand materials costs one directory walk here, and the file is parsed by the OPENER, on
+        // the frame somebody actually asks for it.
+        //
+        // See Editor/Core/OpenableAssets.hpp for the labelling rule and the three `model.demat` that
+        // motivated it.
+        for ( const OpenableAsset& asset : CollectOpenableAssets(
+                   Common::Utils::FileSystem::ListFilesRecursive( Common::Constants::Path::ASSETS_PATH ),
+                   m_SubjectEditors.ClaimedExtensions(), Common::Constants::Path::ASSETS_PATH ) )
         {
-            for ( const auto& [metadata, asset] : m_AssetManager->RegisteredAssets() )
-            {
-                const SubjectId subject =
-                     AssetSubject( metadata.Handle, static_cast<uint32_t>( metadata.AssetType ) );
-                if ( !metadata.IsValid() || !m_SubjectEditors.HasEditorFor( subject.Type() ) )
-                    continue;
-
-                commands.push_back( { "Open", metadata.Filepath.filename().generic_string(),
-                                      [subject] { Core::SubjectOpenRequests::Request( subject ); } } );
-            }
+            const std::string path = asset.Path;
+            commands.push_back( { "Open", asset.Label, [this, path]
+                                  {
+                                      // THROUGH THE PATH OPENERS, the same route the asset browser's
+                                      // double-click takes. Resolving a path to a subject here would be a
+                                      // second copy of the find-or-create-and-load chain — the exact
+                                      // duplication SubjectEditorRegistry::RegisterPathOpener was
+                                      // introduced to delete, when the browser and EditorLayer each
+                                      // carried one.
+                                      (void)m_SubjectEditors.OpenPath( path );
+                                  } } );
         }
 
         // THE LEVELS, which every other kind of document could already be opened by name from here and a
@@ -3173,10 +3483,46 @@ namespace Desert::Editor
 
     void EditorLayer::DrawCommandPalette()
     {
+        // THE OVERLAY ITSELF, ASKED FOR BY NAME. Ctrl+P is the only other way in, and a keystroke is not
+        // available to this machine — so the command palette was the one window in this editor that no
+        // unattended run could photograph, which made every change to it unverifiable. Г14's rule applied
+        // to the palette's own door: a capability reachable only by hand does not exist for the channel.
+        //
+        // A DEFERRED FLAG rather than calling Open() in the closure, and the reason is the one asymmetry
+        // that would otherwise make this a knob that does nothing. CommandPalette::Draw runs the chosen
+        // entry and then sets m_Open = false on the very next line, so an entry that opened the palette
+        // from inside the palette would be closed again before the frame ended — working over the socket
+        // and doing nothing under a person's hand. Consumed below, in this same frame, so the channel's
+        // ordering guarantee still holds: the frame that answers the command is the frame that shows it.
+        if ( m_OpenPaletteRequested )
+        {
+            m_OpenPaletteRequested = false;
+            m_CommandPalette.Open();
+        }
+
+        // BUILT ON THE FRAME IT OPENS, AND NOT ON EVERY FRAME IT IS OPEN.
+        //
+        // This used to call BuildPaletteCommands() unconditionally, sixty times a second for as long as
+        // the overlay was up — while EditorLayer.hpp said, one line above the declaration, "Built on
+        // demand — when the palette opens, or when a request arrives — never per frame." The comment was
+        // the design; the code was not doing it, and nothing said so.
+        //
+        // It became load-bearing with A6-1: the `Open` group is now enumerated from the project's FILES
+        // rather than from the asset manager's cache, so a per-frame rebuild is a recursive walk of the
+        // content tree sixty times a second while somebody types a query. (The scene list beside it,
+        // CollectAvailableScenes, has always walked a directory tree here too, so the rebuild was already
+        // doing disk work per frame — the file half simply made it bigger and more obvious.)
+        //
+        // Rebuilding on OPEN is not a snapshot going stale, and that is why this is the fix rather than a
+        // cache: the palette takes the keyboard while it is up, so nothing can open a document, load a
+        // scene or delete an entity between the build and the choice. Running an entry closes it, and the
+        // next Ctrl+P builds again.
+        if ( m_CommandPalette.TakeJustOpened() )
+            m_CommandPalette.SetCommands( BuildPaletteCommands() );
+
         if ( !m_CommandPalette.IsOpen() )
             return;
 
-        m_CommandPalette.SetCommands( BuildPaletteCommands() );
         m_CommandPalette.Draw();
     }
 
@@ -6011,13 +6357,17 @@ namespace Desert::Editor
         // further down there is a WaitDeviceIdle and the release of exactly the GPU objects this
         // readback needs.
         //
-        // Not on a headless capture run: those open scratch projects in worktrees, and the picture
-        // would be of a scene nobody chose, written into a project nobody will open. Same rule, and
-        // the same reason, as staying out of the recent-projects registry.
+        // Not on an UNATTENDED run: those open scratch projects in worktrees, and the picture would
+        // be of a scene nobody chose, written into a project nobody will open. Same rule, and the
+        // same reason, as staying out of the recent-projects registry — and the same correction:
+        // this asked `shot.Active()` and therefore missed every control-channel session, which is
+        // the unattended path that no longer needs a capture flag at all. See
+        // Editor/Core/CommandLine.hpp::IsUnattendedSession.
         //
         // A failure is logged and nothing else. Refusing to shut down because a picture could not
         // be written would be the tail wagging the dog.
-        if ( !Editor::ShotOptions::Get().Active() )
+        if ( !Editor::IsUnattendedSession( Editor::ShotOptions::Get(),
+                                           Control::ControlChannelOptions::Get().Requested() ) )
             if ( const auto thumbnail = WriteProjectThumbnail(); !thumbnail.IsSuccess() )
                 LOG_WARN( "[Project] the tile thumbnail was not written on exit: {}", thumbnail.GetError() );
 

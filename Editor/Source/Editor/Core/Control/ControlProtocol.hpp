@@ -70,24 +70,68 @@ namespace Desert::Editor::Control
         Quit,         ///< end the session with an exit status
     };
 
+    /**
+     * @brief DOES THIS OPERATION NEED AN EDITOR THAT HAS FINISHED COMING UP?
+     *
+     * THE DEFECT THIS ANSWERS, with its numbers. `commands` used to be answered the instant it arrived,
+     * from whatever the editor happened to hold at that moment — and the editor holds almost nothing for
+     * the first twenty seconds of a session. Measured on this repository's own project: the palette's
+     * `Open` group goes 0 -> 106 -> 130 as five separate startup stages fill the asset cache, and the
+     * 106-entry answer — every material, not one of the twenty-four cloud assets — is a SUCCESSFUL reply
+     * that stands for 3.3 seconds of every single boot. A client cannot tell it from a project that has no
+     * cloud documents. §1.4: an empty (or half-empty) successful answer is a silent wrong answer.
+     *
+     * TWO OPERATIONS ARE DELIBERATELY EXEMPT, and the exemptions are the interesting half.
+     *
+     * `state` must answer THROUGHOUT the boot, because it is how readiness is OBSERVED: its `quiescence`
+     * section names what is still outstanding, in the same words a refusal uses. Making it wait would be
+     * blinding the one client that is watching the editor come up, and would turn readiness back into
+     * something inferred from silence — which is exactly the property this whole change exists to remove.
+     *
+     * `quit` must answer because a boot that has WEDGED is the case where ending the session matters most.
+     * An operation that could only be run by an editor that was already fine is no use to anybody.
+     *
+     * STATED IN THE TABLE AND NOT IN A `switch`, so it is impossible to add an operation without deciding.
+     * The field has no default: `{ "thing", Op::Thing }` does not compile, and the next person is made to
+     * answer the question rather than inherit somebody else's answer.
+     */
+    enum class RequiresReady
+    {
+        No,  ///< answered from whatever state the editor is in, including mid-boot
+        Yes, ///< held until a presented frame proves the editor settled, or refused saying what is pending
+    };
+
     /// One accepted operation. A table, for the same reason kCommandLineFlags is one: the message that
     /// lists the known operations is built FROM the set the parser accepts, so the two cannot drift.
     struct OpSpec
     {
-        const char* Name;
-        Op          Operation;
+        const char*   Name;
+        Op            Operation;
+        RequiresReady Readiness;
     };
 
     inline constexpr OpSpec kOps[] = {
-         { "commands", Op::Commands },
-         { "run", Op::Run },
-         { "properties", Op::Properties },
-         { "set", Op::Set },
-         { "state", Op::State },
-         { "shot.window", Op::ShotWindow },
-         { "shot.viewport", Op::ShotViewport },
-         { "quit", Op::Quit },
+         { "commands", Op::Commands, RequiresReady::Yes },
+         { "run", Op::Run, RequiresReady::Yes },
+         { "properties", Op::Properties, RequiresReady::Yes },
+         { "set", Op::Set, RequiresReady::Yes },
+         { "state", Op::State, RequiresReady::No },
+         { "shot.window", Op::ShotWindow, RequiresReady::Yes },
+         { "shot.viewport", Op::ShotViewport, RequiresReady::Yes },
+         { "quit", Op::Quit, RequiresReady::No },
     };
+
+    /// The table's answer for one operation. Yes for anything not in the table at all — an operation this
+    /// build has never heard of is the last thing that should be run against a half-built editor.
+    [[nodiscard]] constexpr bool NeedsReadyEditor( Op op ) noexcept
+    {
+        for ( const OpSpec& spec : kOps )
+        {
+            if ( spec.Operation == op )
+                return spec.Readiness == RequiresReady::Yes;
+        }
+        return true;
+    }
 
     /// TWO CAPTURES THAT NEVER SUBSTITUTE FOR EACH OTHER, and that is why they are two operations rather
     /// than one with a flag. `shot.window` reads the presented swapchain image and therefore contains the
@@ -104,6 +148,54 @@ namespace Desert::Editor::Control
         return op == Op::ShotWindow || op == Op::ShotViewport;
     }
 
+    /**
+     * @brief WHOSE PROPERTIES `properties` AND `set` ARE ABOUT.
+     *
+     * A CLOSED SET OF TWO, and the second one is A6-1's. The category was written for the focused document
+     * and that stays the default, so every client that predates this sends nothing and gets what it always
+     * got. What it could not reach is the EDITOR'S OWN VIEW: placing the camera was wired to `--camera` /
+     * `--look`, which are read only inside `shot.Active()`, so a developer who wanted the camera somewhere
+     * and had no intention of taking a `--shot` had to launch with a fictitious `--shot --shot-frames
+     * 1000000` to unlock it. The mandatory step of a proof was being done by the flag family this channel
+     * replaced.
+     *
+     * A SUBJECT AND NOT AN OPERATION, because it is the same request: same census type, same refusals,
+     * same JSON. Two operations would be two vocabularies for "read a value and write it back", and the
+     * one nobody remembers falls behind — which is this codebase's most-paid-for defect shape.
+     *
+     * NOT A FREE STRING either. An unknown subject is refused NAMING the known ones, for the reason a
+     * section is (ControlState.hpp): a subject quietly ignored would answer about the focused document
+     * while the client believed it had addressed the viewport, and both answers look exactly alike.
+     */
+    enum class Subject
+    {
+        Document, ///< the focused document's own values — the default, and what every older client means
+        Viewport, ///< the editor's view: where the camera is and which way it looks
+    };
+
+    struct SubjectSpec
+    {
+        const char* Name;
+        Subject     Which;
+    };
+
+    inline constexpr SubjectSpec kSubjects[] = {
+         { "document", Subject::Document },
+         { "viewport", Subject::Viewport },
+    };
+
+    [[nodiscard]] inline std::string KnownSubjectList()
+    {
+        std::string list;
+        for ( const SubjectSpec& spec : kSubjects )
+        {
+            if ( !list.empty() )
+                list += ", ";
+            list += spec.Name;
+        }
+        return list;
+    }
+
     struct Request
     {
         /// Echoed in the response. A client that pipelines needs to know which answer is whose, and an id
@@ -116,7 +208,11 @@ namespace Desert::Editor::Control
         std::string Group;
         std::string Label;
 
-        /// Op::Set — the property of the focused document, addressed by the name its declaration gives it
+        /// Op::Properties / Op::Set — whose values. Absent means the focused document, which is what the
+        /// category has always meant and what every client written before the viewport existed sends.
+        Subject Whose = Subject::Document;
+
+        /// Op::Set — the property of the subject, addressed by the name its declaration gives it
         /// (not by its label: two properties may display the same words).
         std::string Property;
 
@@ -316,6 +412,35 @@ namespace Desert::Editor::Control
         Request request;
         request.Id        = ReadInt( fields, "id", 0 );
         request.Operation = spec->Operation;
+
+        // THE SUBJECT, FOR THE TWO OPERATIONS THAT HAVE ONE. Parsed before the per-operation switch
+        // because an unknown subject must be refused whatever else the request got right — a request that
+        // named "viewpoint" and was answered about the focused document would be answered wrongly and
+        // successfully, and the two replies are indistinguishable.
+        if ( spec->Operation == Op::Properties || spec->Operation == Op::Set )
+        {
+            const std::string subjectName = ReadString( fields, "subject" );
+            if ( !subjectName.empty() )
+            {
+                const SubjectSpec* subject = nullptr;
+                for ( const SubjectSpec& candidate : kSubjects )
+                {
+                    if ( subjectName == candidate.Name )
+                    {
+                        subject = &candidate;
+                        break;
+                    }
+                }
+
+                if ( subject == nullptr )
+                {
+                    return Common::MakeFormattedError<Request>(
+                         "'{}' is not something this editor has properties for. Known subjects: {}.", subjectName,
+                         KnownSubjectList() );
+                }
+                request.Whose = subject->Which;
+            }
+        }
 
         switch ( spec->Operation )
         {

@@ -111,21 +111,50 @@ namespace Desert::Editor
         // person can reach with Ctrl+P, an agent can reach by naming a group and a label, by construction
         // rather than by anybody maintaining a second list. See Editor/Core/Control/ControlDispatch.hpp.
         //
-        // Built on demand — when the palette opens, or when a request arrives — never per frame.
+        // Built on demand — when the palette opens, or when a request arrives — never per frame. THAT
+        // SENTENCE USED TO BE FALSE: DrawCommandPalette rebuilt it on every frame the overlay was up, and
+        // the dictionary walks the scene's entities, the levels on disk and every openable file under the
+        // content root. See DrawCommandPalette for what makes rebuilding on OPEN correct rather than a
+        // snapshot going stale.
         [[nodiscard]] std::vector<PaletteCommand> BuildPaletteCommands();
 
         // Ctrl+P "go to anything": draws the overlay over the dictionary above. No-op unless open.
         void DrawCommandPalette();
+        // The palette asked for BY NAME, from its own dictionary — the only way an unattended run can put
+        // it on screen, since a keystroke is not available here. Deferred rather than opened in the
+        // closure: Draw() closes the palette on the line after it runs an entry, so opening it from inside
+        // itself would work over the socket and do nothing under a person's hand.
+        bool m_OpenPaletteRequested = false;
 
         // ===== Control channel (Editor/Core/Control) =====
         // Drained at the TOP of OnUpdate: accept, read one request, execute it. Everything it can run is
         // a palette entry.
         void ServiceControlChannel();
+        // Executes one request and decides whether its reply leaves now or waits for the frame that proves
+        // it. THE ONLY place a control request is run: there are two ways to arrive at one — read off the
+        // socket, or released by the readiness gate several frames later — and one way to run it.
+        void RunControlRequest( const Control::Request& request );
+        // Drop an in-flight request whose CONNECTION has gone, rather than answering its successor. True
+        // when it did. See the definition: a reply of 311 commands was measured reaching the wrong client.
+        [[nodiscard]] bool AbandonControlRequestIfItsAskerIsGone();
         // Sampled after the deferred queues have drained and BEFORE the scene is rendered — "was anything
         // outstanding while this frame was being made". Judged later, by the gate, at OnFramePresented.
+        // Also called once at the end of OnAttach: an unsampled census must not read as a settled editor.
         void SampleFrameQuiescence();
         // Runs one request against the live editor. Never throws, always answers.
         [[nodiscard]] Control::Response ExecuteControlRequest( const Control::Request& request );
+        // The `set` for the channel's second subject — the editor's own view. See
+        // Editor/Core/ViewportCameraProperties.hpp for why a camera pose is a property write and not a
+        // palette command.
+        [[nodiscard]] Control::Response SetViewportCameraProperty( const Control::Request& request );
+        // The active view IF it is the editor's fly camera; null in Play, where the scene's own
+        // CameraComponent drives. NoEditorCameraReason() is the refusal that goes with the null.
+        [[nodiscard]] ::Desert::Core::EditorCamera* ActiveEditorCamera() const;
+        [[nodiscard]] std::string                   NoEditorCameraReason() const;
+        // THE ONE PLACEMENT: `--camera`/`--look` and the control channel both land here, through the
+        // editor's own view-axis-gizmo and F-focus gestures. Two copies would drift.
+        static void PlaceEditorCamera( ::Desert::Core::EditorCamera& camera, const glm::vec3& position,
+                                       const glm::vec3& forward );
         // Everything ControlState needs, read off this layer in one pass.
         [[nodiscard]] Control::EditorSnapshot TakeEditorSnapshot() const;
         // CAPTURING THE COMPOSITED FRAME, in two halves, because a swapchain image may only be touched
@@ -203,7 +232,7 @@ namespace Desert::Editor
         // ===== Asset documents (one window per asset, opened from the browser) =====
         // Drains Core::SubjectOpenRequests and, per request, focuses the document already open on that subject
         // or builds a new one through m_AssetEditors. Runs from OnUpdate (between frames) because it adds to
-        // m_Documents, and REFUSES past the six renderer slots with the census printed by name — a seventh
+        // m_OpenDocuments, and REFUSES past the six renderer slots with the census printed by name — a seventh
         // consumer would otherwise be handed slot 0 to share, which fails silently and days later.
         void ServiceSubjectOpenRequests();
         // Destroys every document the user asked to close, behind ONE device-idle wait. This is what returns
@@ -538,6 +567,11 @@ namespace Desert::Editor
         std::vector<StartupStage> m_StartupStages;
         size_t                    m_StartupNext           = 0;
         int                       m_StartupFramesRendered = 0;
+        // How long the stages run so far have cost, in milliseconds. Accumulated rather than derived from
+        // a start timestamp: a stage runs one per FRAME, so wall clock between the first and the last also
+        // counts the frames in between, and the number that answers "which stage is spending the boot" is
+        // the sum of the stages themselves.
+        long long                 m_StartupElapsedMs = 0;
         bool                      StartupLoading() const
         {
             return m_StartupNext < m_StartupStages.size();
@@ -563,6 +597,12 @@ namespace Desert::Editor
         // request parked without its reply would have to be re-run to produce one.
         std::optional<Control::Request>  m_ControlInFlight;
         std::optional<Control::Response> m_ControlPendingReply;
+
+        // WHICH CONNECTION asked for it. Not "was somebody connected": the editor notices a disconnect and
+        // accepts the next client in the SAME service call, so a request parked across that gap would have
+        // its reply written to a stranger. Measured — a 311-command answer delivered to the wrong client,
+        // with an id that matched because both had sent 1.
+        uint64_t m_ControlInFlightClient = 0;
 
         // The outstanding work sampled while THIS frame was being built. Not read at the moment the gate
         // judges it: by then the answer has moved on, and the question is about the picture.

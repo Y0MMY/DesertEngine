@@ -126,6 +126,32 @@ namespace Desert::Editor::Control
     };
 
     /**
+     * @brief WHICH OF THE TWO WAITS THE GATE IS SERVING. One gate, two things it can be holding.
+     *
+     * The gate began as one wait — "the command has run; hold its reply until a frame proves it landed" —
+     * and that wait can only ever be armed by an editor that was already up. The channel needed a second
+     * one for the opposite moment: a request that arrived BEFORE the editor had read the project, which
+     * used to be answered anyway, from a state that was half built. Measured: `commands` reports 106 of
+     * this project's 130 openable assets for 3.3 s of every boot, successfully.
+     *
+     * SAME MECHANISM, NOT A SECOND ONE, and that is the whole reason this is an enumerator here rather
+     * than a readiness flag somewhere else. Both waits ask one question — "has a PRESENTED frame been
+     * rendered with nothing outstanding?" — of one census (PendingWork, whose `StartupLoading` entry was
+     * already there and already correct). A separate readiness signal would be a second answer to that
+     * question, and the two would disagree on the frame that mattered.
+     *
+     * The difference is only in what a discharge MEANS, and it is entirely the caller's:
+     *   Readiness -> the request has not run yet; run it now, then arm again for its effect.
+     *   Effect    -> the request has run; release its reply, or take its capture.
+     */
+    enum class GateSubject
+    {
+        Nothing,   ///< the gate is not armed
+        Readiness, ///< a request is parked, unexecuted, until the editor has finished coming up
+        Effect,    ///< a request has executed; its reply waits for the frame that shows it
+    };
+
+    /**
      * @brief The gate itself: armed when a command is executed, discharged by the first frame that
      *        proves the command landed.
      *
@@ -142,20 +168,45 @@ namespace Desert::Editor::Control
         /// device-idle wait, a scene load and a Play/Stop cycle to all finish (four seconds at 60 Hz);
         /// short enough that a wedged editor answers rather than holding the client forever. A refusal
         /// that names what stayed outstanding is a diagnosis; silence is not.
+        ///
+        /// ONE BUDGET SERVES BOTH WAITS, and it is worth saying why the readiness wait does not need a
+        /// bigger one even though it is minutes long in wall clock. THE BUDGET IS IN FRAMES. The staged
+        /// boot runs exactly ONE STAGE PER FRAME, so a boot is as many frames as it has stages — eight in
+        /// this editor, measured, whether those eight frames cost three seconds on an idle machine or five
+        /// minutes on a loaded one. Twenty-four times the headroom, and a wedged editor still answers.
+        /// A budget in seconds would have had to be guessed, and guessed high enough to hide a real hang.
         static constexpr uint32_t kMaxSettleFrames = 240;
 
         /// A command has just run, during the update of frame @p executedOnFrame. The gate now waits for
         /// that frame or a later one to be presented in a settled state.
         void ArmAfterExecution( uint64_t executedOnFrame ) noexcept
         {
-            m_Armed           = true;
+            m_Subject         = GateSubject::Effect;
             m_ExecutedOnFrame = executedOnFrame;
             m_FramesWaited    = 0;
         }
 
+        /// A request arrived on frame @p arrivedOnFrame and has NOT been run: the editor has not finished
+        /// coming up. The gate holds it until a presented frame proves it has.
+        ///
+        /// The frame ordering condition is kept identical to the executed case rather than dropped as
+        /// vacuous, because the two failures it prevents are the same failure: a frame that was already in
+        /// flight when the request arrived says nothing about the request.
+        void ArmForReadiness( uint64_t arrivedOnFrame ) noexcept
+        {
+            m_Subject         = GateSubject::Readiness;
+            m_ExecutedOnFrame = arrivedOnFrame;
+            m_FramesWaited    = 0;
+        }
+
+        [[nodiscard]] GateSubject Holding() const noexcept
+        {
+            return m_Subject;
+        }
+
         [[nodiscard]] bool IsArmed() const noexcept
         {
-            return m_Armed;
+            return m_Subject != GateSubject::Nothing;
         }
 
         [[nodiscard]] uint32_t FramesWaited() const noexcept
@@ -179,7 +230,7 @@ namespace Desert::Editor::Control
         [[nodiscard]] GateVerdict ObserveFramePresented( uint64_t                frame,
                                                          const EditorQuiescence& quiescence ) noexcept
         {
-            if ( !m_Armed )
+            if ( m_Subject == GateSubject::Nothing )
                 return GateVerdict::Idle;
 
             // A frame that STARTED before the command ran cannot show it, whatever its quiescence says.
@@ -193,13 +244,13 @@ namespace Desert::Editor::Control
 
             if ( quiescence.Settled() )
             {
-                m_Armed = false;
+                m_Subject = GateSubject::Nothing;
                 return GateVerdict::Discharged;
             }
 
             if ( m_FramesWaited >= kMaxSettleFrames )
             {
-                m_Armed = false;
+                m_Subject = GateSubject::Nothing;
                 return GateVerdict::TimedOut;
             }
 
@@ -221,22 +272,46 @@ namespace Desert::Editor::Control
          */
         [[nodiscard]] bool WouldDischarge( uint64_t frame, const EditorQuiescence& quiescence ) const noexcept
         {
-            return m_Armed && frame >= m_ExecutedOnFrame && quiescence.Settled();
+            return m_Subject != GateSubject::Nothing && frame >= m_ExecutedOnFrame && quiescence.Settled();
         }
 
         /// Abandon the wait — the connection went away, or the editor is shutting down. Distinct from a
         /// discharge so a caller cannot mistake "nobody is listening" for "the frame proved it".
         void Disarm() noexcept
         {
-            m_Armed        = false;
+            m_Subject      = GateSubject::Nothing;
             m_FramesWaited = 0;
         }
 
     private:
-        bool     m_Armed           = false;
-        uint64_t m_ExecutedOnFrame = 0;
-        uint32_t m_FramesWaited    = 0;
+        GateSubject m_Subject         = GateSubject::Nothing;
+        uint64_t    m_ExecutedOnFrame = 0;
+        uint32_t    m_FramesWaited    = 0;
     };
+
+    /**
+     * @brief The refusal a readiness wait owes its caller when the editor never came up.
+     *
+     * A SEPARATE MESSAGE FROM THE ONE BELOW, and not for tidiness: the two failures are at opposite ends
+     * of the request. This one means the command NEVER RAN, so nothing in the editor changed; the settle
+     * timeout below means it ran and the reply cannot vouch for the picture. A client told the wrong one
+     * either retries something that already happened or gives up on something that never did.
+     *
+     * It names the outstanding work for the same reason, and in the same words `state`'s `quiescence`
+     * section uses — so a client that polled `state` while waiting recognises the phrase in the refusal.
+     */
+    [[nodiscard]] inline std::string DescribeReadinessTimeout( const EditorQuiescence& quiescence,
+                                                               uint32_t                framesWaited )
+    {
+        const std::string outstanding = quiescence.Describe();
+        return "the editor had not finished coming up after " + std::to_string( framesWaited ) +
+               " frames, so this request was NOT run — answering it from a half-built editor would have "
+               "produced a successful reply about a project it has not read yet. Still outstanding: " +
+               ( outstanding.empty() ? std::string( "nothing — which means the gate and the census "
+                                                    "disagree, and that is a defect in the channel itself" )
+                                     : outstanding ) +
+               ". Ask 'state' for the same census at any moment; it answers throughout the boot.";
+    }
 
     /// The refusal a TimedOut verdict owes its caller. Names what never finished, because "the editor did
     /// not settle" alone tells the reader nothing they can act on.

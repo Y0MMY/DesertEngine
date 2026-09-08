@@ -45,11 +45,11 @@ namespace
     void Usage()
     {
         std::fprintf( stderr,
-                      "desertctl --socket <path> [--wait <seconds>] <operation>\n"
+                      "desertctl --socket <path> [--wait <seconds>] [--subject <who>] <operation>\n"
                       "\n"
                       "  commands                      list every command the editor offers right now\n"
                       "  run <group> <label>           run one of them, addressed as the palette shows it\n"
-                      "  properties                    list the focused document's properties and values\n"
+                      "  properties                    list the subject's properties and their values\n"
                       "  set <name> <v1[,v2,v3,v4]>    write one of them (the drag a mouse would do)\n"
                       "  state [section ...]           read the editor's state as JSON (default: all)\n"
                       "  shot-window <file.png>        capture the WHOLE editor, interface included\n"
@@ -59,6 +59,13 @@ namespace
                       "  --wait <seconds>  wait for the socket to appear before connecting; an editor\n"
                       "                    takes a few seconds to boot, and a client that raced it used\n"
                       "                    to look exactly like an editor that never started.\n"
+                      "                    Note that CONNECTING is not READINESS: past that, the editor\n"
+                      "                    holds a request until it has finished coming up, so a single\n"
+                      "                    'commands' or 'run' is already the wait -- no polling loop.\n"
+                      "  --subject <who>   whose properties 'properties' and 'set' are about: 'document'\n"
+                      "                    (the focused one, the default) or 'viewport' -- the editor's\n"
+                      "                    own view, whose Camera.Position and Camera.Direction are how\n"
+                      "                    the camera is placed without a capture flag.\n"
                       "\n"
                       "Exit status: 0 the editor did it, 1 it refused (reason on stderr), 2 unreachable.\n" );
     }
@@ -104,6 +111,16 @@ namespace
             }
         }
         return out;
+    }
+
+    /// `,"subject":"viewport"` — or nothing at all when none was named.
+    ///
+    /// OMITTED RATHER THAN SPELLED "document", so a request this tool sends without --subject is byte for
+    /// byte the request it sent before the field existed. The default lives in ONE place, the editor's
+    /// parser, and a client that spelled it out here would be the second copy of it.
+    std::string SubjectField( const std::string& subject )
+    {
+        return subject.empty() ? std::string{} : R"(,"subject":")" + Escape( subject ) + R"(")";
     }
 
     /// "0.05,0.35,0.95" -> "[0.05,0.35,0.95]", or false having said what was wrong.
@@ -271,6 +288,7 @@ namespace
 int main( int argc, char** argv )
 {
     std::string              socketPath;
+    std::string              subject;
     double                   waitSeconds = 0.0;
     std::vector<std::string> rest;
 
@@ -284,6 +302,13 @@ int main( int argc, char** argv )
         else if ( arg == "--wait" && i + 1 < argc )
         {
             waitSeconds = std::strtod( argv[++i], nullptr );
+        }
+        else if ( arg == "--subject" && i + 1 < argc )
+        {
+            // PASSED THROUGH UNCHECKED, unlike the operation name below. The editor owns the closed set of
+            // subjects and refuses an unknown one by name; a second list here would be the copy that falls
+            // behind the day a third subject is added, and it would refuse a subject the editor supports.
+            subject = argv[++i];
         }
         else if ( arg == "-h" || arg == "--help" )
         {
@@ -324,7 +349,7 @@ int main( int argc, char** argv )
     }
     else if ( operation == "properties" )
     {
-        request = R"({"id":1,"op":"properties"})";
+        request = R"({"id":1,"op":"properties")" + SubjectField( subject ) + "}";
     }
     else if ( operation == "set" )
     {
@@ -338,7 +363,8 @@ int main( int argc, char** argv )
         std::string value;
         if ( !NumberArray( rest[2], value ) )
             return kNoEditor;
-        request = R"({"id":1,"op":"set","property":")" + Escape( rest[1] ) + R"(","value":)" + value + "}";
+        request = R"({"id":1,"op":"set","property":")" + Escape( rest[1] ) + R"(","value":)" + value +
+                  SubjectField( subject ) + "}";
     }
     else if ( operation == "state" )
     {
