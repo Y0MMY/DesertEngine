@@ -26,6 +26,7 @@
 #include <Engine/Text/FontCache.hpp>
 #include <Engine/Vector/IconBake.hpp>
 
+#include <Common/Core/AssetHandle.hpp>
 #include <Common/Core/Constants.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Utilities/VFS.hpp>
@@ -198,6 +199,111 @@ TEST( PackagedContent, BuildContentPakPacksWhatTheScannersFind )
     ASSERT_EQ( assets.size(), 1u );
     EXPECT_EQ( assets[0].filename(), "level.desce" );
     DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( assets[0] ), "scene-body" );
+}
+
+// ── A SCRIPT REFERENCE NAMES ONE FILE, LOOSE AND PACKAGED (I9) ───────────────────────────────────────
+//
+// THE RELATION, and it is a relation rather than a property of either side: the string a scene stores to
+// name its `.lua` must resolve, in the development tree and in a mounted archive, to THE SAME FILE.
+// Asserting only that it resolves in the editor is what let the defect live — that half was always true.
+//
+// WHAT WAS WRONG. Every other reference in a `.desce` is an AssetHandle hashed from `<tag>:<path relative
+// to that root>`, so it survives the packager rebasing content under <package>/Assets/. A script slot was
+// the one kind of content that named ITSELF with the rooted spelling the editor happened to be standing
+// in, and a rooted spelling does not survive the rebase. I8 measured it on a mounted archive: the stored
+// spelling gave Exists=0, the same file through the scripts root gave Exists=1. This is that measurement,
+// turned into a suite, and it carries BOTH halves — the negative control below is the pre-migration
+// spelling, and it must still fail, because a silence proves nothing until the noise is shown.
+//
+// The AssetsRoot is deliberately NOT "Assets", so the packaged root genuinely differs from the dev one
+// and a test that merely echoed the dev layout could not pass.
+TEST( PackagedContent, AScriptReferenceResolvesToTheSameFileLooseAndPackaged )
+{
+    EnvironmentGuard guard;
+
+    const fs::path base = fs::temp_directory_path() / "desert_pkg_script_ref";
+    fs::remove_all( base );
+    const fs::path proj = base / "proj";
+    const fs::path pkg  = base / "pkg";
+
+    const std::string body = "-- MoveAlongX\nProperties = { Speed = 3 }\n";
+    WriteFile( proj / "GameAssets" / "Scripts" / "Examples" / "MoveAlongX.lua", body );
+    WriteFile( proj / "GameAssets" / "Scenes" / "level.desce", "scene-body" );
+    WriteFile( proj / "T.deproj", "{\"Name\":\"T\",\"AssetsRoot\":\"GameAssets\",\"DefaultScene\":\"\"}" );
+
+    SetEnv( "HOME", base.string() );
+    fs::current_path( proj );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( proj / "T.deproj" ).string() ) );
+
+    // ---- the DEV side. The reference is minted exactly the way the Details panel's script picker mints
+    // it: enumerate the census row for scripts, then StableKeyForPath over what the enumeration returned.
+    std::vector<fs::path> found;
+    for ( const auto& p : Common::Utils::FileSystem::ListFilesRecursive( Common::Constants::Path::SCRIPT_PATH ) )
+        if ( p.extension() == ".lua" )
+            found.push_back( p );
+    ASSERT_EQ( found.size(), 1u ) << "the scripts census row does not see the project's own script";
+
+    const std::string stored = Common::AssetHandle::StableKeyForPath( found[0] );
+    EXPECT_EQ( stored, "assets:Scripts/Examples/MoveAlongX.lua" )
+         << "the stored form must be root-tagged and relative, or it cannot survive the rebase";
+
+    const fs::path loosePath = Common::AssetHandle::PathForStableKey( stored );
+    ASSERT_TRUE( Common::Utils::FileSystem::Exists( loosePath ) ) << loosePath.string();
+    DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( loosePath ), body );
+
+    // Key -> path -> identity round-trips under THIS root: resolving the reference and re-deriving an
+    // asset identity from what came back gives the identity the reference itself hashes to.
+    EXPECT_EQ( Common::AssetHandle::FromCookedPath( loosePath ), Common::AssetHandle::FromKey( stored ) );
+
+    // The spelling a v15 scene carried: the file as seen from the editor's working directory. Kept so the
+    // negative control below is the ACTUAL old value and not an invented one.
+    const fs::path preMigrationSpelling = fs::relative( loosePath, proj );
+    ASSERT_FALSE( preMigrationSpelling.empty() );
+    EXPECT_TRUE( Common::Utils::FileSystem::Exists( preMigrationSpelling ) )
+         << "the old spelling resolved in the dev tree - that half was never the defect";
+
+    // ---- the PACKAGED side: a bare directory holding only the archive and the regenerated descriptor.
+    const auto result = Desert::Editor::BuildContentPak();
+    ASSERT_TRUE( result.Success ) << result.Message;
+
+    fs::create_directories( pkg );
+    fs::copy_file( proj / "Content.dpak", pkg / "Content.dpak" );
+    WriteFile( pkg / "Game.deproj", std::string( "{\"Name\":\"T\",\"AssetsRoot\":\"" ) +
+                                         Desert::Editor::kPackagedAssetsRoot + "\",\"DefaultScene\":\"\"}" );
+
+    fs::current_path( pkg );
+    const auto mounted = Common::Utils::VFS::MountPak( pkg / "Content.dpak" );
+    ASSERT_TRUE( mounted.IsSuccess() ) << mounted.GetError();
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( pkg / "Game.deproj" ).string() ) );
+
+    const fs::path packagedPath = Common::AssetHandle::PathForStableKey( stored );
+    ASSERT_TRUE( Common::Utils::FileSystem::Exists( packagedPath ) )
+         << "the stored script reference resolves to nothing in the package: " << packagedPath.string();
+
+    // THE RELATION ITSELF: one reference, two roots, the same file.
+    DESERT_EXPECT_RESULT_EQ( Common::Utils::FileSystem::ReadFileContent( packagedPath ), body );
+
+    // ...and the identity round trip holds under the PACKAGED root too, which is what puts a script on
+    // the same footing as a texture or a mesh.
+    //
+    // NOT `FromCookedPath(loosePath) == FromCookedPath(packagedPath)`, which is what this assertion said
+    // first and which failed for an honest reason worth writing down: a path-derived handle is only
+    // meaningful while the project that path belongs to is OPEN. With the packaged project open, the dev
+    // tree's absolute path lies under no content root at all, so StableKeyForPath hands it back verbatim
+    // and it hashes to something else (measured: 3427774758061914252 vs 2091480530661102989). The
+    // invariant is between the stored KEY and whatever that key resolves to here — never between two
+    // absolute paths from two different roots.
+    EXPECT_EQ( Common::AssetHandle::FromCookedPath( packagedPath ), Common::AssetHandle::FromKey( stored ) );
+
+    // ...and the test is not vacuous: the two resolutions really are different places on disk, so the
+    // equality above is a property of the reference and not of the layout having stayed put.
+    EXPECT_NE( loosePath, packagedPath );
+
+    // ---- the NEGATIVE CONTROL. The pre-migration spelling, unchanged, against the same mounted archive.
+    // It must NOT resolve; if it did, this whole suite would be measuring nothing.
+    EXPECT_FALSE( Common::Utils::FileSystem::Exists( preMigrationSpelling ) )
+         << "the rooted spelling '" << preMigrationSpelling.string()
+         << "' resolved inside the package, so this test cannot tell a fixed reference from a broken one";
 }
 
 // ---- The COOKED-CACHE relation ------------------------------------------------------------------------
