@@ -271,21 +271,27 @@ TEST( PreferenceOwnership, AnUnrelatedSaveChangesNoFieldTheUserDidNotTouch )
     EXPECT_TRUE( Gizmo::PersistentSnap() );
 }
 
-// The same sentence with the OTHER real trigger, and one that is a preference in its own right: the
-// MSAA combo in Scene Settings writes prefs.MSAASamples and saves. It is worth its own case because
-// MSAA is the one value Save() still pushes anywhere (into Graphic::RenderConfig), so if a push were
-// ever going to leak back into a neighbour, this is the action that would do it.
-TEST( PreferenceOwnership, PickingMSAADoesNotDisturbTheSnapStep )
+// The same sentence with another real trigger, and one that is a preference in its own right: the Perf
+// HUD item in the View menu writes prefs.ShowPerfHud and saves.
+//
+// IT USED TO BE THE MSAA COMBO, which was worth its own case because MSAA was the one value Save() still
+// pushed anywhere (into Graphic::RenderConfig) — so if a push were ever going to leak back into a
+// neighbour, that was the action that would do it. К3 moved the field out of this file entirely
+// (Common::Settings::MachineSettings), and with it the last push: Save() now writes the file and touches
+// nothing else at all, which is a strictly stronger version of what this case was defending. The trigger
+// is replaced rather than the case deleted, because what is being asserted is about SAVING, not about
+// MSAA.
+TEST( PreferenceOwnership, TogglingThePerfHudDoesNotDisturbTheSnapStep )
 {
     FreshInstall();
 
     Gizmo::SetTranslateSnap( 500.0f );
     const std::string before = rfl::json::write( EditorPreferences::Get() );
 
-    EditorPreferences::Get().MSAASamples = 4;
+    EditorPreferences::Get().ShowPerfHud = true;
     EditorPreferences::Save();
 
-    const std::vector<std::string> expected = { "MSAASamples" };
+    const std::vector<std::string> expected = { "ShowPerfHud" };
     EXPECT_EQ( FieldsThatDiffer( before, rfl::json::write( EditorPreferences::Get() ) ), expected );
     EXPECT_FLOAT_EQ( Gizmo::TranslateSnap(), 500.0f );
 }
@@ -304,7 +310,6 @@ TEST( PreferenceOwnership, SaveRewritesNothingInTheStructItWrites )
     EditorPreferences::Get().RotateSnapDeg  = 3.0f;
     EditorPreferences::Get().ScaleSnap      = 0.75f;
     EditorPreferences::Get().PersistentSnap = true;
-    EditorPreferences::Get().MSAASamples    = 8;
     EditorPreferences::Get().CameraSpeed    = 4.25f;
     EditorPreferences::Get().ShowPerfHud    = true;
 

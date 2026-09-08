@@ -557,8 +557,9 @@ namespace Desert::Editor
         // Those two entries were added here rather than dropped, so the panel could lose the combos
         // without losing a visualization.
         {
+            // Nothing in this popup is scene data any more. `auto& s = m_Scene->GetSettings()` stood here
+            // for Mesh LOD, "the one Show-popup entry that IS scene data" — К3 showed it was not.
             auto& view = EditorPreferences::Get().DebugView;
-            auto& s    = m_Scene->GetSettings(); // Mesh LOD, the one Show-popup entry that IS scene data
             enum ViewMode
             {
                 VM_Lit,
@@ -674,8 +675,13 @@ namespace Desert::Editor
                     EditorPreferences::Save();
 
                 ImGui::Separator();
-                ImGui::TextDisabled( "Scene" );
-                ImGui::Checkbox( "Mesh LOD (auto)", &s.MeshLOD );
+                // "Scene" is what this heading said until К3, and it was wrong about the one control
+                // under it: distance LOD is what a MACHINE can afford (LOD0 is byte-identical geometry
+                // near the camera), not what the level is. It saves to the machine store on the click,
+                // like the Show flags above save to editor.json.
+                ImGui::TextDisabled( "This machine" );
+                if ( ImGui::Checkbox( "Mesh LOD (auto)", &Common::Settings::MachineSettings::Get().MeshLOD ) )
+                    Common::Settings::MachineSettings::Save();
                 ImGui::PopStyleVar();
                 ImGui::EndPopup();
             }

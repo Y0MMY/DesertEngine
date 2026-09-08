@@ -395,7 +395,6 @@ namespace
     constexpr Row kSceneSettingsRows[] = {
          { "RenderingPath", kSceneRenderer },
          { "EnableSSAO", kSceneRenderer },
-         { "CloudQualityTier", kSceneRenderer },
          { "GlobalIllumination", kSceneRenderer },
          { "GIIntensity", kSceneRenderer },
          { "EnableSSR", kSceneRenderer },
@@ -413,7 +412,6 @@ namespace
          { "AutoExposureSpeed", kSceneRenderer },
          { "AutoExposureMin", kSceneRenderer },
          { "AutoExposureMax", kSceneRenderer },
-         { "AA", kSceneRenderer },
          { "EnableBloom", kSceneRenderer },
          { "BloomThreshold", kSceneRenderer },
          { "BloomIntensity", kSceneRenderer },
@@ -434,14 +432,13 @@ namespace
          { "LensFlareStreakLength", kSceneRenderer },
          { "LensFlareStreakAngle", kSceneRenderer },
          { "LensFlareChromaShift", kSceneRenderer },
-         { "TextureFilterMode", kSceneRenderer },
-         { "Anisotropy", kSceneRenderer },
 
-         // Distance-based mesh LOD. Machine quality rather than level data - it and its four siblings
-         // (AA, TextureFilterMode, Anisotropy, CloudQualityTier) are named as a group in SceneSettings'
-         // own comment, awaiting a decision about who owns quality. Read where every other quality choice
-         // is read.
-         { "MeshLOD", kSceneRenderer },
+         // THE FIVE MACHINE-QUALITY ROWS THAT USED TO SIT HERE ARE GONE WITH THE FIELDS (К3): AA, MeshLOD,
+         // TextureFilterMode, Anisotropy and CloudQualityTier. Every one was a CORRECT row about a field
+         // that should never have been in a level file — the same thing К2's ShowGrid/ShowColliders rows
+         // were, and the same lesson: a consumer census answers "does anything read this?" and cannot
+         // answer "should this be here?". They live in Common::Settings::MachineSettings now, and
+         // Desert/Tests/Engine/ConfigOwnership is the census that asks the second question about them.
 
          // The eight debug rows that used to sit here - ShowGrid, ShowColliders, ShowBoundingBoxes,
          // BoundingBoxColor, BoundingBoxLineWidth, WireframeMode, ShadowDebug, DeferredDebug - are gone

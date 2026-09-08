@@ -119,11 +119,20 @@ namespace Desert::Migration
     //                   the files for a month with nothing reading it.
     inline constexpr int kSceneVersionRetiredKeys = 14;
 
+    //  15             - a scene no longer states what a MACHINE can afford. `AA`, `MeshLOD`,
+    //                   `TextureFilterMode`, `Anisotropy` and `CloudQualityTier` leave the Settings block
+    //                   for Common::Settings::MachineSettings, which the editor reads from
+    //                   `~/.desertengine/machine.json` and a packaged game from the player's own
+    //                   directory. They are five more rows of kRetiredKeys rather than a step of their
+    //                   own - see the note on that table, and on why the retirement pass is the one thing
+    //                   in this file not gated on its own number
+    inline constexpr int kSceneVersionMachineQuality = 15;
+
     // The last step this tool knows and the generation the engine requires are ONE number, and this is
     // where that is checked. If a schema step is ever added here without raising Core::kSceneVersion, the
     // tool would stamp files at a version the loader refuses - every scene in the repository would stop
     // opening at once, and the file that caused it would look correct in isolation.
-    static_assert( kSceneVersionRetiredKeys == kSceneVersion,
+    static_assert( kSceneVersionMachineQuality == kSceneVersion,
                    "the last migration step and the engine's required scene version must be the same "
                    "generation - raise Core::kSceneVersion in Engine/Core/Serialize/SceneFormat.hpp" );
 
@@ -759,9 +768,38 @@ namespace Desert::Migration
          { "Settings", "EnableSSGI",
            "the screen-space GI toggle was replaced by the GlobalIllumination mode on 2026-08-06 "
            "(commit 0b788b1b); nothing has read it since" },
+
+         // K3's five, and they are a different kind of row from the one above: EnableSSGI named a value
+         // nothing read, these name values that are still read and are read SOMEWHERE ELSE. Each says so,
+         // because a person who authored one has to be told where their choice went rather than that it
+         // is gone.
+         //
+         // NOTHING IS CARRIED INTO THE NEW STORE, AND THAT IS A DECISION RATHER THAN AN OMISSION. There
+         // are 51 scenes in this repository and exactly ONE machine.json per host: carrying the values
+         // would mean whichever scene the tool happened to convert last deciding what this machine can
+         // afford, which is a worse answer than any default. The new store's defaults ARE the old C++
+         // defaults digit for digit (Common/Settings/MachineSettings.hpp), so a scene that stated a
+         // default renders exactly the frame it rendered before; one that stated something else is named
+         // in the log with the value it stated, so the operator can set it once, for the machine.
+         { "Settings", "AA",
+           "post-process anti-aliasing is machine quality (K3): it moved to "
+           "Common::Settings::MachineSettings::AA, which the editor reads from "
+           "~/.desertengine/machine.json and a packaged game from the player's own directory" },
+         { "Settings", "MeshLOD",
+           "distance mesh LOD is machine quality (K3) - LOD0 is byte-identical geometry near the camera, "
+           "so off vs on is fidelity and not authoring; it moved to MachineSettings::MeshLOD" },
+         { "Settings", "TextureFilterMode",
+           "the sampler filter is machine quality (K3) - the same picture, sharper or blurrier; it moved "
+           "to MachineSettings::TextureFilterMode" },
+         { "Settings", "Anisotropy",
+           "sampler anisotropy is machine quality (K3), for the same reason as the filter it belongs to; "
+           "it moved to MachineSettings::Anisotropy" },
+         { "Settings", "CloudQualityTier",
+           "the cloud march's occlusion budget is machine quality (K3) - High reproduces the calibrated "
+           "constants to the digit; it moved to MachineSettings::CloudQualityTier" },
     };
 
-    // What MigrateRetiredKeysV13ToV14 removed from one file.
+    // What MigrateRetiredKeys removed from one file.
     struct RetiredKeysMigrationReport
     {
         int KeysRemoved = 0;
@@ -772,23 +810,31 @@ namespace Desert::Migration
         std::vector<std::string> RemovedNames;
     };
 
-    // Raises a scene from schema v13 to v14 by removing every key in kRetiredKeys from the block that
-    // owns it.
+    // Removes every key in kRetiredKeys from the block that owns it.
     //
-    // WHY THIS STEP EXISTS AT ALL, when nothing read these keys. Until K11 the answer was "the next save
-    // deletes them anyway" - the saver enumerated its own registry, so an unknown key evaporated on
-    // contact. That is exactly the defect K11 removed, and removing it made this step necessary: a
-    // preserved key is preserved whether or not we still want it, so wanting rid of one is now a decision
-    // somebody has to write down. Here.
+    // WHY THIS PASS EXISTS AT ALL, when nothing reads these keys any more. Until K11 the answer was "the
+    // next save deletes them anyway" - the saver enumerated its own registry, so an unknown key
+    // evaporated on contact. That is exactly the defect K11 removed, and removing it made this pass
+    // necessary: a preserved key is preserved whether or not we still want it, so wanting rid of one is
+    // now a decision somebody has to write down. Here.
+    //
+    // AND IT IS THE ONE THING IN THIS FILE NOT GATED ON ITS OWN STEP NUMBER, which is deliberate and
+    // narrow. Every other step is `v(n) -> v(n+1)` and MUST be gated on its own constant, or raising the
+    // head would send every file back through migrations that already ran. This one cannot: it is not a
+    // step that happened once, it is the standing consequence of a TABLE that grows, and gating it on
+    // `kSceneVersionRetiredKeys` meant that rows added after 14 would never fire on a corpus already at
+    // 14. So its gate is "not at the head", and that is safe for the reason none of the others is safe
+    // with it: this pass decides nothing from the values, only from the table, so re-running it on a file
+    // it has already cleaned finds nothing to remove and leaves the tree byte-identical.
+    //
+    // A retirement is therefore two edits and one run: a row here, and Core::kSceneVersion moved.
     //
     // PURE - no GPU, no filesystem, no global state.
     //
-    // Idempotent: a scene stating none of the retired keys is left byte-identical and reports zero.
-    //
-    // SHELF LIFE: this raises v13 to v14. The step stays; kRetiredKeys is what empties, one row at a time,
-    // as each row's generation passes out of reach.
-    RetiredKeysMigrationReport MigrateRetiredKeysV13ToV14( std::optional<rfl::Generic>&     settings,
-                                                           std::vector<Assets::EntityData>& entities );
+    // SHELF LIFE: the pass stays; kRetiredKeys is what empties, one row at a time, as each row's
+    // generation passes out of reach.
+    RetiredKeysMigrationReport MigrateRetiredKeys( std::optional<rfl::Generic>&     settings,
+                                                   std::vector<Assets::EntityData>& entities );
 
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport

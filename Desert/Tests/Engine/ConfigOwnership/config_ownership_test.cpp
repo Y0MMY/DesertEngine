@@ -6,8 +6,10 @@
 //
 //   * К2 found ten viewport debug flags living in the LEVEL file, and `ShowColliders: true` had shipped
 //     through git in 55 of 73 scenes that stated it;
-//   * К3 (open) has five image-quality fields living in the level file, so a weak machine cannot turn the
-//     picture down without editing a file that goes to everybody;
+//   * К3 found five image-quality fields living in the level file, so a weak machine could not turn the
+//     picture down without editing a file that goes to everybody. CLOSED: they are in machine.json, and
+//     the sixth of the same kind (MSAASamples, in editor.json, where a shipped game could never read it)
+//     went with them;
 //   * У6, У8 and Д31 are the same shape one layer out — one container holding things with different
 //     owners and different lifetimes.
 //
@@ -26,6 +28,16 @@
 //       Does NOT hold anything a second person opening the project must see, and nothing the shipped
 //       Runtime needs — the packaged game never opens this file.
 //
+//   machine.json                 — ONE HOST'S COPY OF WHAT ITS MACHINE CAN AFFORD.
+//       Holds the quality knobs: MSAA, post AA, mesh LOD, the sampler's filter and anisotropy, the cloud
+//       tier. Same OWNER kind as editor.json — two people may differ at the same moment — but a different
+//       FILE, because the packaged game reads these and never opens editor.json. ONE SCHEMA
+//       (Common::Settings::MachineSettings) served from two places: `~/.desertengine/machine.json` for
+//       the editor, `<user data>/<product>/machine.json` for a shipped game. The place is a PARAMETER of
+//       Load(), not a second type — two schemas obliged to agree is the defect class this project has
+//       paid for repeatedly, and K3 refused to create one on purpose.
+//       Does NOT hold anything about the EDITOR (that is editor.json) and nothing that describes a level.
+//
 //   <Name>.deproj                — WHAT THE PRODUCT IS, FOR EVERYBODY.
 //       Holds the few facts every process that opens this project must agree on before any level
 //       exists: its identity, where its content lives, which level boots, and the format's own version.
@@ -37,7 +49,7 @@
 //       Holds the level's entities and the level-wide policy a designer authors and expects to travel
 //       with the level: the render path, shadows, the grade, the lens, wind, gravity, the splash.
 //       Does NOT hold what a VIEWER is doing on top of the world (К2 took ten such fields out) and does
-//       NOT hold what a MACHINE can afford (К3 owes five).
+//       NOT hold what a MACHINE can afford (К3 took five out, to machine.json).
 //
 // THE DECISION PROCEDURE — three questions, IN THIS ORDER. The order IS the rule.
 //
@@ -73,13 +85,18 @@
 // an on/off, not a fidelity ladder, and there is no cheaper SSAO to fall back to. If К3's machine-level
 // store ever grows a scalability LEVEL, SSAO is the first field to re-examine.
 //
-// A CONSEQUENCE THAT К3 HAS TO PLAN AROUND, recorded here because this is where it will be looked for:
-// answering "editor.json" for a field the SHIPPED GAME also needs is not a valid answer. `editor.json` is
-// an Editor-target concept (Desert::Editor::EditorPreferences); the Runtime never opens it. The five
-// misplaced quality fields are all read by SceneRenderer, which the packaged game runs — so moving them
-// into editor.json would take the quality dial away from the player entirely. Their real home is a
-// per-machine store BOTH hosts read, which does not exist and which is a fourth file. That is an owner's
-// decision, not a cleanup.
+// HOW К3 WAS ANSWERED, recorded here because this is where the question will be asked again. "editor.json"
+// is not a valid home for a field the SHIPPED GAME also needs: it is an Editor-target concept
+// (Desert::Editor::EditorPreferences) and the Runtime never opens it, while all five misplaced quality
+// fields are read by SceneRenderer, which the packaged game runs. Moving them there would have fixed this
+// repository's git history by taking the quality dial away from the player.
+//
+// The owner's decision (2026-09-07) was a per-machine store BOTH hosts read: ONE SCHEMA in Common, and the
+// FILE as a parameter — `~/.desertengine/machine.json` for the editor, the player's own directory for a
+// packaged game. The alternative considered and refused was a separate per-host file with its own struct,
+// i.e. two schemas obliged to agree; that is the shape this project caught five times in one day, and a
+// place is a parameter rather than a second type. This is not a fourth KIND of setting: the kind (one
+// person's own copy) already existed, and what changed is that it stopped being a privilege of the editor.
 //
 // ===================================================================================================
 // HOW THIS SUITE IS BUILT
@@ -88,6 +105,8 @@
 // Each file's field list is enumerated BY THE SAME MECHANISM THAT WRITES THAT FILE, never by a hand-typed
 // list — so a field added tomorrow fails here before anyone has to remember this document exists:
 //
+//   machine.json <- rfl::fields<MachineSettings>(), the same call MachineSettings::Save() writes it with,
+//                   less its own ExtraFields carrier for the reason editor.json's is skipped.
 //   editor.json  <- rfl::fields<EditorPreferences>() and rfl::fields<DebugViewState>(), which is what
 //                   rfl::json::write emits in EditorPreferences::Save() — less the one member that is not
 //                   a key at all, EditorPreferences::UnknownKeys, whose contents ARE keys of the file but
@@ -122,11 +141,13 @@
 #include <Editor/Core/EditorPreferences.hpp>
 
 #include <Common/Project/ProjectFormat.hpp>
+#include <Common/Settings/MachineSettings.hpp>
 
 #include <Engine/Core/SceneSettings.hpp>
 #include <Engine/Core/Serialize/SceneFormat.hpp>
 #include <Engine/Graphic/DebugViewState.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
+#include <Engine/Reflection/ReflectionSerializer.hpp>
 #include <Engine/Reflection/ReflectionTypes.hpp>
 
 #include <rflcpp/rfl/Generic.hpp>
@@ -242,21 +263,13 @@ namespace
          // action taken on THIS installation's imgui.ini.
          { "DockLayoutVersion", Owner::Machine, kEditorLayer },
 
-         // The sibling that proves the rule already works when it is applied: MSAA is the same kind of
-         // cost-versus-quality choice as SceneSettings::AA and it is already here, per machine, while AA
-         // sits in the level file. SceneSettingsPanel draws the two combos side by side and labels them
-         // "(this machine)" and "(scene)". К3 is the task that makes them agree.
-         //
-         // AND К3 HAS TO DECIDE THIS ROW TOO, not just the five in the level file — noted by К6 while
-         // moving the snap rows above, because the row itself stays green and hides it. The kind is right
-         // (a fidelity ladder, per machine) but the FILE is only right for the editor: the value reaches
-         // the renderer as Graphic::RenderConfig::MSAASamples, whose single writer is EditorPreferences,
-         // and the packaged Runtime never opens editor.json. So a shipped game runs MSAA nailed to 1 with
-         // no reader and no dial — which is exactly the consequence this file's header records for the
-         // five К3 owes, arrived at from the other direction. It is not added to the debt register here
-         // because the register's answer is "a per-machine store both hosts read", and that store is an
-         // owner's decision rather than a cleanup.
-         { "MSAASamples", Owner::Machine, kPrefsImpl },
+         // `MSAASamples` USED TO BE A ROW HERE, and К6 left a note on it that К3 acted on: the KIND was
+         // right (a fidelity ladder, per machine) and the FILE was right only for the editor. The value
+         // reached the renderer as Graphic::RenderConfig::MSAASamples, whose single writer was
+         // EditorPreferences, and the packaged Runtime never opens editor.json — so a shipped game ran
+         // MSAA nailed to 1 with no reader and no dial. It is censused under machine.json below, with the
+         // five that came the other way, out of the level file. The row was green the whole time it was
+         // wrong, which is why the note mattered more than the assertion.
 
          // Selection outline: an editor-only viewport visualization (a runtime build has no selection).
          { "OutlineColor", Owner::Machine, kEditorLayer },
@@ -322,6 +335,39 @@ namespace
     };
 
     // ------------------------------------------------------------------------------------------------
+    // machine.json — Common::Settings::MachineSettings
+    //
+    // Every field is Machine, and — as with editor.json — that is not an accident of this table but of the
+    // file: it is per-HOST by construction, written into one person's own directory, so a field of any
+    // other kind here would be a value one machine decides for everybody.
+    //
+    // WHY IT IS A SECOND per-machine FILE RATHER THAN MORE ROWS ABOVE. `editor.json` is opened by the
+    // Editor target and by nothing else; every field below is read by SceneRenderer, which the packaged
+    // game also runs. One kind, two audiences, two files — and one SCHEMA, whose location is a parameter.
+    //
+    // The consumer named is SceneRenderer.cpp for the four the renderer reads per frame; MSAASamples is
+    // read there too, at Init, and is separately spent by the panel that offers it.
+    // ------------------------------------------------------------------------------------------------
+
+    constexpr const char* kSceneRendererImpl = "Desert/Desert/Source/Engine/Graphic/SceneRenderer.cpp";
+
+    constexpr Row kMachineSettingsRows[] = {
+         // Baked into every pipeline at SceneRenderer::Init, so it costs a restart — which is exactly the
+         // property that makes it the machine's and not the level's.
+         { "MSAASamples", Owner::Machine, kSceneRendererImpl },
+
+         // The five К3 took out of the level file. Each passes the mis-authored/rendered-worse test on the
+         // "rendered worse" side: MeshLOD off is byte-identical geometry near the camera, Anisotropy 1 and
+         // Nearest filtering and AA None are the same picture blurrier or harsher, and CloudQuality High
+         // reproduces the calibrated constants to the digit.
+         { "AA", Owner::Machine, kSceneRendererImpl },
+         { "MeshLOD", Owner::Machine, kSceneRendererImpl },
+         { "TextureFilterMode", Owner::Machine, kSceneRendererImpl },
+         { "Anisotropy", Owner::Machine, kSceneRendererImpl },
+         { "CloudQualityTier", Owner::Machine, kSceneRendererImpl },
+    };
+
+    // ------------------------------------------------------------------------------------------------
     // <Name>.deproj — Common::Project::ProjectFile
     //
     // Four Project fields, one FileMeta, and one that is in the wrong file (EngineVersion).
@@ -370,16 +416,15 @@ namespace
     // KIND ONLY. SettingConsumers owns "does anything read this" for every reflected type and answers it
     // for all 51 of these fields; repeating those answers here would be a second statement of one set.
     //
-    // Five rows say Machine, and all five are К3's. The four fields that LOOK like their siblings and are
-    // not — RenderingPath, GlobalIllumination, EnableSSAO, EnableSSR — are Level by the mis-authored /
-    // rendered-worse test at the top of this file.
+    // NOT ONE ROW SAYS MACHINE ANY MORE, and that is К3's deliverable: five did, and they are censused
+    // under machine.json above. The four fields that LOOK like them and are not — RenderingPath,
+    // GlobalIllumination, EnableSSAO, EnableSSR — are Level by the mis-authored / rendered-worse test at
+    // the top of this file, and they stayed.
     // ------------------------------------------------------------------------------------------------
 
     constexpr Row kSceneSettingsRows[] = {
-         { "RenderingPath", Owner::Level },      // two shading models, not two fidelities
-         { "MeshLOD", Owner::Machine },          // К3
-         { "EnableSSAO", Owner::Level },         // the closest call; see the header
-         { "CloudQualityTier", Owner::Machine }, // К3
+         { "RenderingPath", Owner::Level }, // two shading models, not two fidelities
+         { "EnableSSAO", Owner::Level },    // the closest call; see the header
          { "GlobalIllumination", Owner::Level },
          { "GIIntensity", Owner::Level },
          { "EnableSSR", Owner::Level },
@@ -401,8 +446,6 @@ namespace
          { "AutoExposureSpeed", Owner::Level },
          { "AutoExposureMin", Owner::Level },
          { "AutoExposureMax", Owner::Level },
-
-         { "AA", Owner::Machine }, // К3 — and MSAASamples, its own sibling, is already in editor.json
 
          { "EnableBloom", Owner::Level },
          { "BloomThreshold", Owner::Level },
@@ -428,9 +471,6 @@ namespace
          { "LensFlareStreakAngle", Owner::Level },
          { "LensFlareChromaShift", Owner::Level },
 
-         { "TextureFilterMode", Owner::Machine }, // К3
-         { "Anisotropy", Owner::Machine },        // К3
-
          { "Gravity", Owner::Level },
          { "WindDirection", Owner::Level },
          { "WindStrength", Owner::Level },
@@ -447,6 +487,8 @@ namespace
            CENSUS_ROWS( kEditorPrefsRows ) },
          { "~/.desertengine/editor.json (DebugView)", Owner::Machine, "DebugViewState", nullptr, nullptr,
            CENSUS_ROWS( kDebugViewRows ) },
+         { "machine.json", Owner::Machine, "MachineSettings", "MachineSettings", "Get",
+           CENSUS_ROWS( kMachineSettingsRows ) },
          { "<Name>.deproj", Owner::Project, "ProjectFile", "ProjectContext", "Current",
            CENSUS_ROWS( kProjectFileRows ) },
          { "<Name>.desce", Owner::Level, "SceneSerialized", nullptr, nullptr, CENSUS_ROWS( kSceneFileRows ) },
@@ -474,19 +516,18 @@ namespace
     };
 
     constexpr Misplaced kKnownMisplaced[] = {
-         // ---- К3: image quality in the level file -------------------------------------------------
-         // All five are read by SceneRenderer, which the packaged game also runs, so their destination is
-         // NOT editor.json — see the consequence recorded in this file's header. К3 has to pick the store
-         // first; the move is the easy half.
-         { "<Name>.desce (Settings)", "AA", "К3",
-           "post-process anti-aliasing; its own sibling MSAASamples is already per-machine" },
-         { "<Name>.desce (Settings)", "MeshLOD", "К3",
-           "distance LOD; LOD0 is byte-identical geometry, so off vs on is fidelity, not authoring" },
-         { "<Name>.desce (Settings)", "TextureFilterMode", "К3", "sampler filter; the same picture, blurrier" },
-         { "<Name>.desce (Settings)", "Anisotropy", "К3", "sampler anisotropy; the same picture, blurrier" },
-         { "<Name>.desce (Settings)", "CloudQualityTier", "К3",
-           "cloud march budget; High reproduces the calibrated constants to the digit" },
-
+         // THE REGISTER IS EMPTY, and an empty one is the only state this file is finished in. Every row
+         // it has ever held was closed rather than reworded, which is deliberate: a register that keeps a
+         // history is a register nobody reads.
+         //
+         // ---- К3: CLOSED. Five image-quality fields in the level file ------------------------------
+         // AA, MeshLOD, TextureFilterMode, Anisotropy and CloudQualityTier are read by SceneRenderer,
+         // which the packaged game also runs, so their destination was NOT editor.json — see the header.
+         // They are in Common::Settings::MachineSettings, censused above, and scene schema v14 -> v15
+         // strips them from every .desce (Migration::kRetiredKeys). The corpus assertion below is what
+         // makes that provable rather than merely written: with the rows gone, it requires that the FILES
+         // were converted too.
+         //
          // ---- К4: CLOSED by К11, and the row is gone rather than reworded -------------------------
          // It read: ProjectContext::Save() stamps Common::Version::Full() — the commit hash and a
          // `.dirty` suffix — into a git-tracked file, triggered by the Build Settings startup-scene
@@ -581,6 +622,8 @@ namespace
             return SerializedKeysOf<Desert::Editor::EditorPreferences>();
         if ( type == "DebugViewState" )
             return SerializedKeysOf<Desert::Graphic::DebugViewState>();
+        if ( type == "MachineSettings" )
+            return SerializedKeysOf<Common::Settings::MachineSettings>();
         if ( type == "ProjectFile" )
             return SerializedKeysOf<Common::Project::ProjectFile>();
         if ( type == "SceneSerialized" )
@@ -850,10 +893,13 @@ TEST( ConfigOwnership, TheKnownMisplacedFieldsAreExactlyThese )
          << "a field whose kind does not match its file is not in the debt register, or the register names "
             "one that has since been moved. Both are edits somebody has to see.";
 
-    // Five today, all К3. It was six until К11 closed К4 — `.deproj::EngineVersion` stopped being a
-    // machine fact when the engine stopped stamping it, so the row is gone rather than reworded. This
-    // number going UP without a task name is what the next assertion refuses.
-    EXPECT_EQ( registered.size(), 5u );
+    // NONE TODAY. It was six until К11 closed К4 (`.deproj::EngineVersion` stopped being a machine fact
+    // when the engine stopped stamping it) and five until К3 moved the quality group out of the level
+    // file. Zero is not a milestone to be defended — a new violation is allowed to appear here with a
+    // task name — but it does mean that every file in this repository now states only its own kind, and
+    // that is the first time that has been true. This number going UP without a task name is what the
+    // next assertion refuses.
+    EXPECT_EQ( registered.size(), 0u );
 }
 
 // A debt entry with no owner is a note, and a note nobody owns is what this whole subject was made of
@@ -948,24 +994,52 @@ TEST( ConfigOwnership, EveryFieldOfTheUnreflectedFilesNamesAConsumerThatReadsIt 
 // 6. THE CORPUS — the half that proves a migration was RUN and not merely written
 // ---------------------------------------------------------------------------------------------------
 
-// A .desce may state Level keys and its own metadata, and nothing else. Today it also states the five К3
-// owes, which is why they are exempted BY NAME here rather than by loosening the check: when К3 moves
-// them, deleting their register rows makes this assertion require that the files were converted too. That
-// is the same shape SceneDebugFields uses, and it is the only thing that ever makes a migration expire.
+// A .desce may state Level keys and its own metadata, and nothing else. It used to also state the five К3
+// owed, exempted BY NAME through the register rather than by loosening the check — so deleting those rows
+// is what turned this assertion into a requirement that the FILES were converted, which is the only thing
+// that ever makes a migration expire. It fires today over an empty register, which is the state it was
+// built to reach.
+//
+// A key here is forbidden by KIND, not by name, so it also covers a key that no longer exists as a field
+// at all: the loop below asks the .desce census for everything that is not this file's kind, and a Machine
+// row added to it tomorrow reddens every scene that states it without anybody editing this test.
 TEST( ConfigOwnershipCorpus, NoSceneOnDiskStatesASettingOfAnotherFilesKind )
 {
     const std::string root = RepoRoot();
     ASSERT_FALSE( root.empty() );
 
+    // WHAT A .desce MAY NOT STATE, derived from the OTHER censuses rather than from this one — and the
+    // change of direction is К3's, because the old derivation stopped saying anything the moment it
+    // worked. It read the .desce census for rows whose kind was not Level, which was exactly right while
+    // five such rows sat there under a debt exemption; with the rows moved, that set is EMPTY and the
+    // loop below would have swept fifty-one files against nothing and reported green. A container whose
+    // contents come from the same source as the question is §1.4's shape, and it arrived here as the
+    // SUCCESS case of a repair.
+    //
+    // So the set is every key some OTHER file owns: a scene may not state a machine's quality, a user's
+    // outline colour or the project's assets root. It is non-empty by construction — the censuses above
+    // are pinned against their own writers — and a key added to any of them extends this guard for free.
     std::vector<std::string> forbidden;
     for ( const FileCensus& file : kFiles )
     {
-        if ( std::string( file.File ) != "<Name>.desce (Settings)" )
-            continue;
+        const bool isSceneFile =
+             std::string( file.File ) == "<Name>.desce (Settings)" || std::string( file.File ) == "<Name>.desce";
         for ( const Row* r = file.Rows; r != file.Rows + file.Count; ++r )
-            if ( r->Kind != Owner::FileMeta && r->Kind != file.Holds && !IsKnownMisplaced( file.File, r->Field ) )
-                forbidden.push_back( r->Field );
+        {
+            if ( r->Kind == Owner::FileMeta )
+                continue; // a version integer is the file's own and collides with nothing
+            if ( isSceneFile )
+            {
+                // A row still in the scene census that is not Level is a live debt entry; it stays
+                // exempt until the task that owns it converts the files.
+                if ( r->Kind != file.Holds && !IsKnownMisplaced( file.File, r->Field ) )
+                    forbidden.push_back( r->Field );
+                continue;
+            }
+            forbidden.push_back( r->Field );
+        }
     }
+    ASSERT_FALSE( forbidden.empty() ) << "nothing is forbidden, so this sweep proves nothing";
 
     std::vector<std::filesystem::path> scenes;
     std::error_code                    ec;
@@ -993,7 +1067,7 @@ TEST( ConfigOwnershipCorpus, NoSceneOnDiskStatesASettingOfAnotherFilesKind )
         for ( const std::string& key : forbidden )
             EXPECT_FALSE( fields.value().get( key ).has_value() )
                  << path.string() << " states Settings." << key
-                 << ", which is not level data. Run Tools/SceneMigrator over it.";
+                 << ", which another config file owns. Run Tools/SceneMigrator over it.";
     }
 }
 
@@ -1030,6 +1104,84 @@ TEST( ConfigOwnershipCorpus, TheTrackedProjectDescriptorStatesNoMachineSpecificK
                  << ", a per-machine value, in a file git tracks and the whole team shares. See К4.";
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 7. THE RELATION К3 IS ABOUT: TURNING THE MACHINE DOWN WRITES NOTHING INTO A LEVEL
+// ---------------------------------------------------------------------------------------------------
+
+// The whole point of the move, stated as a fact about BYTES rather than about where a field is declared.
+// Before К3 a person on a weak machine who picked Low clouds and 1x anisotropy had, by that act, modified
+// the level file — and pushed it, which is how `ShowColliders: true` reached 55 of 73 scenes before К2.
+//
+// It is deliberately end-to-end and not a fact about types: the quality is set to its cheapest value on
+// every field, the store is SAVED for real, and the corpus is hashed on both sides of that write. A
+// future SceneSerializer that learned to mirror one of these values into the settings block would fail
+// here, and nothing about the declarations would have changed.
+//
+// HOME IS NOT TOUCHED: the store is written to a temp file this test owns, through the path parameter
+// that exists precisely so a caller can say where. That parameter is why this assertion is runnable at
+// all — a store that computed its own location could only be tested against the developer's own config.
+TEST( ConfigOwnershipCorpus, LoweringTheQualityOnThisMachineChangesNoByteOfAnySceneFile )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    std::vector<std::filesystem::path> scenes;
+    std::error_code                    ec;
+    for ( const auto& entry :
+          std::filesystem::recursive_directory_iterator( root + "Editor/Resources/Assets/Scenes", ec ) )
+        if ( entry.is_regular_file() && entry.path().extension() == ".desce" )
+            scenes.push_back( entry.path() );
+    ASSERT_GE( scenes.size(), 40u ) << "the scene corpus was not found";
+
+    std::vector<std::string> before;
+    for ( const auto& path : scenes )
+        before.push_back( ReadAll( path ) );
+
+    const std::filesystem::path store =
+         std::filesystem::temp_directory_path() / "desert_configownership_machine.json";
+    std::filesystem::remove( store, ec );
+    Common::Settings::MachineSettings::Load( store );
+
+    auto& quality             = Common::Settings::MachineSettings::Get();
+    quality.MSAASamples       = 1;
+    quality.AA                = Common::Settings::AntiAliasingMode::None;
+    quality.MeshLOD           = false;
+    quality.TextureFilterMode = Common::Settings::TextureFilter::Nearest;
+    quality.Anisotropy        = 1;
+    quality.CloudQualityTier  = Common::Settings::CloudQuality::Low;
+    ASSERT_TRUE( Common::Settings::MachineSettings::Save() );
+    ASSERT_TRUE( std::filesystem::exists( store ) ) << "the quality was not written anywhere at all";
+
+    for ( std::size_t i = 0; i < scenes.size(); ++i )
+        EXPECT_EQ( ReadAll( scenes[i] ), before[i] )
+             << scenes[i].string() << " changed when the MACHINE's quality did";
+
+    std::filesystem::remove( store, ec );
+}
+
+// The same claim one layer in, through the call the saver actually writes the Settings block with. The
+// test above proves nothing was written; this proves nothing WOULD be — the serialized block is a
+// function of Core::SceneSettings alone, so a mirror added between the two structs shows up here as a
+// difference rather than as a slow desync somebody notices months later.
+TEST( ConfigOwnership, TheSerializedSettingsBlockDoesNotMoveWhenTheMachineQualityDoes )
+{
+    const auto* type = ReflectionRegistry::Get().Find( "SceneSettings" );
+    ASSERT_NE( type, nullptr );
+
+    const Desert::Core::SceneSettings settings;
+    const std::string before = rfl::json::write( Desert::Reflection::SerializeReflected( *type, &settings ) );
+
+    auto& quality             = Common::Settings::MachineSettings::Get();
+    quality.MSAASamples       = 8;
+    quality.AA                = Common::Settings::AntiAliasingMode::SMAA;
+    quality.MeshLOD           = false;
+    quality.TextureFilterMode = Common::Settings::TextureFilter::Nearest;
+    quality.Anisotropy        = 16;
+    quality.CloudQualityTier  = Common::Settings::CloudQuality::Low;
+
+    EXPECT_EQ( rfl::json::write( Desert::Reflection::SerializeReflected( *type, &settings ) ), before );
 }
 
 int main( int argc, char** argv )

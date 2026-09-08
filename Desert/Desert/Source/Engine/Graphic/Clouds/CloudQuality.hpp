@@ -1,7 +1,8 @@
 #pragma once
 
-#include <Engine/Core/SceneSettings.hpp>
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
+
+#include <Common/Settings/MachineSettings.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -121,12 +122,12 @@ namespace Desert::Graphic
      * scene whose tier failed to deserialize renders correctly and slowly, which is the failure a person
      * notices and reports rather than one they ship.
      */
-    inline CloudQualityScale CloudQualityFor( Core::CloudQuality tier )
+    inline CloudQualityScale CloudQualityFor( Common::Settings::CloudQuality tier )
     {
         CloudQualityScale scale;
         switch ( tier )
         {
-            case Core::CloudQuality::Low:
+            case Common::Settings::CloudQuality::Low:
                 // Sixteen is where the shadow ray's price list stops being worth paying rather than an
                 // arbitrary halving: it is 3.73 ms below the default here, and the frame it produces is
                 // 34% hot in the sunward highlights against the converged answer — a difference a person
@@ -138,13 +139,13 @@ namespace Desert::Graphic
                 scale.StopTransmittanceFloor = 0.05f;
                 break;
 
-            case Core::CloudQuality::Medium:
+            case Common::Settings::CloudQuality::Medium:
                 scale.LightMarchSampleCeiling = ECS::kCloudLightMarchMaxSamples;
                 scale.ShadowMapScale          = 0.5f;
                 scale.StopTransmittanceFloor  = 0.0f;
                 break;
 
-            case Core::CloudQuality::High:
+            case Common::Settings::CloudQuality::High:
             default:
                 scale.LightMarchSampleCeiling = ECS::kCloudLightMarchMaxSamples;
                 scale.ShadowMapScale          = 1.0f;

@@ -1034,7 +1034,8 @@ namespace Desert::Graphic::System
     }
 
     void VolumetricCloudRenderer::SetCloudSettings( bool present, const ECS::VolumetricCloudData& data,
-                                                    const glm::vec3& windOffset, Core::CloudQuality quality,
+                                                    const glm::vec3&                      windOffset,
+                                                    Common::Settings::CloudQuality        quality,
                                                     const std::vector<HeroCloudInstance>& heroClouds )
     {
         m_Present    = present;

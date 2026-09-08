@@ -70,7 +70,10 @@ namespace Desert::Editor
         // and said the wrong thing — a thumbnail scene had to know about an editor aid to opt out of it.
         auto& settings       = m_Scene->GetSettings();
         settings.EnableBloom = false;
-        settings.AA          = ::Desert::Core::AntiAliasingMode::FXAA;
+
+        // `settings.AA = FXAA` used to stand here and said NOTHING: FXAA is the default, so the line
+        // restated it. The mode is machine quality now (К3) and this renderer is simply never pushed to,
+        // which leaves it at the schema defaults — the same silence the debug overlays already rely on.
 
         // Selection outline is an editor-preference now (no longer a scene setting); force it off on this
         // preview renderer so it never bleeds into a thumbnail (the main editor loop pushes it every frame,

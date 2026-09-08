@@ -8,25 +8,11 @@
 
 namespace Desert::Core
 {
-    // Anti-aliasing technique. Deliberately no MSAA (incompatible with the planned deferred pipeline);
-    // these are all post-process. TAA/DLSS are intentionally absent until motion-vector + jitter
-    // infrastructure exists (built alongside deferred).
-    enum class AntiAliasingMode : int
-    {
-        None = 0,
-        FXAA,
-        SMAA,
-    };
-
-    // Global texture sampler filter (applies to all sampled images; live — recreates samplers on change).
-    // Must match Graphic::TextureFilterMode.
-    enum class TextureFilter : int
-    {
-        Nearest     = 0,
-        Bilinear    = 1,
-        Trilinear   = 2,
-        Anisotropic = 3,
-    };
+    // THREE ENUMS LEFT THIS HEADER WITH THE FIELDS THAT USED THEM (К3): AntiAliasingMode, TextureFilter
+    // and CloudQuality now live in Common/Settings/MachineSettings.hpp, because what they name is what a
+    // MACHINE can afford and the packaged game has to be able to say it too. The texture-filter enum
+    // additionally existed TWICE — here and in RenderConfig — under a "Must match" comment with nothing
+    // asserting the match; both spellings are gone and Common::Settings::TextureFilter is the only one.
 
     // Rendering path. Forward = the classic one-pass lit shading. Deferred = a G-buffer pass + a
     // screen-space lighting pass, which scales to many dynamic lights (city lamps/windows) and unlocks
@@ -75,51 +61,6 @@ namespace Desert::Core
         Off         = 0,
         ScreenSpace = 1,
         RSM         = 2,
-    };
-
-    // How much the volumetric cloud layer is allowed to spend on OCCLUSION — the shadow ray each lit
-    // sample traces toward the sun, and the map the layer casts onto the world under it. Those two are
-    // the tier's whole content, and the reason is measured rather than chosen: every other cost in the
-    // subsystem is pinned by a relation that a cheaper setting breaks. See Graphic::CloudQualityScale for
-    // what each tier changes, and Docs/Clouds/CALIBRATION.md section QT for what each one costs, what it
-    // degrades in the picture, and which candidate knobs were measured and refused.
-    //
-    // THE LADDER CHANGES ONE THING PER STEP, which is what makes a tier readable rather than a mood:
-    //
-    //  High   — the reference. Everything at the value the calibration converged on.
-    //  Medium — the cloud shadow map at HALF its linear footprint. The SKY IS UNCHANGED (the deferred
-    //           pass discards texels with no geometry, so the map is a ground-only quantity); what is
-    //           lost is cloud shadow on world geometry beyond ~15 km of the camera.
-    //  Low    — the above, plus the shadow ray capped at 16 samples. That one is visible in the sky:
-    //           the sunward highlights run about a third brighter than the converged answer, because a
-    //           coarse shadow ray under-reports how much cloud stands between a sample and the sun.
-    //
-    // AND WHY THERE IS NO SCENE MIGRATION FOR IT, which is a deliberate answer and not an omission. The
-    // default is High, and High reproduces the shipped constants to the digit
-    // (Desert/Tests/Engine/CloudShadow asserts exactly that), so a scene saved before this field existed
-    // has no key, deserializes to High, and renders the frame it always rendered. Compare
-    // SceneSettings::Tonemapper, which DID need one: there the new default meant something different from
-    // what old scenes were authored against, so the old value had to be written down. Here the absent key
-    // and the correct value are the same thing, and a migration would be ceremony over a no-op.
-    //
-    // WHY IT IS A SCENE PROPERTY. It is not, ideally — a quality tier is a property of the MACHINE, and
-    // the right home for it is a user-level scalability store this engine does not have. It lives here
-    // because every sibling cost-versus-quality choice already does (RenderingPath, GlobalIllumination,
-    // EnableSSAO, EnableSSR, AA, Anisotropy), and adding a second settings system for the ninth such knob
-    // is the duplication §2.1 of the contract forbids. When a machine-level store arrives, this field is
-    // one of nine that move into it together, not one that has to be un-invented first.
-    //
-    // К2 RE-EXAMINED THIS AND LEFT IT STANDING, deliberately. That task moved the DEBUG fields out of this
-    // struct, and the obvious next question was whether the quality group should follow. It should not, not
-    // yet: "out of the level file" was never in doubt for a debug overlay, whereas quality has three
-    // candidate owners (the scene, the project, the machine) and picking one is a decision, not a cleanup.
-    // The five are named together in SceneSettings' own header comment so the group is visible while it
-    // waits, instead of being rediscovered a field at a time.
-    enum class CloudQuality : int
-    {
-        Low    = 0,
-        Medium = 1,
-        High   = 2,
     };
 
     // The curve that maps HDR scene luminance onto the 0..1 the display can show. Not a compatibility
@@ -172,48 +113,32 @@ namespace Desert::Core
         // Desert/Tests/Engine/ConfigOwnership — which enumerates this struct through the reflection registry,
         // i.e. through the same table SceneSerializer writes the block with.
         //
-        // WHAT IS STILL HERE THAT ARGUABLY SHOULD NOT BE — named rather than moved, because moving it needs
-        // a decision this struct cannot make. Five fields describe what a MACHINE can afford rather than
-        // what the level is: AA, TextureFilterMode, Anisotropy, MeshLOD and CloudQualityTier. A weak
-        // machine cannot turn any of them down without editing a file that goes to the repository. They are
-        // registered as debt against К3 in the census above, and К3 has ONE decision to make before it can
-        // move anything: the destination is NOT editor.json. All five are read by SceneRenderer, which the
-        // packaged game runs, and editor.json is an Editor-target file the Runtime never opens — so putting
-        // them there would take the quality dial away from the player. The home they need is a per-machine
-        // store BOTH hosts read, which does not exist.
+        // THE FIVE MACHINE-QUALITY FIELDS ARE GONE (К3), and this is where the note naming them used to
+        // stand. AA, MeshLOD, TextureFilterMode, Anisotropy and CloudQualityTier described what a MACHINE
+        // can afford, so a weak machine could not turn the picture down without editing a file that goes
+        // to everybody: they are in Common::Settings::MachineSettings now, one schema read by BOTH hosts
+        // from two places (`~/.desertengine/machine.json` for the editor, the game's own user directory
+        // for a packaged build). editor.json was NOT a valid destination — all five are read by
+        // SceneRenderer, which the packaged game runs, and the Runtime never opens that file — which is
+        // why the answer had to be a store rather than a move. Scene schema v14 -> v15 strips them from
+        // every file (Tools/SceneMigrator, Migration::kRetiredKeys).
         //
-        // AND THE FOUR THAT LOOK LIKE THEM AND ARE NOT. CloudQuality's comment below counts NINE
-        // cost-versus-quality siblings; only these five are misplaced. RenderingPath, GlobalIllumination,
-        // EnableSSAO and EnableSSR each change the authored LOOK rather than degrading it — the test К1
-        // wrote down is "set to its cheapest value, has the level been MIS-AUTHORED, or merely RENDERED
-        // WORSE?". Forward and Deferred disagree about cloud shadow on the ground; GI Off is a darker room,
-        // not a coarser one. EnableSSAO is the closest call and is deliberately called level data out loud:
-        // it is an on/off, not a fidelity ladder, and it is the first field to re-examine if the machine
-        // store К3 needs ever grows a scalability LEVEL.
+        // AND THE FOUR THAT LOOK LIKE THEM AND ARE NOT — these stay, deliberately. RenderingPath,
+        // GlobalIllumination, EnableSSAO and EnableSSR each change the authored LOOK rather than degrading
+        // it, by К1's test: "set to its cheapest value, has the level been MIS-AUTHORED, or merely
+        // RENDERED WORSE?". Forward and Deferred disagree about cloud shadow on the ground; GI Off is a
+        // darker room, not a coarser one. EnableSSAO is the closest call and is called level data out
+        // loud: it is an on/off, not a fidelity ladder, and it is the first field to re-examine if
+        // MachineSettings ever grows a scalability LEVEL.
 
         // Rendering path. Default is Deferred — see the enum's own comment for what that costs.
         PROPERTY( DisplayName( "Render Path" ), Category( "Rendering" ) )
         RenderPath RenderingPath = RenderPath::Deferred;
 
-        // Distance-based mesh level of detail. LOD0 (near) is byte-identical geometry, so this only changes
-        // what is drawn far from the camera. MACHINE QUALITY, not level data — see the note at the top of
-        // this struct; it sits under Rendering with its four siblings rather than in a "Debug" category of
-        // its own, which is where it used to be and which said the wrong thing about it.
-        PROPERTY( DisplayName( "Mesh LOD (auto)" ), Category( "Rendering" ),
-                  Tooltip( "Distance-based mesh level of detail. LOD0 (near) is identical geometry." ) )
-        bool MeshLOD = true;
-
         // Deferred screen-space effects (Deferred path only). Both cost a full-screen multi-sample pass —
         // turn off for maximum FPS.
         PROPERTY( DisplayName( "Enable SSAO" ), Category( "Rendering" ) )
         bool EnableSSAO = true;
-
-        // The volumetric cloud layer's cost ceiling. HIGH is the calibrated reference and is what every
-        // number in Docs/Clouds/CALIBRATION.md was measured at; the two cheaper tiers each name exactly
-        // one thing they give up. Measured on this machine, Clouds_Demo at 1280x766, debug:
-        // 17.80 / 14.06 / 10.34 ms of frame time.
-        PROPERTY( DisplayName( "Cloud Quality" ), Category( "Rendering" ) )
-        CloudQuality CloudQualityTier = CloudQuality::High;
 
         PROPERTY( DisplayName( "Global Illumination" ), Category( "Rendering" ) )
         GIMode GlobalIllumination = GIMode::ScreenSpace;
@@ -281,8 +206,9 @@ namespace Desert::Core
         float AutoExposureMin    = 0.02f; // luminance clamp
         PROPERTY( DisplayName( "Auto Exposure Max" ), Category( "Post Processing" ), Range( 0.0f, 20.0f ) )
         float AutoExposureMax    = 8.0f;
-        PROPERTY( DisplayName( "Anti-Aliasing" ), Category( "Post Processing" ) )
-        AntiAliasingMode AA  = AntiAliasingMode::FXAA;
+        // "Anti-Aliasing" used to sit here (AA). It is machine quality — see the note at the top of this
+        // struct — and lives in Common::Settings::MachineSettings beside MSAASamples, which is the other
+        // half of the same question and was already per-machine.
         PROPERTY( DisplayName( "Enable Bloom" ), Category( "Post Processing" ) )
         bool  EnableBloom    = false; // off by default -> no glow out of the box
         PROPERTY( DisplayName( "Bloom Threshold" ), Category( "Post Processing" ), Range( 0.0f, 10.0f ) )
@@ -359,11 +285,9 @@ namespace Desert::Core
         PROPERTY( DisplayName( "Chromatic Shift" ), Category( "Lens Flare" ), Range( 0.0f, 1.0f ) )
         float LensFlareChromaShift = 0.15f;
 
-        // Textures
-        PROPERTY( DisplayName( "Texture Filter" ), Category( "Textures" ) )
-        TextureFilter TextureFilterMode = TextureFilter::Trilinear;
-        PROPERTY( DisplayName( "Anisotropy" ), Category( "Textures" ), Range( 1.0f, 16.0f ) )
-        int           Anisotropy        = 8; // 1/2/4/8/16x — used only in Anisotropic filter mode
+        // The "Textures" category used to be here: TextureFilterMode and Anisotropy, the sampler's filter
+        // and its anisotropy. Both are the same picture, blurrier — machine quality, not level data — and
+        // they are in Common::Settings::MachineSettings with their three siblings.
 
         // The "Debug" category used to be here: ten fields naming what the viewport was drawing on top of
         // the world. It is gone, not renamed and not hidden — see the note at the top of this struct and

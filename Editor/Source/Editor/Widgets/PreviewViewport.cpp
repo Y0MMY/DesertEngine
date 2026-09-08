@@ -220,10 +220,19 @@ namespace Desert::Editor
         // (Graphic::DebugViewState), default to off, and only the main editor loop pushes a user's flags
         // into one. Two tasks met in this block — one turned the shadows on, the other took the overlay
         // out — and both belong: the preview owns its lighting budget, and it no longer owns the overlay.
-        auto& settings            = m_Scene->GetSettings();
-        settings.EnableBloom      = false;
-        settings.AA               = ::Desert::Core::AntiAliasingMode::FXAA;
-        settings.CloudQualityTier = ::Desert::Core::CloudQuality::Low;
+        auto& settings       = m_Scene->GetSettings();
+        settings.EnableBloom = false;
+
+        // THE QUALITY THIS PANE RENDERS AT, applied to a COPY of the machine's answer and pushed into
+        // this renderer alone (К3). Two of the three lines that used to stand here wrote SceneSettings:
+        // `AA = FXAA`, which merely restated the default and said nothing, and `CloudQualityTier = Low`,
+        // which was a real override of a value that has since stopped being scene data. A preview pane is
+        // 512 pixels marching at quarter resolution and has no use for the viewport's sample ceiling, so
+        // the tier still drops — but the user's stored answer is never touched, which is К10's rule: a
+        // view's transient idea of what it needs must not become the user's permanent one.
+        Common::Settings::MachineSettings quality = Common::Settings::MachineSettings::Get();
+        quality.CloudQualityTier                  = Common::Settings::CloudQuality::Low;
+        m_Renderer->SetQuality( quality );
 
         // The selection outline is pushed by the editor loop every frame; this renderer is never fed by it,
         // so disable it explicitly or a stale outline could bleed into the preview.

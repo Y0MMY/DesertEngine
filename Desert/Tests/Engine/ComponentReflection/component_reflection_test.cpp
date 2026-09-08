@@ -1390,21 +1390,21 @@ TEST( ReflectionMetadata, EveryEditConditionNamesABoolOfItsOwnBlock )
 namespace
 {
     // Every enumerator, listed once. A tier missing from here is a tier nothing checks.
-    constexpr Desert::Core::CloudQuality kAllQualityTiers[] = {
-         Desert::Core::CloudQuality::Low,
-         Desert::Core::CloudQuality::Medium,
-         Desert::Core::CloudQuality::High,
+    constexpr Common::Settings::CloudQuality kAllQualityTiers[] = {
+         Common::Settings::CloudQuality::Low,
+         Common::Settings::CloudQuality::Medium,
+         Common::Settings::CloudQuality::High,
     };
 
-    const char* QualityTierName( Desert::Core::CloudQuality tier )
+    const char* QualityTierName( Common::Settings::CloudQuality tier )
     {
         switch ( tier )
         {
-            case Desert::Core::CloudQuality::Low:
+            case Common::Settings::CloudQuality::Low:
                 return "Low";
-            case Desert::Core::CloudQuality::Medium:
+            case Common::Settings::CloudQuality::Medium:
                 return "Medium";
-            case Desert::Core::CloudQuality::High:
+            case Common::Settings::CloudQuality::High:
                 return "High";
         }
         return "?";
@@ -1441,7 +1441,7 @@ TEST( CloudQualityTier, TheTierCapsTheShadowRayAndLeavesTheMarchAlone )
     shape.DensityFactor    = 1.0f;
     shape.ExtinctionFactor = 1.0f;
 
-    for ( const Desert::Core::CloudQuality tier : kAllQualityTiers )
+    for ( const Common::Settings::CloudQuality tier : kAllQualityTiers )
     {
         const Desert::Graphic::CloudQualityScale scale = Desert::Graphic::CloudQualityFor( tier );
         const Desert::Graphic::CloudGpuPayload   payload = Desert::Graphic::PackCloudParams(
@@ -1476,7 +1476,7 @@ TEST( CloudQualityTier, TheTierCapsTheShadowRayAndLeavesTheMarchAlone )
     // side.
     data.LightMarchSamples = 8;
     data.StopTransmittance = 0.2f;
-    for ( const Desert::Core::CloudQuality tier : kAllQualityTiers )
+    for ( const Common::Settings::CloudQuality tier : kAllQualityTiers )
     {
         const Desert::Graphic::CloudQualityScale scale = Desert::Graphic::CloudQualityFor( tier );
         const Desert::Graphic::CloudGpuPayload   payload = Desert::Graphic::PackCloudParams(

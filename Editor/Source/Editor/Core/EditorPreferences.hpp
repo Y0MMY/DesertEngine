@@ -25,9 +25,9 @@ namespace Desert::Editor
     // THIS STRUCT IS THE LIVE STATE, not a copy of it that something else has to be given. Everything
     // that consumes a preference reads it from here every time it needs it — the gizmo snap through
     // Core::GizmoState, the Details stars through the two helpers below, the Show flags straight off
-    // DebugView. Exactly ONE value is pushed anywhere, RenderConfig::MSAASamples, because the layer that
-    // reads it may not know the editor exists; see EditorPreferences.cpp for why that one is safe and
-    // the four snap values were not.
+    // DebugView. NOTHING AT ALL IS PUSHED ANYWHERE from here any more: the one value that was
+    // (RenderConfig::MSAASamples) belonged to the MACHINE rather than to the editor, and К3 moved it and
+    // its four siblings into Common::Settings::MachineSettings, which both hosts read.
     //
     // WHAT BELONGS IN THIS FILE, in one sentence (К1): ONE PERSON'S COPY OF THE EDITOR — what a user's own
     // installation must remember between sessions and across every project, and whose value two people on
@@ -71,9 +71,14 @@ namespace Desert::Editor
         // which changes every window's ImGui ID). A stored value below the current forces ONE automatic
         // "reset to default layout" so panels re-dock cleanly instead of scattering against a stale imgui.ini.
         int DockLayoutVersion = 0;
-        // MSAA for the scene viewport (1 = off, 2/4/8). Applied at STARTUP (pipelines bake their
-        // sample count): Load() pushes it into RenderConfig before the SceneRenderer initializes.
-        int MSAASamples = 1;
+
+        // `MSAASamples` USED TO BE HERE and К3 moved it, not because the KIND was wrong — a fidelity
+        // ladder is per machine — but because the FILE was. It reached the renderer through
+        // Graphic::RenderConfig, whose only writer was this struct, and the packaged Runtime never opens
+        // this file: a shipped game therefore ran MSAA nailed to 1 with no reader and no dial. It is in
+        // Common::Settings::MachineSettings now, beside the post-AA mode it is half a question with. Its
+        // key is dropped from existing files by MigrateLoaded()'s retired list — without that, UnknownKeys
+        // below would preserve it in every user's editor.json for ever.
 
         // Selection outline (Jump Flood) — an editor-only viewport visualization, not a scene property.
         // Pushed to the renderer each frame via SceneRenderer::SetOutlineSettings. Width/smoothness in px.
@@ -226,9 +231,9 @@ namespace Desert::Editor
         // the edit finishes (ImGui::IsItemDeactivatedAfterEdit for a slider or a drag, the click for a
         // checkbox or a menu item) — never on every frame of a drag, which would be sixty writes a second.
         //
-        // IT CHANGES NO SETTING. Two things besides the file are touched and neither is one:
-        // RenderConfig::MSAASamples, a one-way derived copy this file is the sole writer of; and
-        // UnknownKeys, which is re-read from disk immediately before the write. Anything else here would
+        // IT CHANGES NO SETTING, and since К3 it touches nothing outside the file except UnknownKeys,
+        // which is re-read from disk immediately before the write. The one derived push that used to
+        // share this function (RenderConfig::MSAASamples) went with the field. Anything else here would
         // be a save that edits state the user did not touch in the action that triggered it — what К6
         // removed.
         //

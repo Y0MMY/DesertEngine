@@ -1,7 +1,8 @@
 #include "SceneSettingsPanel.hpp"
 
-#include <Editor/Core/EditorPreferences.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
+
+#include <Common/Settings/MachineSettings.hpp>
 
 #include <Engine/Core/Scene.hpp>
 #include <Engine/Core/SceneSettings.hpp>
@@ -38,57 +39,59 @@ namespace Desert::Editor
 
         if ( Utils::ImGuiUtilities::SectionHeader( "Anti-Aliasing" ) )
         {
-            // TWO CONTROLS, TWO OWNERS, AND NEITHER WRITES THE OTHER'S VALUE.
+            // TWO CONTROLS OVER ONE OWNER, AND THAT IS WHAT К3 CHANGED HERE.
             //
-            // This used to be ONE combo with four entries — None / FXAA / SMAA / MSAA — over two pieces of
-            // state with different owners and different lifetimes: SceneSettings::AA travels with the
-            // level, EditorPreferences::MSAASamples is this machine's and is baked into the pipelines at
-            // startup. Picking MSAA wrote BOTH (`s.AA = None` and `prefs.MSAASamples = 4`), and picking
-            // FXAA while MSAA was on wrote both again. DEV_CONTRACT §4.2 forbids exactly that: one user
-            // action, one value, two places to store it and no way to tell which the file meant.
+            // This started as ONE combo with four entries — None / FXAA / SMAA / MSAA — over two pieces of
+            // state with different owners: SceneSettings::AA travelled with the level, MSAASamples was
+            // this machine's. Picking MSAA wrote BOTH (`s.AA = None` and `prefs.MSAASamples = 4`), which
+            // §4.2 forbids: one user action, one value, two places to store it. К2 split it into two
+            // controls labelled "(scene)" and "(this machine)", which stopped the cross-write and left the
+            // real problem standing — half of one question stored in a file that travels to everybody, so
+            // a machine that could not afford SMAA had to commit a change to fix it.
             //
-            // So they are two controls, each labelled with who owns it. They are not alternatives either,
-            // whatever the old combo implied: MSAA resolves geometry edges inside the pipeline and the post
-            // AA filters the resolved image, so both can be on and the picture is simply softer. Saying so
-            // in one line is cheaper than a cross-write that lies about the ownership.
-            auto&     prefs   = EditorPreferences::Get();
+            // Both halves are the machine's now, in one file that BOTH the editor and the packaged game
+            // read. They are still two controls because they are still two things: MSAA resolves geometry
+            // edges inside the pipeline and post AA filters the resolved image, so both can be on.
+            auto&     quality = Common::Settings::MachineSettings::Get();
             const int maxMsaa = Graphic::RenderConfig::MaxMSAASamples.load();
 
             const char* modes[] = { "None", "FXAA", "SMAA" };
-            int         current = static_cast<int>( s.AA );
-            if ( ImGui::Combo( "Post AA (scene)", &current, modes, IM_ARRAYSIZE( modes ) ) )
-                s.AA = static_cast<Core::AntiAliasingMode>( current );
+            int         current = static_cast<int>( quality.AA );
+            if ( ImGui::Combo( "Post AA (this machine)", &current, modes, IM_ARRAYSIZE( modes ) ) )
+            {
+                quality.AA = static_cast<Common::Settings::AntiAliasingMode>( current );
+                Common::Settings::MachineSettings::Save();
+            }
             Utils::ImGuiUtilities::Tooltip(
-                 "A post-process pass on the finished image. Saved IN THE SCENE and travels with it; "
-                 "applies immediately. TAA/DLSS need motion vectors (deferred)." );
+                 "A post-process pass on the finished image; applies immediately. Belongs to this "
+                 "machine, not to the scene — TAA/DLSS need motion vectors (deferred)." );
 
             const char* msaaLevels[] = { "Off", "2x", "4x", "8x" };
             const int   msaaValues[] = { 1, 2, 4, 8 };
             int         msaaIdx      = 0;
             for ( int v = 0; v < IM_ARRAYSIZE( msaaValues ); ++v )
-                if ( msaaValues[v] == prefs.MSAASamples )
+                if ( msaaValues[v] == quality.MSAASamples )
                     msaaIdx = v;
             if ( ImGui::Combo( "MSAA (this machine)", &msaaIdx, msaaLevels, IM_ARRAYSIZE( msaaLevels ) ) )
             {
-                prefs.MSAASamples = std::min( msaaValues[msaaIdx], maxMsaa );
-                EditorPreferences::Save();
+                quality.MSAASamples = std::min( msaaValues[msaaIdx], maxMsaa );
+                Common::Settings::MachineSettings::Save();
             }
             Utils::ImGuiUtilities::Tooltip(
-                 "Hardware multisampling. A USER setting (editor.json), NOT part of the scene: the "
-                 "pipelines bake their sample count at startup, so it costs a restart and belongs to the "
-                 "machine that pays for it." );
+                 "Hardware multisampling. The pipelines bake their sample count at startup, so it costs a "
+                 "restart and belongs to the machine that pays for it." );
             ImGui::TextDisabled( "Device max: %dx. Both may be on — MSAA resolves edges, post AA filters\n"
                                  "the resolved image.",
                                  maxMsaa );
 
             // MSAA bakes into the pipelines at startup — flag any pending change loudly.
             const int active = Graphic::RenderConfig::MSAASamplesActive.load();
-            if ( prefs.MSAASamples != active )
+            if ( quality.MSAASamples != active )
                 ImGui::TextColored( ImVec4( 1.0f, 0.75f, 0.2f, 1.0f ),
                                     "Restart the editor to apply MSAA (now: %s, selected: %s).",
                                     active > 1 ? std::format( "{}x", active ).c_str() : "off",
-                                    prefs.MSAASamples > 1 ? std::format( "{}x", prefs.MSAASamples ).c_str()
-                                                          : "off" );
+                                    quality.MSAASamples > 1 ? std::format( "{}x", quality.MSAASamples ).c_str()
+                                                            : "off" );
         }
 
         if ( Utils::ImGuiUtilities::SectionHeader( "Post-Processing" ) )
@@ -97,7 +100,7 @@ namespace Desert::Editor
             // exists only for Reinhard.
             const char* tonemappers[] = { "ACES (filmic)", "Reinhard (extended)" };
             int         tonemapper    = static_cast<int>( s.Tonemapper );
-            if ( ImGui::Combo( "Tonemapper", &tonemapper, tonemappers, IM_ARRAYSIZE( tonemappers ) ) )
+            if ( ImGui::Combo( "Tonemapper (scene)", &tonemapper, tonemappers, IM_ARRAYSIZE( tonemappers ) ) )
                 s.Tonemapper = static_cast<Core::TonemapOperator>( tonemapper );
             Utils::ImGuiUtilities::Tooltip(
                  "The curve that maps HDR luminance onto the display. ACES is the default and is the "
@@ -193,23 +196,35 @@ namespace Desert::Editor
 
         if ( Utils::ImGuiUtilities::SectionHeader( "Textures" ) )
         {
+            auto& quality = Common::Settings::MachineSettings::Get();
+
             // Global sampler filter — applies live (samplers are recreated when this changes).
             const char* items[]  = { "Nearest", "Bilinear", "Trilinear", "Anisotropic" };
-            int         current  = static_cast<int>( s.TextureFilterMode );
-            if ( ImGui::Combo( "Filter", &current, items, IM_ARRAYSIZE( items ) ) )
-                s.TextureFilterMode = static_cast<Core::TextureFilter>( current );
+            int         current  = static_cast<int>( quality.TextureFilterMode );
+            if ( ImGui::Combo( "Filter (this machine)", &current, items, IM_ARRAYSIZE( items ) ) )
+            {
+                quality.TextureFilterMode = static_cast<Common::Settings::TextureFilter>( current );
+                Common::Settings::MachineSettings::Save();
+            }
+            Utils::ImGuiUtilities::Tooltip( "Sampler filter for every texture. The same picture, sharper "
+                                            "or blurrier — this machine's choice, not the level's." );
 
-            // Anisotropy level — only meaningful in Anisotropic mode.
-            if ( s.TextureFilterMode == Core::TextureFilter::Anisotropic )
+            // Anisotropy level — only meaningful in Anisotropic mode. Shown only there for the reason
+            // White Point above is shown only under Reinhard: a control that moves nothing in the current
+            // mode is a dead setting.
+            if ( quality.TextureFilterMode == Common::Settings::TextureFilter::Anisotropic )
             {
                 const char* levels[]  = { "1x", "2x", "4x", "8x", "16x" };
                 const int   values[]  = { 1, 2, 4, 8, 16 };
                 int         levelIdx  = 3; // default 8x
                 for ( int i = 0; i < IM_ARRAYSIZE( values ); ++i )
-                    if ( values[i] == s.Anisotropy )
+                    if ( values[i] == quality.Anisotropy )
                         levelIdx = i;
-                if ( ImGui::Combo( "Anisotropy", &levelIdx, levels, IM_ARRAYSIZE( levels ) ) )
-                    s.Anisotropy = values[levelIdx];
+                if ( ImGui::Combo( "Anisotropy (this machine)", &levelIdx, levels, IM_ARRAYSIZE( levels ) ) )
+                {
+                    quality.Anisotropy = values[levelIdx];
+                    Common::Settings::MachineSettings::Save();
+                }
             }
         }
 
@@ -252,18 +267,29 @@ namespace Desert::Editor
 
         if ( Utils::ImGuiUtilities::SectionHeader( "Rendering" ) )
         {
+            // EVERY CONTROL IN THIS SECTION SAYS WHO OWNS IT, and the four that say "(scene)" are the
+            // four that LOOK like machine quality and are not. К1's test decides it: set to its cheapest
+            // value, has the level been mis-authored or merely rendered worse? Forward and Deferred
+            // disagree about cloud shadow on the ground, GI Off is a darker room rather than a coarser
+            // one, and SSAO/SSR are on-offs rather than fidelity ladders — all four change the authored
+            // look. Cloud Quality below does not, so it moved with its four siblings (К3).
             const char* paths[] = { "Forward", "Deferred" };
             int         cur     = static_cast<int>( s.RenderingPath );
-            if ( ImGui::Combo( "Render Path", &cur, paths, IM_ARRAYSIZE( paths ) ) )
+            if ( ImGui::Combo( "Render Path (scene)", &cur, paths, IM_ARRAYSIZE( paths ) ) )
                 s.RenderingPath = static_cast<Core::RenderPath>( cur );
 
             // The volumetric cloud layer's cost ceiling. OUTSIDE the deferred-only block below, because
             // the clouds are marched and composited on both paths — only the shadow they cast on the
             // world is deferred-only, and that is a part of what this tier scales rather than the whole.
+            auto&       quality        = Common::Settings::MachineSettings::Get();
             const char* cloudQuality[] = { "Low", "Medium", "High" };
-            int         cloudCur       = static_cast<int>( s.CloudQualityTier );
-            if ( ImGui::Combo( "Cloud Quality", &cloudCur, cloudQuality, IM_ARRAYSIZE( cloudQuality ) ) )
-                s.CloudQualityTier = static_cast<Core::CloudQuality>( cloudCur );
+            int         cloudCur       = static_cast<int>( quality.CloudQualityTier );
+            if ( ImGui::Combo( "Cloud Quality (this machine)", &cloudCur, cloudQuality,
+                               IM_ARRAYSIZE( cloudQuality ) ) )
+            {
+                quality.CloudQualityTier = static_cast<Common::Settings::CloudQuality>( cloudCur );
+                Common::Settings::MachineSettings::Save();
+            }
             ImGui::TextDisabled( "High is the calibrated reference. Medium halves the cloud shadow map's\n"
                                  "reach on the ground (~15 km); Low also caps the sun-ray at 16 samples,\n"
                                  "which runs the sunward highlights bright." );
@@ -273,11 +299,11 @@ namespace Desert::Editor
             // same state as the viewport's View Mode dropdown — offering GI, which that one lacked, and
             // lacking the three heat maps, which it had. GI was added there; this is the one control now.
             ImGui::BeginDisabled( s.RenderingPath != Core::RenderPath::Deferred );
-            ImGui::Checkbox( "Enable SSAO", &s.EnableSSAO );
+            ImGui::Checkbox( "Enable SSAO (scene)", &s.EnableSSAO );
 
             const char* giModes[] = { "Off", "Screen Space", "RSM" };
             int         giCur     = static_cast<int>( s.GlobalIllumination );
-            if ( ImGui::Combo( "Global Illumination", &giCur, giModes, IM_ARRAYSIZE( giModes ) ) )
+            if ( ImGui::Combo( "Global Illumination (scene)", &giCur, giModes, IM_ARRAYSIZE( giModes ) ) )
                 s.GlobalIllumination = static_cast<Core::GIMode>( giCur );
             ImGui::BeginDisabled( s.GlobalIllumination == Core::GIMode::Off );
             ImGui::SliderFloat( "GI Intensity", &s.GIIntensity, 0.0f, 20.0f );
@@ -285,7 +311,7 @@ namespace Desert::Editor
             if ( s.GlobalIllumination == Core::GIMode::RSM )
                 ImGui::TextDisabled( "RSM bounces off-screen geometry; its gather is dim (try ~6)." );
 
-            ImGui::Checkbox( "Enable SSR", &s.EnableSSR );
+            ImGui::Checkbox( "Enable SSR (scene)", &s.EnableSSR );
             ImGui::BeginDisabled( !s.EnableSSR );
             ImGui::SliderFloat( "SSR Intensity", &s.SSRIntensity, 0.0f, 1.0f );
             // World units are centimetres; the bounds mirror the PROPERTY Range on SSRMaxDistance
