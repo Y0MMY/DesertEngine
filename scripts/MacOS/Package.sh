@@ -1,18 +1,29 @@
 #!/bin/bash
-# Package a distributable build: binaries + content pak (+ loose Resources for the editor).
-# Output: dist/DesertEngine-<config>/ — CI archives this directory as a downloadable artifact.
+# THE ENGINE DROP — the downloadable build of the TOOLS, not of a game.
+# Output: dist/DesertEngine-<config>/ — CI archives this directory as an artifact (ci.yml).
 #
 #   ./scripts/MacOS/Package.sh [Release|Debug]
 #
-# Content ships BOTH ways on purpose:
-#   - Content.dpak (built with the same PakTool the Runtime mounts) — the packaged-game path;
-#   - loose Resources/ — the editor's dev path and the VFS's loose-file override for debugging.
-# Updates later: keep Content.manifest (written beside the pak below, 0.076 % of its size), then for
-# the next release build the new pak and run
-#     PakTool patch <old Content.manifest> <new Content.dpak> Patch_001.dpak
-# — the Runtime mounts Patch*.dpak on top of the base automatically, and the patch carries the list of
-# files the release DELETED as well as the ones it changed. Keeping the manifest is what makes that
-# possible without keeping the old 318 MB archive.
+# WHAT THIS IS AND WHAT IT IS NOT (П5). A GAME is packaged by the editor's own PackageGame() and by
+# nothing else: it needs an OPEN PROJECT, which is a thing this script does not have and CI does not
+# have either, and its product is the player binary plus one archive carrying the project's content
+# and its descriptor. This script's product is the EDITOR plus the tools plus the loose engine
+# resources the editor reads from disk. Two disjoint jobs, and only one of them ships a game.
+#
+# WHY Content.dpak AND Content.manifest ARE NO LONGER WRITTEN HERE, measured 2026-09-08 on the Debug
+# drop. `VFS::MountPak` has exactly ONE non-test call site in this repository —
+# Runtime/Source/PackagedContent.cpp — so the editor and the tools in this directory never mount an
+# archive at all, and the pak's only possible reader was the Runtime sitting beside it. That reader
+# mounted its 144 MB and then refused, because a pak of Editor/Resources carries no project
+# descriptor and this script has no project to describe: "No game to run", reproduced by running it.
+# So the drop was 528 MB of which 144 MB was an archive nothing could use and another 133 MB was the
+# SAME tree loose beside it — the one tree shipped twice, 52 % of the artifact — and the pair of them
+# is what made this directory read as a second, broken way to package a game.
+#
+# Nothing consumed either file: the only reference anywhere is ci.yml's upload of the whole folder.
+# The patch workflow they were written for is not lost — `PakTool manifest <pak> <out>` records a
+# manifest of any archive, and the archive a release actually patches is a GAME's, produced by
+# PackageGame. Recording one for the engine drop answered a question nobody asks.
 set -euo pipefail
 
 CONFIG="${1:-Release}"
@@ -32,17 +43,7 @@ for exe in Editor Runtime ProjectHub PakTool DShaderTool; do
     [ -x "$BIN/$exe" ] && cp "$BIN/$exe" "$OUT/"
 done
 
-# One content pak with everything the editor/runtime reads (keys keep the "Resources/" prefix so
-# reads relative to the package root resolve through the VFS unchanged).
-"$BIN/PakTool" create "$OUT/Content.dpak" "$ROOT/Editor/Resources" --prefix Resources
-
-# The manifest of THIS release, beside it. Written at package time because it cannot be written later:
-# a manifest of a version can only be recorded while that version exists. It is what the next release's
-# `PakTool patch` compares against, and it is ~0.076 % of the archive, so keeping one per version for
-# ever costs nothing while keeping one 318 MB archive per version does not.
-"$BIN/PakTool" manifest "$OUT/Content.dpak" "$OUT/Content.manifest"
-
-# Loose copy for the editor + debugging override.
+# The engine resources, loose — the editor reads these off disk and mounts nothing.
 cp -R "$ROOT/Editor/Resources" "$OUT/Resources"
 
 echo "Package.sh: packaged -> $OUT"
