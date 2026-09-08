@@ -57,8 +57,26 @@ jobs:
           # diffs. Removing this restores the timeout, and the timeout looks like a cancellation.
           filter: blob:none
 
+      # PINNED TO 18, AND THE PIN IS THE POINT. This step used to install the unversioned
+      # `clang-format` package, i.e. whatever the runner image happens to ship — so the gate's verdict
+      # changed silently whenever GitHub rebuilt the image, and it was not comparable to anything a
+      # developer could run. Every developer here verifies with Homebrew's llvm@18
+      # (`git-clang-format --binary /opt/homebrew/opt/llvm@18/bin/clang-format`), which is also what
+      # the contract and the verify skill tell them to use.
+      #
+      # MEASURED 2026-09-08: a merge whose changed lines were clean under 18 locally was REJECTED here,
+      # on a string-literal concatenation the newer formatter re-wraps differently. Nothing was wrong
+      # with the code; the two ends of the gate were different programs. An unpinned formatter is the
+      # same defect class as an unpinned compiler — the answer depends on the day.
+      #
+      # If this ever needs to move, move it deliberately and in ONE change: this line, the skill
+      # (`desert-engine-verify` §6), the contract (§3.3), and a re-format of the tree under the new
+      # version. Do not let the two ends drift apart again.
       - name: Install clang-format
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18
+          sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
+          clang-format --version
 
       - name: Check formatting of changed lines
         run: ./scripts/CI/CheckFormat.sh "${{ github.event.pull_request.base.sha || github.event.before }}"
