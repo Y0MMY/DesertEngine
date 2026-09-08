@@ -12,6 +12,7 @@
 #include <Editor/Core/Selection/FoliagePaint.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/ThemeManager.hpp>
+#include <Editor/Core/ToastManager.hpp>
 #include <Editor/Import/MeshDnD.hpp>
 #include <Editor/Import/MeshMaterial.hpp>
 #include <Editor/Import/AsyncMeshLoader.hpp>
@@ -1624,9 +1625,17 @@ namespace Desert::Editor
             }
             else
             {
-                m_Picking.Pick( *m_Scene, m_ViewportData.MousePosition, m_ViewportData.Size,
-                                m_Gizmo.IsHovered() || m_LightGizmoRenderer->IsLightIconHovered(),
-                                ::ImGui::GetIO().KeyCtrl );
+                const auto outcome = m_Picking.Pick(
+                     *m_Scene, m_ViewportData.MousePosition, m_ViewportData.Size,
+                     m_Gizmo.IsHovered() || m_LightGizmoRenderer->IsLightIconHovered(), ::ImGui::GetIO().KeyCtrl );
+
+                // A refused click has to SAY so. Clicking a locked entity and watching the selection not
+                // change is indistinguishable from a broken raycast, and the fix (unlock it) lives in
+                // another panel — so the refusal is put on screen rather than dropped. The other outcomes
+                // are ordinary and stay quiet; only the one the user can act on speaks, through the
+                // editor's existing toast queue instead of a second notification path of its own.
+                if ( outcome == Tools::PickOutcome::RefusedLocked )
+                    ToastManager::Push( Tools::Describe( outcome ), ToastLevel::Info, 2.5f );
             }
         }
 

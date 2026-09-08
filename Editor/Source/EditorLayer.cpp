@@ -11,6 +11,7 @@
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/ECS/EntityLock.hpp>
 #include <Engine/Geometry/PrimitiveType.hpp>
 #include <Common/Core/Units.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
@@ -3283,6 +3284,22 @@ namespace Desert::Editor
                                           return PaletteCommandDone();
                                       } } );
 
+                // LOCKING ONE IS TOO, and by the paragraph directly above it has to be here. The padlock
+                // in the Outliner's gutter and the row's context menu are both a MOUSE, and the lock's
+                // whole subject is what the viewport will and will not let you touch — so a channel that
+                // cannot set it cannot check it either. Same recursive setter both of those call.
+                {
+                    const bool locked = m_MainScene->GetRegistry().has<ECS::LockComponent>( entity.GetHandle() );
+                    Desert::Core::Scene* scene  = m_MainScene.get();
+                    const entt::entity   handle = entity.GetHandle();
+                    commands.push_back( { "Entity", ( locked ? "Unlock " : "Lock " ) + name,
+                                          [scene, handle, locked]
+                                          {
+                                              ECS::SetLockedRecursive( scene->GetRegistry(), handle, !locked );
+                                              return PaletteCommandDone();
+                                          } } );
+                }
+
                 // ── AND WHAT CAN BE OPENED *FROM* THIS ENTITY ─────────────────────────────────────────
                 //
                 // The other half of U7, and the half that makes a component document reachable at all
@@ -3379,6 +3396,59 @@ namespace Desert::Editor
                                   Core::GizmoState::SetPersistentSnap( !Core::GizmoState::PersistentSnap() );
                                   return PaletteCommandDone();
                               } } );
+
+        // ── THE TRANSFORM TOOLS AND THE SPACE THEY WORK IN ───────────────────────────────────────────
+        //
+        // FOUND BY NEEDING IT, exactly as the Delete-entity entry above was. Every one of these is a
+        // toolbar button and a W/E/R keystroke, and both of those are a HUMAN — so the space toggle could
+        // be photographed in one of its two states and the "a locked entity draws no gizmo" claim could
+        // not be photographed at all, because nothing without a mouse could put a gizmo on screen first.
+        //
+        // The same Core::GizmoState setters the buttons call, so these are a second SPELLING of the
+        // request and never a second copy of the state.
+        {
+            using Gz = Core::GizmoState;
+
+            constexpr struct
+            {
+                const char*   Label;
+                Gz::Operation Op;
+            } kTools[] = {
+                 { "Select (no gizmo)", Gz::Operation::None },
+                 { "Move", Gz::Operation::Translate },
+                 { "Rotate", Gz::Operation::Rotate },
+                 { "Scale", Gz::Operation::Scale },
+            };
+            for ( const auto& tool : kTools )
+            {
+                const auto op = tool.Op;
+                commands.push_back( { "Transform", tool.Label, [op]
+                                      {
+                                          Gz::Set( op );
+                                          return PaletteCommandDone();
+                                      } } );
+            }
+
+            // Both spaces are offered by name rather than as one "toggle", because a client that cannot
+            // see the button needs to be able to ASK for a state instead of flipping an unknown one.
+            constexpr struct
+            {
+                const char* Label;
+                Gz::Space   Space;
+            } kSpaces[] = {
+                 { "Space: World", Gz::Space::World },
+                 { "Space: Local", Gz::Space::Local },
+            };
+            for ( const auto& choice : kSpaces )
+            {
+                const auto space = choice.Space;
+                commands.push_back( { "Transform", choice.Label, [space]
+                                      {
+                                          Gz::SetSpace( space );
+                                          return PaletteCommandDone();
+                                      } } );
+            }
+        }
 
         // The View -> Show item, under a name. It is the cheapest action in the editor that saves the
         // preferences file while having nothing whatever to do with the gizmo, which is exactly what makes

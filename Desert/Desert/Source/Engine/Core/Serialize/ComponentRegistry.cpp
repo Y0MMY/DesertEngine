@@ -1263,6 +1263,9 @@ namespace Desert::Core::Serialize
 
         // ---- Marker components (presence is the state) ----
         Register( MakeMarker<ECS::FolderComponent>( "Folder" ) );
+        // The authoring lock. Serialized for the reason Components.hpp gives: a lock that does not
+        // survive a reload protects nothing. No version bump — an added key is what ForeignKeys is for.
+        Register( MakeMarker<ECS::LockComponent>( "Lock" ) );
 
         // ---- Skybox (now FULLY REFLECTED via RA3) ----
         // No more hand-written SkyboxComponentSer / field mapping: the whole component reflects, and its

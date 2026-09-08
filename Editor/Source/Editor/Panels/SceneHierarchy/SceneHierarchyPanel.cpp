@@ -3,6 +3,7 @@
 #include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/ECS/EntityLock.hpp>
 #include <Engine/Assets/MaterialData.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/AssetManager.hpp>
@@ -14,6 +15,7 @@
 #include <Engine/Geometry/ProceduralCharacterFactory.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/Commands/SceneCommands.hpp>
@@ -260,6 +262,11 @@ namespace Desert::Editor
         const bool visible = !entity.HasComponent<ECS::VisibilityComponent>() ||
                              entity.GetComponent<ECS::VisibilityComponent>().Visible;
 
+        // Locked entities (LockComponent present) refuse viewport picking and gizmo edits. Asked through
+        // the shared predicate rather than HasComponent here, so the outliner's padlock and the two places
+        // that ENFORCE it can never be reading different rules.
+        const bool locked = ECS::IsLocked( *entity.GetRegistry(), entity.GetHandle() );
+
         const char* icon = ICON_MDI_CUBE_OUTLINE;
         if ( entity.HasComponent<ECS::FolderComponent>() )
             icon = ICON_MDI_FOLDER;
@@ -427,6 +434,24 @@ namespace Desert::Editor
                                          : "Delete" ) )
                 deleteEntity = true;
 
+            // The padlock gutter is a 16px target; the menu is how you find the feature at all, and how a
+            // whole selection is locked in one go. Both spellings call the same recursive setter.
+            if ( ImGui::Selectable( locked ? ICON_MDI_LOCK_OPEN_OUTLINE " Unlock"
+                                           : ICON_MDI_LOCK " Lock (no picking, no gizmo)" ) )
+            {
+                auto& reg = *entity.GetRegistry();
+                if ( Core::SelectionManager::Count() > 1 && Core::SelectionManager::IsSelected( UUID ) )
+                {
+                    for ( const auto& id : Core::SelectionManager::GetSelection() )
+                        if ( auto ref = m_Scene->FindEntityByID( id ) )
+                            ECS::SetLockedRecursive( reg, ref->get().GetHandle(), !locked );
+                }
+                else
+                {
+                    ECS::SetLockedRecursive( reg, entity.GetHandle(), !locked );
+                }
+            }
+
             ImGui::Separator();
             if ( ImGui::Selectable( "Add Child" ) )
             {
@@ -495,6 +520,20 @@ namespace Desert::Editor
             m_Scene->SetVisibleRecursive( entity, !visible ); // toggles the entity + its subtree
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( visible ? "Hide" : "Show" );
+
+        // Column 3: the authoring padlock, beside the eye because the two answer the same shape of
+        // question about a row — "is this in my way?". Closed means the viewport will not pick it and the
+        // gizmo will not drag it; this row stays clickable, which is deliberately the only way back.
+        ImGui::TableSetColumnIndex( 3 );
+        ImGui::PushStyleColor( ImGuiCol_Text, locked ? ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled )
+                                                     : ThemeManager::GetIconColor() );
+        ImGui::TextUnformatted( locked ? ICON_MDI_LOCK : ICON_MDI_LOCK_OPEN_OUTLINE );
+        ImGui::PopStyleColor();
+        if ( ImGui::IsItemClicked() )
+            ECS::SetLockedRecursive( *entity.GetRegistry(), entity.GetHandle(), !locked );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( locked ? "Unlock (allow picking and gizmo edits)"
+                                      : "Lock (refuse picking and gizmo edits)" );
 
         if ( nodeOpen )
         {
@@ -793,29 +832,41 @@ namespace Desert::Editor
 
         // Entity table
         {
-            // FOUR columns, because the old two made the Type column carry the visibility eye as well —
-            // and an eye plus "StaticMeshActor" never fit in 110px, so the type was clipped on every row
-            // of the Starter scene. The eye now has its own fixed gutter and the type column is sized off
-            // the census, so it fits the widest name it can ever print (EntityTypeCensus.hpp).
+            // Name, Type, and a fixed gutter for EACH of the two per-row toggles. The old two-column form
+            // made the Type column carry the visibility eye as well — and an eye plus "StaticMeshActor"
+            // never fit in 110px, so the type was clipped on every row of the Starter scene. Each toggle
+            // now has its own gutter and the type column is sized off the census, so it fits the widest
+            // name it can ever print (EntityTypeCensus.hpp).
+            //
+            // (This comment said "FOUR columns" while the call below asked for three, from the time the eye
+            // was split out. It is four now for real; the count is written once, below, and read from there.)
             //
             // Resizable stays: the user can still widen Name at the Type column's expense. What changed is
             // the DEFAULT, which is what every fresh layout gets.
             constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
                                                    ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable;
 
-            // The eye gutter: one glyph plus the cell padding it is drawn inside.
-            const float gutterWidth = ImGui::CalcTextSize( ICON_MDI_EYE_OUTLINE ).x + 8.0f;
+            // A toggle gutter: one glyph plus the cell padding it is drawn inside. Measured on the WIDEST
+            // glyph either gutter can show, so neither clips when its icon changes with the row's state.
+            const float gutterWidth =
+                 std::max( { ImGui::CalcTextSize( ICON_MDI_EYE_OUTLINE ).x, ImGui::CalcTextSize( ICON_MDI_LOCK ).x,
+                             ImGui::CalcTextSize( ICON_MDI_LOCK_OPEN_OUTLINE ).x } ) +
+                 8.0f;
             const float typeWidth =
                  TypeColumnWidth( []( const char* s ) { return ImGui::CalcTextSize( s ).x; }, 12.0f );
 
             ImGui::PushStyleVar( ImGuiStyleVar_CellPadding, ImVec2( 4.0f, 2.0f ) );
-            if ( ImGui::BeginTable( "##outliner", 3, tableFlags ) )
+            if ( ImGui::BeginTable( "##outliner", 4, tableFlags ) )
             {
                 ImGui::TableSetupColumn( "Name", ImGuiTableColumnFlags_WidthStretch );
                 ImGui::TableSetupColumn( "Type", ImGuiTableColumnFlags_WidthFixed, typeWidth );
-                // NoResize on the gutter: it holds one glyph, and a user who drags it to nothing loses the
-                // only visibility control the outliner has.
+                // NoResize on the gutters: each holds one glyph, and a user who drags one to nothing loses
+                // the only control the outliner has for that state.
                 ImGui::TableSetupColumn( "##visible",
+                                         ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoResize |
+                                              ImGuiTableColumnFlags_NoHeaderLabel,
+                                         gutterWidth );
+                ImGui::TableSetupColumn( "##locked",
                                          ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoResize |
                                               ImGuiTableColumnFlags_NoHeaderLabel,
                                          gutterWidth );

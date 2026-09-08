@@ -15,6 +15,7 @@
 #include <Engine/Animation/Skeleton.hpp>
 #include <Engine/Animation/Animator.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/ECS/EntityLock.hpp>
 
 #include <ImGuizmo.h>
 #include <glm/gtx/matrix_decompose.hpp>
@@ -87,6 +88,14 @@ namespace Desert::Editor::Tools
 
         auto& transformComponent = selectedEntity.GetComponent<ECS::TransformComponent>();
         auto& reg                = scene.GetRegistry();
+
+        // A LOCKED primary draws no gizmo at all, which is the whole second half of the lock: the picker
+        // refuses to select a locked entity, but the OUTLINER deliberately still can — that is how you
+        // reach the padlock to undo it — and a selection made there must not come with draggable handles.
+        // Returning before SetRect/Manipulate also leaves m_Hovered false, so picking does not stand down
+        // for a gizmo that is not on screen.
+        if ( ECS::IsLocked( reg, selectedEntity.GetHandle() ) )
+            return;
 
         // The gizmo must work in WORLD space. For a CHILD entity (e.g. a camera parented to the character),
         // the world transform = parentWorld * local, and an edit must be converted back to LOCAL before
@@ -185,6 +194,10 @@ namespace Desert::Editor::Tools
                 ECS::Entity e = ref->get();
                 if ( !e.HasComponent<ECS::TransformComponent>() || coveredBySelection( e.GetHandle() ) )
                     continue;
+                // A locked follower is not moved below, so it must not be snapshotted either — an undo
+                // entry for an entity that never changed is an undo step that appears to do nothing.
+                if ( ECS::IsLocked( reg, e.GetHandle() ) )
+                    continue;
                 const auto& tc = e.GetComponent<ECS::TransformComponent>();
                 m_DragSnapshots.push_back( { id, tc.Translation, tc.Rotation, tc.Scale } );
             }
@@ -216,6 +229,11 @@ namespace Desert::Editor::Tools
                         continue;
                     ECS::Entity e = ref->get();
                     if ( !e.HasComponent<ECS::TransformComponent>() || coveredBySelection( e.GetHandle() ) )
+                        continue;
+                    // The group delta stops at a locked member. Dragging five things of which one is
+                    // locked moves four — the lock is a property of the entity, not of how it happened
+                    // to be selected, so a multi-selection cannot be a way around it.
+                    if ( ECS::IsLocked( reg, e.GetHandle() ) )
                         continue;
 
                     auto&           tc = e.GetComponent<ECS::TransformComponent>();
