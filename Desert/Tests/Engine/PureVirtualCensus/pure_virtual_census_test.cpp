@@ -739,12 +739,12 @@ TEST( PureVirtualCensus, TheNumberIsStatedSoAShrinkageIsVisible )
 {
     // 19: the three IComponentWidget rows left with the CRTP layer that existed only to implement them —
     // they were not a generic route somebody bypassed, they were SUPERSEDED by ComponentEditorEntry's own
-    // Has/Add/Remove lambdas, and one of the three had a COMMENTED-OUT body. It was 22 when Г12 also gave `Device::IsFormatSupported` its FIRST caller — SceneRenderer's float-render-target
-    // gate, which had been reading a cached bool computed once at device init for ONE hardcoded format,
-    // while the comment above it claimed to read the introspection layer. That row left by being
-    // ANSWERED, like `AssetBase::Unload` before it, and the doc comment that said 'prefer this over
-    // adding another Supports<Feature> bool' is now true. It was 23 before that, and 31 before Г12
-    // deleted the eight-row bind vocabulary in one decision rather than
+    // Has/Add/Remove lambdas, and one of the three had a COMMENTED-OUT body. It was 22 when Г12 also gave
+    // `Device::IsFormatSupported` its FIRST caller — SceneRenderer's float-render-target gate, which had been
+    // reading a cached bool computed once at device init for ONE hardcoded format, while the comment above it
+    // claimed to read the introspection layer. That row left by being ANSWERED, like `AssetBase::Unload` before
+    // it, and the doc comment that said 'prefer this over adding another Supports<Feature> bool' is now true. It
+    // was 23 before that, and 31 before Г12 deleted the eight-row bind vocabulary in one decision rather than
     // eight; it was 35 when Г8 counted: `RenderSystem::Shutdown` and the orphan duplicate of
     // ImGuiLayer.hpp went with that task, `MaterialProperty::Clone` with М9, and `AssetBase::Unload`
     // with А7 — the last of those by being ANSWERED rather than deleted, which is the only way a row
