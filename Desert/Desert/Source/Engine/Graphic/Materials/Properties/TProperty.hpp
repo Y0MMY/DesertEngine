@@ -117,46 +117,17 @@ namespace Desert::Graphic
         bool                m_Dirty = true;
     };
 
-    // Texture property — always marks dirty on Set (no equality check for pointers is meaningful here).
-    class TTextureProperty final : public IProperty
-    {
-    public:
-        TTextureProperty( std::string_view name, std::string_view shaderName )
-             : m_Name( name )
-             , m_ShaderName( shaderName )
-        {
-        }
-
-        std::string_view GetName()       const override { return m_Name; }
-        std::string_view GetShaderName() const override { return m_ShaderName; }
-        bool             IsDirty()       const override { return m_Dirty; }
-        void             MarkClean()           override { m_Dirty = false; }
-        PropertyKind     GetKind() const override
-        {
-            return PropertyKind::Texture2D;
-        }
-        size_t           GetByteSize()   const override { return sizeof( void* ); }
-
-        void CopyValueTo( void* out ) const override
-        {
-            memcpy( out, &m_Value, sizeof( void* ) );
-        }
-
-        void Reset() override
-        {
-            m_Value = nullptr;
-            m_Dirty = true;
-        }
-
-        void* Get()          const { return m_Value; }
-        void  Set( void* v )       { m_Value = v; m_Dirty = true; }
-
-    private:
-        std::string_view    m_Name;
-        std::string_view    m_ShaderName;
-        void*               m_Value = nullptr;
-        bool                m_Dirty = false;
-    };
+    // `TTextureProperty` STOOD HERE AND NOTHING IN THE TREE EVER MADE ONE. Its only producer was the
+    // MTEXTURE_PROPERTY macro below, and that macro had zero uses over the whole repository — so the
+    // class existed to hold a `void* m_Value` that no material ever set and no pass ever read. The
+    // pointer-ownership census (Desert/Tests/Engine/PointerOwnership) found it while asking who owned
+    // the image behind that `void*`, and the answer was "nobody, because there is no image": an
+    // un-owned raw pointer whose lifetime question could not be asked, let alone answered. A8.
+    //
+    // The LIVE texture path is unaffected and is not this: a texture reaches a material through
+    // `MaterialInstance::SetTexture` -> the `void*` alternative of MaterialPropertyValue ->
+    // `Texture2DProperty::SetImage`, which snapshots the descriptor. That path has its own row in the
+    // census.
 
 } // namespace Desert::Graphic
 
@@ -181,16 +152,4 @@ namespace Desert::Graphic
     Type Get##VarName() const { return VarName.Get(); }                                    \
     void Set##VarName( const Type& val ) { VarName.Set( val ); }
 
-#define MTEXTURE_PROPERTY( VarName, ShaderName )                                           \
-    Desert::Graphic::TTextureProperty VarName { #VarName, ShaderName };                    \
-    struct VarName##_PropertyRegistrar                                                      \
-    {                                                                                       \
-        VarName##_PropertyRegistrar( Desert::Graphic::IPropertyOwner* owner,               \
-                                     Desert::Graphic::IProperty*       prop )              \
-        {                                                                                   \
-            owner->RegisterProperty( prop );                                               \
-        }                                                                                   \
-    } VarName##_reg { this, &VarName };                                                    \
-    void* Get##VarName() const { return VarName.Get(); }                                   \
-    void  Set##VarName( void* val ) { VarName.Set( val ); }
 // clang-format on

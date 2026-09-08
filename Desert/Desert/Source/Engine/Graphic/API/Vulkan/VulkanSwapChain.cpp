@@ -367,6 +367,29 @@ namespace Desert::Graphic::API::Vulkan
         for ( auto fb : m_SwapChainFramebuffers ) vkDestroyFramebuffer( device, fb, nullptr );
         m_SwapChainFramebuffers.clear();
 
+        // A CAPTURE RECORDED AND NEVER COLLECTED IS AN OWNED ALLOCATION WITH NO OWNER LEFT TO COLLECT IT.
+        // `m_CaptureAllocation` is one of the two raw pointers in this class that genuinely OWN what they
+        // point at (a VMA handle, which has no C++ destructor), and the only release path was inside
+        // TakeCapturedFrameRGBA8 — so a capture recorded on the frame that then RESIZED the window, or one
+        // recorded on the last frame before shutdown, kept a full frame of GPU_TO_CPU memory until the
+        // process ended. Release() runs on both of those paths; TakeCapturedFrameRGBA8 runs on neither.
+        // Found by the pointer-ownership census (Desert/Tests/Engine/PointerOwnership) asking who was
+        // obliged to destroy it. A8.
+        if ( m_CaptureStaging != VK_NULL_HANDLE )
+        {
+            // Same late-teardown hazard as the colour/depth pair below: with no renderer context there is
+            // no allocator to reach, and the device's own destruction takes the buffer with it.
+            const auto ctx = EngineContext::GetInstance().GetRendererContext();
+            if ( ctx )
+                SP_CAST( VulkanContext, ctx )
+                     ->GetVulkanAllocator()
+                     ->RT_DestroyBuffer( m_CaptureStaging, static_cast<VmaAllocation>( m_CaptureAllocation ) );
+            m_CaptureStaging    = VK_NULL_HANDLE;
+            m_CaptureAllocation = nullptr;
+            m_CaptureWidth      = 0;
+            m_CaptureHeight     = 0;
+        }
+
         if ( m_VkRenderPass != VK_NULL_HANDLE )
         {
             vkDestroyRenderPass( device, m_VkRenderPass, nullptr );
