@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/ECS/Components.hpp>
+#include <Engine/Graphic/Render2D/ClipRegion2D.hpp>
 #include <Engine/UI/UILayout.hpp>
 
 #include <Common/Core/Core.hpp>
@@ -133,12 +134,23 @@ namespace Desert::UI
         Rect      RectPx{};
         glm::mat3 Xform{ 1.0f }; // its own transform composed inside its ancestors'
         Rect      ScreenPx{};    // the axis-aligned box RectPx occupies on screen after Xform
-        Rect      ClipPx{};      // the inherited scissor; W<=0 means unclipped
-        Rect      VisiblePx{};   // ScreenPx intersected with ClipPx and the viewport — the pixels it may own
 
-        // Drawn, but no pixel of it can land: scrolled out of its list, or off the viewport. The walk does
-        // NOT cull these — it records their geometry and the scissor throws it away — so this is the column
-        // that answers "why can I not see it" for an element that is neither hidden nor mispositioned.
+        // THE CLIP THIS ELEMENT INHERITED, as the region — not as a scissor box. The field was a Rect for
+        // exactly as long as a clip WAS a scissor; Ю9 made a rotated clipper cut its own quadrilateral on
+        // the CPU, so a box can no longer say where the pixels went and a box here would be the middle link
+        // that drops a property: PickElement reads this, the draw list cuts by the region, and the two would
+        // disagree in the corners of every rotated clipper. Always Bounded — the walk's outermost level is
+        // the viewport — so "unclipped" is not one of its states and an empty region is distinguishable
+        // from a large one.
+        Graphic::Render2D::ClipRegion2D ClipRegion{};
+
+        Rect VisiblePx{}; // ScreenPx ∩ ClipRegion's BOX ∩ the viewport — the pixels it may own, box half only
+
+        // Drawn, but no pixel of it can land: scrolled out of its list, cut away by a rotated clipper, or
+        // off the viewport. The walk does NOT cull these — it records their geometry and the clip throws it
+        // away — so this is the column that answers "why can I not see it" for an element that is neither
+        // hidden nor mispositioned. Unlike VisiblePx this DOES account for the oblique half-planes, because
+        // the box of an element a rotated clipper removed entirely is not empty.
         bool Clipped = false;
 
         bool           TakesSlot     = true; // counted by a parent auto-layout group (Collapsed drops out)

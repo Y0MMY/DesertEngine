@@ -46,6 +46,25 @@ namespace Desert::Editor
             return buf;
         }
 
+        // The inherited clip, both halves. The box is what the scissor cut; the plane count is what a
+        // rotated clipper cut on top of it, and printing only the box would make a turned clipper look
+        // identical to the straight one whose box it shares — which is exactly the confusion this panel
+        // exists to remove.
+        std::string ClipRegionText( const ::Desert::Graphic::Render2D::ClipRegion2D& r )
+        {
+            if ( !r.Bounded )
+                return "unclipped";
+            if ( ::Desert::Graphic::Render2D::ClipRegionEmpty( r ) )
+                return "empty — nothing survives it";
+            char buf[128];
+            std::snprintf( buf, sizeof( buf ), "x %.1f  y %.1f  w %.1f  h %.1f", r.Box.x, r.Box.y, r.Box.z,
+                           r.Box.w );
+            std::string text = buf;
+            if ( r.PlaneCount > 0 )
+                text += "  + " + std::to_string( r.PlaneCount ) + " oblique edge(s)";
+            return text;
+        }
+
         std::string Vec2Text( const glm::vec2& v )
         {
             char buf[64];
@@ -301,8 +320,7 @@ namespace Desert::Editor
                                node->RectValid ? RectText( node->RectPx )
                                                : std::string( "none — a layout group left it no slot" ) );
                 LabelledValue( "On screen (px)", RectText( node->ScreenPx ) );
-                LabelledValue( "Clip inherited (px)",
-                               node->ClipPx.W > 0.0f ? RectText( node->ClipPx ) : std::string( "unclipped" ) );
+                LabelledValue( "Clip inherited (px)", ClipRegionText( node->ClipRegion ) );
                 LabelledValue( "Pixels it may occupy", node->Clipped
                                                             ? std::string( "none — clipped away entirely" )
                                                             : RectText( node->VisiblePx ) );

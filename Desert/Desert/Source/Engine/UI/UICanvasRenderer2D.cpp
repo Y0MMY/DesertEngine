@@ -341,13 +341,6 @@ namespace Desert::UI
         // deferral ImGui uses, which avoids a second layout pass and is invisible in practice. The election
         // and the drag both live in UICanvasContext (Hot / HotNext / Drag).
 
-        Rect IntersectRect( const Rect& a, const Rect& b )
-        {
-            const float x0 = std::max( a.X, b.X ), y0 = std::max( a.Y, b.Y );
-            const float x1 = std::min( a.X + a.W, b.X + b.W ), y1 = std::min( a.Y + a.H, b.Y + b.H );
-            return Rect{ x0, y0, std::max( 0.0f, x1 - x0 ), std::max( 0.0f, y1 - y0 ) };
-        }
-
         bool PointIn( const Rect& r, const glm::vec2& p )
         {
             return p.x >= r.X && p.x <= r.X + r.W && p.y >= r.Y && p.y <= r.Y + r.H;
@@ -1061,8 +1054,8 @@ namespace Desert::UI
         void DrawElement( UICanvasContext& ctx, entt::registry& reg, entt::entity e, const Rect& parent,
                           float scale, Graphic::Render2D::DrawList2D& dl, const UIInput* input,
                           std::string* outClicked, entt::entity* focused, std::vector<PopupInfo>* popups,
-                          std::vector<entt::entity>* focusables, const Rect& clipRect, HitScope scope,
-                          const Rect* forcedRect = nullptr )
+                          std::vector<entt::entity>* focusables, const Graphic::Render2D::ClipRegion2D& clipRegion,
+                          HitScope scope, const Rect* forcedRect = nullptr )
         {
             // The visibility axis, before anything else is computed. Hidden and Collapsed both stop here
             // and take the whole sub-tree with them — nothing drawn, nothing hit-tested, no tween clock
@@ -1262,10 +1255,13 @@ namespace Desert::UI
                 // Elect the hot element: last writer in draw order = topmost. Clipped-away pixels don't
                 // count, so a scrolled-out row can't be clicked through its viewport.
                 //
-                // `rect` is tested against the UNDONE pointer and `clipRect` against the screen one,
+                // `rect` is tested against the UNDONE pointer and `clipRegion` against the screen one,
                 // because they live in different spaces on purpose: the element's own rect is what the
-                // transform acts on, the clip is the axis-aligned box the scissor actually cut.
-                if ( input && electsSelf && PointIn( rect, pointerPx ) && PointIn( clipRect, input->MousePx ) )
+                // transform acts on, the clip is a region of the SCREEN — the scissor box the hardware cut,
+                // intersected with the oblique edges the draw list cut the geometry with. Both halves, so a
+                // pixel the clipper removed cannot still take the pointer.
+                if ( input && electsSelf && PointIn( rect, pointerPx ) &&
+                     Graphic::Render2D::ClipRegionContains( clipRegion, input->MousePx ) )
                 {
                     ctx.HotNext = e;
                     // The drag ghost is drawn at the cursor in SCREEN space, so what it needs is the
@@ -1627,10 +1623,16 @@ namespace Desert::UI
                 if ( clip )
                     dl.PushClipRect( { rect.X, rect.Y }, { rect.X + rect.W, rect.Y + rect.H } );
 
-                // Children inherit the scissor for hit testing too, so what is scrolled out of view can't
-                // be clicked through its viewport. Intersected in SCREEN space against the same box the
-                // scissor was given, so the pointer is refused exactly where the pixels were.
-                const Rect childClip = clip ? IntersectRect( clipRect, ScreenBounds( rect ) ) : clipRect;
+                // Children inherit the clip for hit testing too, so what is scrolled out of view can't be
+                // clicked through its viewport. Narrowed by THE SAME FUNCTION DrawList2D::PushClipRect just
+                // called, with the same matrix and the same rect — the pointer is refused exactly where the
+                // geometry was cut, because there is one implementation of "where" and not two that agree.
+                // The return value is ignored on purpose: the draw list has already logged an inexact
+                // region, and both halves get the same superset either way.
+                Graphic::Render2D::ClipRegion2D childClip = clipRegion;
+                if ( clip )
+                    (void)Graphic::Render2D::IntersectClipRegion( childClip, dl.GetTransform(), { rect.X, rect.Y },
+                                                                  { rect.X + rect.W, rect.Y + rect.H } );
 
                 const auto& children = reg.get<ECS::RelationshipComponent>( e ).Children;
                 if ( reg.has<ECS::UILayoutGroupComponent>( e ) )
@@ -1857,11 +1859,17 @@ namespace Desert::UI
 
         std::vector<PopupInfo>    popups;
         std::vector<entt::entity> focusables;
+        // The canvas is drawn into the viewport and nowhere else, so that is the outermost clip both halves
+        // start from. Built as a region rather than a Rect so every level below narrows ONE type.
+        Graphic::Render2D::ClipRegion2D rootClip;
+        (void)Graphic::Render2D::IntersectClipRegion(
+             rootClip, glm::mat3( 1.0f ), { viewportPx.X, viewportPx.Y },
+             { viewportPx.X + viewportPx.W, viewportPx.Y + viewportPx.H } );
         if ( reg.has<ECS::RelationshipComponent>( canvasEntity ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvasEntity ).Children )
                 if ( reg.valid( c ) )
                     DrawElement( ctx, reg, c, childRoot, scale, dl, input, outClicked, focused, &popups,
-                                 &focusables, viewportPx, HitScope{} );
+                                 &focusables, rootClip, HitScope{} );
 
         // --- Pointer events, drag & drop -------------------------------------------------------------
         // Everything here runs on the freshly elected hot element, AFTER the tree is laid out: enter/exit

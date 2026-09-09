@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Engine/Graphic/Render2D/ClipRegion2D.hpp>
 #include <Engine/Graphic/Render2D/Transform2D.hpp>
 
 #include <glm/glm.hpp>
@@ -89,16 +90,26 @@ namespace Desert::Graphic::Render2D
                       const glm::vec4& colorB, int segments = 48 );
 
         // Clip subsequently-added primitives to `min`..`max` (px), intersected with the current clip (so
-        // nested masks compose). Pair with PopClipRect. The backend applies it as a scissor per batch.
+        // nested masks compose). Pair with PopClipRect.
         //
-        // `min`/`max` are read in the CURRENT transform's space and stored as their SCREEN-space bounding
-        // box, because a scissor is the only clip the hardware has and it is axis-aligned. So a clipper
-        // that is itself rotated clips to the box around it — conservatively (it never clips away a pixel
-        // it should keep), and the walk's pointer clip goes through the same TransformedAABB2D so the
-        // picture and the pointer cannot disagree about where the clip is. Clipping to the rotated
-        // quadrilateral itself needs a stencil and is the task behind this one.
+        // `min`/`max` are read in the CURRENT transform's space. The AXIS-ALIGNED part of the result is the
+        // scissor the backend sets per batch; the OBLIQUE part — the four edges of a rotated clipper, which
+        // a scissor cannot express — cuts the geometry here, before it is a vertex. So a rotated clipper
+        // clips to the quadrilateral itself and not to the box around it, at zero extra draw calls: the
+        // batch key still breaks only on texture, text mode and that scissor box.
+        //
+        // Ю8 stored only the box and recorded the looseness as a decision; this is that decision closed.
+        // The walk's pointer clip goes through the same IntersectClipRegion, so the picture and the pointer
+        // are cut by one object rather than by two that agree.
         void PushClipRect( const glm::vec2& min, const glm::vec2& max );
         void PopClipRect();
+
+        // The accumulated clip, for the caller that must refuse a pointer exactly where the geometry was
+        // refused. Read rather than rebuilt, for the same reason GetTransform() is.
+        const ClipRegion2D& GetClipRegion() const
+        {
+            return m_Clip;
+        }
 
         // --- Render transform ------------------------------------------------------------------------
         // Everything added between a Push and its Pop has its POSITIONS mapped through @p xform, composed
@@ -154,6 +165,9 @@ namespace Desert::Graphic::Render2D
         }
 
     private:
+        // The half of the clip the hardware can cut: the region's box, or a zero rect meaning "no scissor".
+        glm::vec4 ScissorBox() const;
+
         // Returns a command matching the given state (texture + text mode), extending the last one when
         // possible or opening a new one anchored at the current end of the index buffer.
         DrawCommand& CurrentCommand( const void* texture, bool text );
@@ -161,6 +175,29 @@ namespace Desert::Graphic::Render2D
         // Append one textured/tinted quad (the shared path behind AddRectFilled / AddImage / AddText).
         void AddQuad( const void* texture, const glm::vec2& min, const glm::vec2& max, const glm::vec2& uv0,
                       const glm::vec2& uv1, const glm::vec4& color, bool text );
+
+        // --- The three shapes every primitive here is made of, and the only places geometry is appended ---
+        // Each has an EXACT unclipped path — the vertices are stored as given and indexed exactly as they
+        // were before an oblique clip existed, so a canvas with no rotated clipper emits the bytes it always
+        // emitted — and a clipped path that hands each triangle to EmitClippedTriangle. Splitting them this
+        // way is what lets the shared-vertex indexing survive: a clipped triangle owns its corners, an
+        // unclipped fan does not.
+
+        // A convex polygon (3 or 4 corners, in order): quads, lines, triangles.
+        void EmitPoly( DrawCommand& cmd, const Vertex2D* corners, uint32_t count );
+        // A centre plus a closed rim, the last rim vertex bridging back to the first: rounded rectangles.
+        void EmitClosedFan( DrawCommand& cmd, const Vertex2D& centre, const Vertex2D* rim, uint32_t rimCount );
+        // `pairCount` (outer, inner) vertex pairs, consecutive pairs bridged by two triangles: rings.
+        void EmitStrip( DrawCommand& cmd, const Vertex2D* pairs, uint32_t pairCount );
+
+        // Clip one triangle against the region's oblique half-planes and append what survives as its own
+        // fan. Called only while at least one such plane is active.
+        void EmitClippedTriangle( DrawCommand& cmd, const Vertex2D& a, const Vertex2D& b, const Vertex2D& c );
+
+        bool ClippingOblique() const
+        {
+            return m_Clip.PlaneCount > 0;
+        }
 
         // The one place a position becomes a vertex. With an empty transform stack it is the identity in
         // the strongest sense — the value is not touched at all.
@@ -173,8 +210,12 @@ namespace Desert::Graphic::Render2D
         std::vector<uint32_t>    m_Indices;
         std::vector<DrawCommand> m_Commands;
 
-        glm::vec4              m_CurrentClip = { 0.0f, 0.0f, 0.0f, 0.0f }; // x,y,w,h px; W<=0 => unclipped
-        std::vector<glm::vec4> m_ClipStack;
+        // Staging for the one primitive whose corner count is not a compile-time constant (AddRing). Kept
+        // on the list so its capacity survives Reset() like the geometry buffers' does.
+        std::vector<Vertex2D> m_Scratch;
+
+        ClipRegion2D              m_Clip;
+        std::vector<ClipRegion2D> m_ClipStack;
 
         glm::mat3 m_Transform    = glm::mat3( 1.0f );
         bool      m_HasTransform = false; // == !m_TransformStack.empty(), kept as a flag so
