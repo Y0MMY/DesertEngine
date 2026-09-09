@@ -50,9 +50,24 @@ namespace Desert::Editor
 
         // Reflected-property byte edit (see PropertyEditorBuilder): before/after bytes at a raw field
         // address. Pointer-based -> volatile (dropped when the edited object may have died).
+        //
+        // ONLY FOR TRIVIALLY COPYABLE FIELDS. Restoring is a memcpy, so a field that owns heap — a
+        // std::string — must not come here: the copy carries the string's BUFFER POINTER, and putting it
+        // back hands the live object memory the allocator has already reclaimed. Use PushString for
+        // those. Which field types may take which route is decided once, in
+        // Editor/Panels/PropertyEditor/PropertyUndoPolicy.hpp, and asserted per type by
+        // Desert/Tests/Editor/PropertyUndoPolicy.
         void Push( void* target, const void* oldBytes, const void* newBytes, std::size_t size )
         {
             PushCommand( std::make_unique<ByteCommand>( target, oldBytes, newBytes, size ) );
+        }
+
+        // Reflected-property STRING edit: before/after VALUES, restored by assignment. The value and the
+        // object's representation are different things for a std::string, and only the value survives
+        // being stored (see Push above).
+        void PushString( std::string* target, std::string oldValue, std::string newValue )
+        {
+            PushCommand( std::make_unique<StringCommand>( target, std::move( oldValue ), std::move( newValue ) ) );
         }
 
         void PushCommand( std::unique_ptr<ICommand> command )
@@ -172,6 +187,45 @@ namespace Desert::Editor
             std::size_t          m_Size   = 0;
             std::vector<uint8_t> m_Old;
             std::vector<uint8_t> m_New;
+        };
+
+        // The string counterpart of ByteCommand. Same volatility (it holds a raw pointer into a live
+        // component) and the same label, because to the user it is the same action — only the way the
+        // state is held differs, and it has to differ: see PushString above.
+        class StringCommand final : public ICommand
+        {
+        public:
+            StringCommand( std::string* target, std::string oldValue, std::string newValue )
+                 : m_Target( target ), m_Old( std::move( oldValue ) ), m_New( std::move( newValue ) )
+            {
+            }
+
+            bool Undo() override
+            {
+                *m_Target = m_Old;
+                return true;
+            }
+
+            bool Redo() override
+            {
+                *m_Target = m_New;
+                return true;
+            }
+
+            bool IsVolatile() const override
+            {
+                return true;
+            }
+
+            std::string GetLabel() const override
+            {
+                return "Property edit";
+            }
+
+        private:
+            std::string* m_Target = nullptr;
+            std::string  m_Old;
+            std::string  m_New;
         };
 
         static constexpr size_t kMaxEntries = 256;

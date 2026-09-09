@@ -1,5 +1,6 @@
 #include "PropertyEditorBuilder.hpp"
 #include "PropertyReset.hpp"
+#include "PropertyUndoPolicy.hpp"
 #include <Editor/Core/DragPayloads.hpp>
 #include <Editor/Core/MultiEdit.hpp>
 
@@ -407,15 +408,25 @@ namespace Desert::Editor
             return changed && !field.Meta.ReadOnly;
         }
 
-        // Capture the field bytes BEFORE the widget so an interactive edit (drag/slider/color/checkbox)
-        // can record its "before" state for undo. Limited to small POD fields (value editors).
-        const bool  trackUndo = !field.Meta.ReadOnly && field.Type != FieldType::AssetHandle &&
-                               field.Type != FieldType::Struct && field.Size > 0 && field.Size <= 64;
+        // Capture the field's state BEFORE the widget so an edit can record what to go back to. WHICH
+        // fields are recorded, when the entry is pushed and how the state is held is decided once in
+        // PropertyUndoPolicy.hpp — this file is drawn by ImGui and reachable by no suite, which is how
+        // the previous inline condition managed to exclude every asset slot and include every
+        // std::string at the same time.
+        const PropertyUndoKind    undoKind = PropertyUndoKindFor( field.Type, field.Meta.ReadOnly, field.Size );
+        const PropertyUndoStorage undoStorage =
+             PropertyUndoStorageFor( field.Type, field.Meta.ReadOnly, field.Size );
+
         std::vector<uint8_t> beforeBytes;
-        if ( trackUndo )
+        std::string          beforeString;
+        if ( undoStorage == PropertyUndoStorage::Bytes )
         {
             beforeBytes.resize( field.Size );
             std::memcpy( beforeBytes.data(), p, field.Size );
+        }
+        else if ( undoStorage == PropertyUndoStorage::StringValue )
+        {
+            beforeString = *static_cast<const std::string*>( p );
         }
 
         // A field whose EditCondition is not met stays visible but inert — the setting exists, it just has
@@ -1070,22 +1081,60 @@ namespace Desert::Editor
                 break;
         }
 
-        // Record an undo command on edit commit. One widget is active at a time, so a single pending
-        // capture is enough: grab "old" the frame the widget activates, push old->new on commit.
-        if ( trackUndo )
+        // Record an undo command on edit commit. WHEN that happens is decided by PropertyUndoActionFor,
+        // not here — an INTERACTIVE row waits for its item to deactivate after an edit, a DISCRETE one
+        // (every asset slot, every enum combo) has no such moment because the value was written from
+        // inside a popup by a widget that is not this row's item. That difference is why the asset
+        // slots were excluded from undo entirely instead of being given the route they needed.
+        //
+        // The "before" state still has to be carried across frames for the interactive case: ImGui
+        // reports the activation on one frame and the commit on a later one. One widget is active at a
+        // time, so a single pending capture is enough.
         {
             static void*                s_PendingTarget = nullptr;
             static std::vector<uint8_t> s_PendingOld;
+            static std::string          s_PendingOldString;
 
-            if ( ImGui::IsItemActivated() )
+            if ( undoKind == PropertyUndoKind::Interactive && ImGui::IsItemActivated() )
             {
-                s_PendingTarget = p;
-                s_PendingOld    = beforeBytes;
+                s_PendingTarget    = p;
+                s_PendingOld       = beforeBytes;
+                s_PendingOldString = beforeString;
             }
-            if ( ImGui::IsItemDeactivatedAfterEdit() && s_PendingTarget == p )
+
+            const bool pending = ( s_PendingTarget == p );
+
+            PropertyEditSignals signals;
+            signals.DeactivatedAfterEdit = ImGui::IsItemDeactivatedAfterEdit() && pending;
+            signals.Changed              = changed;
+            signals.ValueDiffers =
+                 undoStorage == PropertyUndoStorage::StringValue
+                      ? ( *static_cast<const std::string*>( p ) != beforeString )
+                      : ( !beforeBytes.empty() && std::memcmp( beforeBytes.data(), p, field.Size ) != 0 );
+
+            // WHERE the "before" state comes from follows the KIND, not the signal: an interactive
+            // edit began on an earlier frame and its capture is the pending one, a discrete edit began
+            // and ended on this frame and its capture is this row's. Picking by signal instead would
+            // read a stale pending buffer on any row that happens to share an address with a finished
+            // drag.
+            const bool                  interactive = ( undoKind == PropertyUndoKind::Interactive );
+            const std::vector<uint8_t>& oldBytes    = interactive ? s_PendingOld : beforeBytes;
+            const std::string&          oldString   = interactive ? s_PendingOldString : beforeString;
+
+            switch ( PropertyUndoActionFor( undoKind, undoStorage, signals ) )
             {
-                CommandHistory::Get().Push( p, s_PendingOld.data(), p, field.Size );
-                s_PendingTarget = nullptr;
+                case PropertyUndoAction::PushBytes:
+                    if ( oldBytes.size() == field.Size )
+                        CommandHistory::Get().Push( p, oldBytes.data(), p, field.Size );
+                    s_PendingTarget = nullptr;
+                    break;
+                case PropertyUndoAction::PushString:
+                    CommandHistory::Get().PushString( static_cast<std::string*>( p ), oldString,
+                                                      *static_cast<const std::string*>( p ) );
+                    s_PendingTarget = nullptr;
+                    break;
+                case PropertyUndoAction::Nothing:
+                    break;
             }
         }
 

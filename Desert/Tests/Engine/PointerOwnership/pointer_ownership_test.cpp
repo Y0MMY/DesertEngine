@@ -214,11 +214,19 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   has to exist separately — the march, the shadow map and the sky's own bake — for the reason the
     //   layer's packed block is already tripled: one buffer holds one set of bytes per (frame x renderer
     //   slot), not per pass.
-    EXPECT_EQ( CountOf( Form::Raw ), 344 );
+    //
+    //   815 -> 816 with Ю2, and it is ONE RAW: CommandHistory::StringCommand::m_Target. The undo stack
+    //   grew a second property-edit command because a std::string field cannot take the byte one — the
+    //   entry stores the object's REPRESENTATION and restoring it hands the live string a heap pointer
+    //   the edit already freed, which seventeen reflected string fields could reach. The new command
+    //   stores the VALUE and assigns it back. Its pointer is the same kind of pointer ByteCommand's is
+    //   (into a live component's field) under the same guard (IsVolatile, so DropVolatile drops it), so
+    //   it adds a row rather than a question.
+    EXPECT_EQ( CountOf( Form::Raw ), 345 );
     EXPECT_EQ( CountOf( Form::Shared ), 323 );
     EXPECT_EQ( CountOf( Form::Unique ), 110 );
     EXPECT_EQ( CountOf( Form::Weak ), 38 );
-    EXPECT_EQ( (int)Members().size(), 815 )
+    EXPECT_EQ( (int)Members().size(), 816 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }
