@@ -185,9 +185,16 @@ namespace Desert::Editor::ShaderGraph
             // not have. Two floats and not a Vec2 because the Volume palette's arithmetic is float and
             // vec3: a coordinate is almost always built out of Split (Vector 3) of the sample position,
             // and a Vec2 pin would need a make-vec2 node whose only purpose is to feed this one.
+            //
+            // RGB AND NOT RGBA, for the same reason Vec3Param exists instead of a Color Param here: this
+            // domain has no vec4 sink anywhere in its palette, so a Color pin would be a handle the canvas
+            // refuses every link out of — a dead knob, which the contract forbids in the same breath as a
+            // stub. Retyped rather than removed: a .dgraph stores pins POSITIONALLY, so dropping output 0
+            // would move the R pin under every saved link. As Vec3 the pin is live — Albedo, Emissive and
+            // Multiply (Vector 3) all take it. `NoPinIsOfferedInADomainThatCannotConnectIt` is the gate.
             { "MediumTexture", "Medium Texture", RGBA( 70, 110, 160, 255 ),
               { { "U", ValueType::Float }, { "V", ValueType::Float } },
-              { { "RGBA", ValueType::Color }, { "R", ValueType::Float } },
+              { { "RGB", ValueType::Vec3 }, { "R", ValueType::Float } },
               /*param*/ true, false, false, VOLUME },
             { "ColorConst", "Color", RGBA( 120, 70, 80, 255 ), {},
               { { "Color", ValueType::Color } }, false, /*color*/ true, false, NOT_VOLUME },
@@ -478,9 +485,10 @@ namespace Desert::Editor::ShaderGraph
                 if ( !error.empty() )
                     return fallback;
 
-                // Multi-output nodes: pick the component for the linked pin. Both texture nodes have the
-                // same RGBA/R pair — the difference between them is where the coordinate comes from, not
-                // what a sample is.
+                // Multi-output nodes: pick the component for the linked pin. Both texture nodes pair a
+                // whole-sample pin with an R pin, and `.r` reads the same on the vec4 one and on the
+                // medium's vec3 one — the difference between the nodes is where the coordinate comes
+                // from, not what a sample is.
                 if ( ( src->Kind == "TextureSample" || src->Kind == "MediumTexture" ) &&
                      src->Outputs.size() == 2 && it->second == src->Outputs[1].Id )
                     return var + ".r";
@@ -553,13 +561,19 @@ namespace Desert::Editor::ShaderGraph
                 else if ( node.Kind == "MediumTexture" )
                 {
                     touchedParams.insert( &node );
-                    // textureLod AND NOT texture, AND IT IS NOT A STYLE CHOICE. All four programs a medium
-                    // is compiled into are COMPUTE, and an implicit-LOD fetch needs derivatives no compute
-                    // stage has — glslang refuses it, so `texture()` here would be a shader that will not
-                    // compile emitted from a canvas the artist drew correctly. Level 0 because a volume
-                    // sample has no screen-space footprint to derive a level from in the first place.
-                    decl = std::format( "vec4 {} = textureLod( {}, vec2( {}, {} ), 0.0 );", var, node.ParamName,
-                                        InputExpr( node, 0, "0.0" ), InputExpr( node, 1, "0.0" ) );
+                    // textureLod AND NOT texture, AND THE REASON IS THE LEVEL, NOT THE COMPILER. What used
+                    // to be written here — that glslang REFUSES `texture()` in a compute stage because
+                    // there are no derivatives — was measured false: mutating the ShaderCacheKey census's
+                    // medium from `textureLod( s, uv, 0.0 )` to `texture( s, uv )` compiles clean in all
+                    // four real programs under shaderc with SetWarningsAsErrors(), and the shipped
+                    // CloudFetchNoise is a plain `texture(...)` in every one of them. What is actually
+                    // true is that an implicit level is UNDEFINED outside a fragment stage, so a compute
+                    // march would sample whichever mip the driver happens to pick. Level 0 is stated
+                    // because a volume sample has no screen-space footprint to derive one from.
+                    // Only .rgb: the RGB pin is a Vec3 (see the catalogue), because this domain has no
+                    // vec4 sink to wire a fourth channel into.
+                    decl = std::format( "vec3 {} = textureLod( {}, vec2( {}, {} ), 0.0 ).rgb;", var,
+                                        node.ParamName, InputExpr( node, 0, "0.0" ), InputExpr( node, 1, "0.0" ) );
                 }
                 else if ( node.Kind == "Vec3Param" )
                 {
