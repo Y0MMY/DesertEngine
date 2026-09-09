@@ -17,6 +17,7 @@
 #include <Editor/Import/MeshMaterial.hpp>
 #include <Editor/Import/AsyncMeshLoader.hpp>
 #include <filesystem>
+#include <Engine/Graphic/Render2D/Transform2D.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 #include <Engine/Geometry/SkinnedMesh.hpp>
@@ -1201,13 +1202,37 @@ namespace Desert::Editor
         // actually lives in. Handles, anchors and snapping all resolve inside that tree.
         const entt::entity selCanvas = ::Desert::UI::CanvasOf( reg, e );
 
+        // `r` is the element's rect BEFORE its render transform (the space its offsets are written in);
+        // `xf` maps that rect onto the screen. Everything the author SEES has to go through xf, and
+        // everything written BACK into UILayout has to come out of it — the two halves below.
         ::Desert::UI::Rect r;
-        if ( !::Desert::UI::GetElementRect( reg, selCanvas, e, viewRect, r ) )
+        glm::mat3          xf( 1.0f );
+        if ( !::Desert::UI::GetElementRect( reg, selCanvas, e, viewRect, r, &xf ) )
             return;
 
-        // Selection marquee.
-        dl->AddRect( ImVec2( r.X, r.Y ), ImVec2( r.X + r.W, r.Y + r.H ), IM_COL32( 255, 170, 40, 255 ), 0.0f, 0,
-                     2.0f );
+        namespace R2D = ::Desert::Graphic::Render2D;
+
+        // A corner of `r` where it actually lands on screen.
+        const auto OnScreen = [&xf]( float x, float y )
+        {
+            const glm::vec2 p = R2D::TransformPoint2D( xf, glm::vec2( x, y ) );
+            return ImVec2( p.x, p.y );
+        };
+        // A screen point brought back into `r`'s space, for asking "is the cursor on this element".
+        const auto ToLocal = [&xf]( const ImVec2& p )
+        {
+            const glm::vec2 q = R2D::TransformPoint2D( R2D::InverseTransform2D( xf ), glm::vec2( p.x, p.y ) );
+            return ImVec2( q.x, q.y );
+        };
+
+        // Selection marquee — FOUR EDGES rather than an axis-aligned box, because a rotated element
+        // whose marquee stayed square would be a selection the author cannot line up with what they see.
+        {
+            const ImVec2 c[4] = { OnScreen( r.X, r.Y ), OnScreen( r.X + r.W, r.Y ),
+                                  OnScreen( r.X + r.W, r.Y + r.H ), OnScreen( r.X, r.Y + r.H ) };
+            for ( int i = 0; i < 4; ++i )
+                dl->AddLine( c[i], c[( i + 1 ) % 4], IM_COL32( 255, 170, 40, 255 ), 2.0f );
+        }
 
         // Edit only in Select mode, over the viewport, and not while grabbing a 3D gizmo.
         const bool canEdit = Core::ViewportMode::Get() == Core::EditorMode::Select && m_ViewportData.IsHovered &&
@@ -1221,14 +1246,14 @@ namespace Desert::Editor
             ImVec2   P;
         };
         const HandlePt handles[8] = {
-             { UIHandle::TL, ImVec2( r.X, r.Y ) },
-             { UIHandle::T, ImVec2( cx, r.Y ) },
-             { UIHandle::TR, ImVec2( r.X + r.W, r.Y ) },
-             { UIHandle::R, ImVec2( r.X + r.W, cy ) },
-             { UIHandle::BR, ImVec2( r.X + r.W, r.Y + r.H ) },
-             { UIHandle::B, ImVec2( cx, r.Y + r.H ) },
-             { UIHandle::BL, ImVec2( r.X, r.Y + r.H ) },
-             { UIHandle::L, ImVec2( r.X, cy ) },
+             { UIHandle::TL, OnScreen( r.X, r.Y ) },
+             { UIHandle::T, OnScreen( cx, r.Y ) },
+             { UIHandle::TR, OnScreen( r.X + r.W, r.Y ) },
+             { UIHandle::R, OnScreen( r.X + r.W, cy ) },
+             { UIHandle::BR, OnScreen( r.X + r.W, r.Y + r.H ) },
+             { UIHandle::B, OnScreen( cx, r.Y + r.H ) },
+             { UIHandle::BL, OnScreen( r.X, r.Y + r.H ) },
+             { UIHandle::L, OnScreen( r.X, cy ) },
         };
         const float hs = 4.0f; // half handle size
 
@@ -1251,13 +1276,28 @@ namespace Desert::Editor
                                           ? reg.get<ECS::RelationshipComponent>( e ).Parent
                                           : entt::null;
         ::Desert::UI::Rect pr;
+        glm::mat3          pxf( 1.0f );
         const bool         haveParent =
-             parentE != entt::null && ::Desert::UI::GetElementRect( reg, selCanvas, parentE, viewRect, pr );
+             parentE != entt::null && ::Desert::UI::GetElementRect( reg, selCanvas, parentE, viewRect, pr, &pxf );
+
+        // Anchors are fractions of the PARENT's rect, so their markers live in the parent's space and go
+        // to the screen through the parent's transform — not this element's, which the anchors know
+        // nothing about.
+        const auto OnScreenP = [&pxf]( float x, float y )
+        {
+            const glm::vec2 p = R2D::TransformPoint2D( pxf, glm::vec2( x, y ) );
+            return ImVec2( p.x, p.y );
+        };
+        const auto ToParent = [&pxf]( const ImVec2& p )
+        {
+            const glm::vec2 q = R2D::TransformPoint2D( R2D::InverseTransform2D( pxf ), glm::vec2( p.x, p.y ) );
+            return ImVec2( q.x, q.y );
+        };
 
         const auto&  aL    = reg.get<ECS::UILayoutComponent>( e ).Data;
-        const ImVec2 aMinP = haveParent ? ImVec2( pr.X + aL.AnchorMin.x * pr.W, pr.Y + aL.AnchorMin.y * pr.H )
+        const ImVec2 aMinP = haveParent ? OnScreenP( pr.X + aL.AnchorMin.x * pr.W, pr.Y + aL.AnchorMin.y * pr.H )
                                         : ImVec2( 0.0f, 0.0f );
-        const ImVec2 aMaxP = haveParent ? ImVec2( pr.X + aL.AnchorMax.x * pr.W, pr.Y + aL.AnchorMax.y * pr.H )
+        const ImVec2 aMaxP = haveParent ? OnScreenP( pr.X + aL.AnchorMax.x * pr.W, pr.Y + aL.AnchorMax.y * pr.H )
                                         : ImVec2( 0.0f, 0.0f );
         const float  ar    = 5.0f;
         if ( canEdit && haveParent )
@@ -1287,8 +1327,12 @@ namespace Desert::Editor
                     hovered = h.Id;
                     break;
                 }
-        if ( hovered == UIHandle::None && mouse.x >= r.X && mouse.x <= r.X + r.W && mouse.y >= r.Y &&
-             mouse.y <= r.Y + r.H )
+        // The body test is the one that has to be asked in the element's OWN space: the handles above are
+        // screen points already, but "inside the rect" is a question about the rect, and a rotated
+        // element whose body answered in screen space would be grabbable in a box beside itself.
+        const ImVec2 mouseLocal = ToLocal( mouse );
+        if ( hovered == UIHandle::None && mouseLocal.x >= r.X && mouseLocal.x <= r.X + r.W &&
+             mouseLocal.y >= r.Y && mouseLocal.y <= r.Y + r.H )
             hovered = UIHandle::Body;
 
         if ( canEdit && m_UIDrag == UIHandle::None && hovered != UIHandle::None &&
@@ -1308,9 +1352,10 @@ namespace Desert::Editor
         {
             if ( ImGui::IsMouseDown( ImGuiMouseButton_Left ) && haveParent && pr.W > 0.0f && pr.H > 0.0f )
             {
-                auto& L  = reg.get<ECS::UILayoutComponent>( e ).Data;
-                float fx = std::clamp( ( mouse.x - pr.X ) / pr.W, 0.0f, 1.0f );
-                float fy = std::clamp( ( mouse.y - pr.Y ) / pr.H, 0.0f, 1.0f );
+                auto&        L  = reg.get<ECS::UILayoutComponent>( e ).Data;
+                const ImVec2 mp = ToParent( mouse ); // anchors are fractions of the parent's own rect
+                float        fx = std::clamp( ( mp.x - pr.X ) / pr.W, 0.0f, 1.0f );
+                float        fy = std::clamp( ( mp.y - pr.Y ) / pr.H, 0.0f, 1.0f );
                 if ( !ImGui::GetIO().KeyAlt )
                     for ( float s : { 0.0f, 0.5f, 1.0f } )
                     {
@@ -1344,7 +1389,21 @@ namespace Desert::Editor
         {
             if ( ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
             {
-                glm::vec2 d = ( glm::vec2( mouse.x, mouse.y ) - m_UIDragStartMouse ) / scale; // design px
+                // THE DELTA IS A SCREEN DELTA AND THE OFFSETS ARE NOT, so it is brought back through the
+                // linear part of a transform — and WHICH transform differs by handle, which is the whole
+                // reason this is two lines and not one:
+                //   * Body moves the rect inside its PARENT, and a rect translated by d in the parent's
+                //     space appears translated by pxf*d on screen (the pivot travels with it, so the
+                //     element's own rotation contributes nothing);
+                //   * a resize handle moves an EDGE of the rect, which the element's own transform then
+                //     turns as well — so that one comes back through xf.
+                // Both are the identity for an untransformed element, which is why this reads the same as
+                // it always did for every scene that does not rotate anything.
+                const glm::mat3 undo    = R2D::InverseTransform2D( m_UIDrag == UIHandle::Body ? pxf : xf );
+                const glm::vec2 screenD = glm::vec2( mouse.x, mouse.y ) - m_UIDragStartMouse;
+                glm::vec2       d       = glm::vec2( undo[0].x * screenD.x + undo[1].x * screenD.y,
+                                                     undo[0].y * screenD.x + undo[1].y * screenD.y ) /
+                              scale; // design px, in the space the offsets are written in
                 if ( ImGui::GetIO().KeyShift && m_UIDrag == UIHandle::Body ) // Shift = lock the dominant axis
                 {
                     if ( std::abs( d.x ) >= std::abs( d.y ) )
@@ -1439,7 +1498,9 @@ namespace Desert::Editor
                                 oMin.x += addX;
                             if ( maxX )
                                 oMax.x += addX;
-                            dl->AddLine( ImVec2( gXpos, r.Y - 40.0f ), ImVec2( gXpos, r.Y + r.H + 40.0f ),
+                            // The guide is a line in the PARENT's space (that is where gXpos and the
+                            // element's edges were compared), so it reaches the screen the same way.
+                            dl->AddLine( OnScreenP( gXpos, r.Y - 40.0f ), OnScreenP( gXpos, r.Y + r.H + 40.0f ),
                                          IM_COL32( 90, 200, 255, 200 ), 1.0f );
                         }
 
@@ -1477,7 +1538,7 @@ namespace Desert::Editor
                                 oMin.y += addY;
                             if ( maxY )
                                 oMax.y += addY;
-                            dl->AddLine( ImVec2( r.X - 40.0f, gYpos ), ImVec2( r.X + r.W + 40.0f, gYpos ),
+                            dl->AddLine( OnScreenP( r.X - 40.0f, gYpos ), OnScreenP( r.X + r.W + 40.0f, gYpos ),
                                          IM_COL32( 90, 200, 255, 200 ), 1.0f );
                         }
                     }
