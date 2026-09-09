@@ -36,8 +36,12 @@ namespace Desert::Graphic::System
         pipeSpec.Framebuffer = m_Framebuffer;
         pipeSpec.Shader      = m_Shader;
 
-        m_Pipeline = Graphic::GraphicsPipeline::Create( pipeSpec );
-        m_Pipeline->Invalidate();
+        // m_Shader is whatever GetByName returned, INCLUDING nullptr — this site never checked, and a
+        // null shader used to be dereferenced inside the backend. Create's rule names it now.
+        const auto pipeline = Graphic::GraphicsPipeline::Create( pipeSpec );
+        if ( !pipeline )
+            return Common::MakeError( pipeline.GetError() );
+        m_Pipeline = pipeline.GetValue();
 
         m_MaterialTonemap = std::make_unique<MaterialTonemap>();
 

@@ -56,10 +56,10 @@ namespace Desert::Graphic::Render2D
         spec.BlendEnable       = true; // straight-alpha composite over the scene
         spec.UseLoadRenderPass = true; // draw ON TOP of the composited scene, don't clear it
 
-        m_Pipeline = GraphicsPipeline::Create( spec );
-        if ( !m_Pipeline )
-            return Common::MakeError( "Render2D::Init: failed to create UI2D pipeline" );
-        m_Pipeline->Invalidate();
+        const auto uiPipeline = GraphicsPipeline::Create( spec );
+        if ( !uiPipeline )
+            return Common::MakeError( "Render2D::Init: " + uiPipeline.GetError() );
+        m_Pipeline = uiPipeline.GetValue();
 
         // Text pipeline: identical state, but the UIText shader samples the SDF glyph atlas. Same vertex
         // layout (pos/uv/colour), so text and shape quads share the one dynamic vertex buffer.
@@ -70,10 +70,10 @@ namespace Desert::Graphic::Render2D
         GraphicsPipelineSpecification textSpec = spec;
         textSpec.DebugName                     = "UITextPipeline";
         textSpec.Shader                        = m_TextShader;
-        m_TextPipeline                         = GraphicsPipeline::Create( textSpec );
-        if ( !m_TextPipeline )
-            return Common::MakeError( "Render2D::Init: failed to create UIText pipeline" );
-        m_TextPipeline->Invalidate();
+        const auto textPipeline                = GraphicsPipeline::Create( textSpec );
+        if ( !textPipeline )
+            return Common::MakeError( "Render2D::Init: " + textPipeline.GetError() );
+        m_TextPipeline = textPipeline.GetValue();
 
         // Glass pipeline: same state again, but the UIGlass shader samples the blurred scene snapshot and
         // masks itself with a rounded-rect SDF. Optional — a project whose shaders predate it still runs,
@@ -84,9 +84,12 @@ namespace Desert::Graphic::Render2D
             GraphicsPipelineSpecification glassSpec = spec;
             glassSpec.DebugName                     = "UIGlassPipeline";
             glassSpec.Shader                        = m_GlassShader;
-            m_GlassPipeline                         = GraphicsPipeline::Create( glassSpec );
-            if ( m_GlassPipeline )
-                m_GlassPipeline->Invalidate();
+            // Glass is OPTIONAL, so a refusal here is not an Init failure — but it is named, because a
+            // silent flat tint reads exactly like "the designer did not enable glass".
+            if ( const auto glassPipeline = GraphicsPipeline::Create( glassSpec ) )
+                m_GlassPipeline = glassPipeline.GetValue();
+            else
+                LOG_ERROR( "Render2D: backdrop-blur panels draw as flat tint — {}", glassPipeline.GetError() );
         }
         else
         {

@@ -63,11 +63,15 @@ namespace Desert::Graphic::System
         pipeSpec.DepthTestEnabled  = false;
         pipeSpec.DepthWriteEnabled = false;
 
-        m_Pipeline = Graphic::GraphicsPipeline::Create( pipeSpec );
-        m_Pipeline->Invalidate();
+        // Same unchecked GetByName as Tonemap/FXAA: a missing 'Skybox' shader was a null dereference.
+        const auto pipeline = Graphic::GraphicsPipeline::Create( pipeSpec );
+        if ( !pipeline )
+            return Common::MakeError( pipeline.GetError() );
+        m_Pipeline = pipeline.GetValue();
 
         // Procedural sky: same fullscreen-quad pass/target, but the engine-generated atmosphere shader.
         m_ProceduralShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "ProceduralSky" );
+        Common::ResultStr<std::shared_ptr<Graphic::GraphicsPipeline>> proceduralPipeline;
         if ( m_ProceduralShader )
         {
             Graphic::GraphicsPipelineSpecification skySpec;
@@ -78,8 +82,19 @@ namespace Desert::Graphic::System
             skySpec.DepthTestEnabled  = false;
             skySpec.DepthWriteEnabled = false;
 
-            m_ProceduralPipeline = Graphic::GraphicsPipeline::Create( skySpec );
-            m_ProceduralPipeline->Invalidate();
+            proceduralPipeline = Graphic::GraphicsPipeline::Create( skySpec );
+            if ( !proceduralPipeline )
+            {
+                // The procedural sky is optional (a scene on a cubemap never asks for it), so a refusal
+                // is not an Initialize failure — but everything below this point exists only to feed
+                // this pipeline, so it is all skipped rather than half-built.
+                LOG_ERROR( "[SkyAtmosphere] the procedural sky will not draw for this view: {}",
+                           proceduralPipeline.GetError() );
+            }
+        }
+        if ( proceduralPipeline )
+        {
+            m_ProceduralPipeline = proceduralPipeline.GetValue();
 
             m_ProceduralMaterial = std::make_shared<MaterialProceduralSky>();
 

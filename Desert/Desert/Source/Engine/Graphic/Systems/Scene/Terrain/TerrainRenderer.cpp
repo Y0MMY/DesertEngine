@@ -247,9 +247,10 @@ namespace Desert::Graphic::System
         // `#pragma state` — no longer hardcoded here. The pipeline comes from the shared cache.
         ApplyShaderRenderState( spec, shader->GetProgramMeta().State );
 
-        m_Pipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
-        if ( !m_Pipeline )
-            return Common::MakeError( "TerrainRenderer: failed to create pipeline" );
+        const auto pipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
+        if ( !pipeline )
+            return Common::MakeError( "TerrainRenderer: " + pipeline.GetError() );
+        m_Pipeline = pipeline.GetValue();
 
         // Terrain materials are created lazily, one per texture set, inside the pass — see m_Materials
         // in the header. Nothing to build here: a material made now would only ever serve one key.
@@ -264,9 +265,17 @@ namespace Desert::Graphic::System
             grassSpec.BlendEnable = false;
             ApplyShaderRenderState( grassSpec, grassShader->GetProgramMeta().State );
 
-            m_GrassPipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( grassSpec );
-            if ( m_GrassPipeline )
+            const auto grassPipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( grassSpec );
+            if ( !grassPipeline )
             {
+                // Grass is optional, so this is not an Initialize failure — but it used to be an
+                // `if ( m_GrassPipeline )` that was always true, so an unbuilt grass pipeline took the
+                // whole block anyway and grass "worked" while drawing nothing.
+                LOG_ERROR( "[Terrain] grass is off for this scene: {}", grassPipeline.GetError() );
+            }
+            else
+            {
+                m_GrassPipeline = grassPipeline.GetValue();
                 m_GrassMaterial = std::make_unique<DataDrivenMaterial>( "Grass" );
                 m_GrassClumpTex = BakeGrassClumpTexture(); // baked once, sampled per-fragment (cheap)
 

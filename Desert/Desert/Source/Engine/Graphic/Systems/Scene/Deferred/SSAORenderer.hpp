@@ -34,8 +34,10 @@ namespace Desert::Graphic::System
             spec.Shader            = m_Shader;
             spec.DepthTestEnabled  = false;
             spec.DepthWriteEnabled = false;
-            m_Pipeline             = Graphic::GraphicsPipeline::Create( spec );
-            m_Pipeline->Invalidate();
+            const auto pipeline    = Graphic::GraphicsPipeline::Create( spec );
+            if ( !pipeline )
+                return Common::MakeError( pipeline.GetError() );
+            m_Pipeline = pipeline.GetValue();
 
             m_Material = std::make_unique<MaterialSSAO>();
             return BOOLSUCCESS;

@@ -19,17 +19,15 @@ namespace Desert::Graphic::System
             return fb;
         }
 
-        std::shared_ptr<GraphicsPipeline> MakePipeline( std::string_view name,
-                                                        const std::shared_ptr<Framebuffer>& fb,
-                                                        const std::shared_ptr<Shader>&       shader )
+        NO_DISCARD Common::ResultStr<std::shared_ptr<GraphicsPipeline>>
+                   MakePipeline( std::string_view name, const std::shared_ptr<Framebuffer>& fb,
+                                 const std::shared_ptr<Shader>& shader )
         {
             Graphic::GraphicsPipelineSpecification spec;
             spec.DebugName   = std::string( name );
             spec.Framebuffer = fb;
             spec.Shader      = shader;
-            auto pipeline    = Graphic::GraphicsPipeline::Create( spec );
-            pipeline->Invalidate();
-            return pipeline;
+            return Graphic::GraphicsPipeline::Create( spec );
         }
     } // namespace
 
@@ -38,7 +36,9 @@ namespace Desert::Graphic::System
         const auto& targetFramebuffer = m_TargetFramebuffer.lock();
         if ( !targetFramebuffer )
         {
-            DESERT_VERIFY( false );
+            // `DESERT_VERIFY( false )` stood here — it takes the process down, and then FALLS THROUGH
+            // to dereference the null it was asserting about. This function returns a Result; say so.
+            return Common::MakeError( "SMAARenderer: the target framebuffer is gone." );
         }
 
         const uint32_t w = targetFramebuffer->GetFramebufferWidth();
@@ -54,9 +54,23 @@ namespace Desert::Graphic::System
         m_WeightsShader = shaders.GetByName( "SMAAWeights" );
         m_BlendShader   = shaders.GetByName( "SMAABlend" );
 
-        m_EdgesPipeline   = MakePipeline( "SMAAEdges", m_EdgesFB, m_EdgesShader );
-        m_WeightsPipeline = MakePipeline( "SMAAWeights", m_WeightsFB, m_WeightsShader );
-        m_BlendPipeline   = MakePipeline( "SMAABlend", m_Framebuffer, m_BlendShader );
+        // The three shaders above were taken from GetByName WITHOUT a check until Г22, and a missing one
+        // is a null shared_ptr that reached VulkanPipeline::CreatePipelineLayout and was dereferenced.
+        // The rule inside Create refuses it by name now, and the refusal arrives here.
+        const auto edges = MakePipeline( "SMAAEdges", m_EdgesFB, m_EdgesShader );
+        if ( !edges )
+            return Common::MakeError( edges.GetError() );
+        m_EdgesPipeline = edges.GetValue();
+
+        const auto weights = MakePipeline( "SMAAWeights", m_WeightsFB, m_WeightsShader );
+        if ( !weights )
+            return Common::MakeError( weights.GetError() );
+        m_WeightsPipeline = weights.GetValue();
+
+        const auto blend = MakePipeline( "SMAABlend", m_Framebuffer, m_BlendShader );
+        if ( !blend )
+            return Common::MakeError( blend.GetError() );
+        m_BlendPipeline = blend.GetValue();
 
         m_MatEdges   = std::make_unique<MaterialSMAAEdges>();
         m_MatWeights = std::make_unique<MaterialSMAAWeights>();

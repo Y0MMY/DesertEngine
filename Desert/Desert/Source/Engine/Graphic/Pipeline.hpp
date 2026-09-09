@@ -173,6 +173,59 @@ namespace Desert::Graphic
         std::string DebugName;
     };
 
+    /**
+     * Whether a graphics pipeline may be built from @p spec at all — the same arrangement, and for the
+     * same reasons, as CheckComputePipelineSpecification below: one rule, asked in one place, so that
+     * GraphicsPipeline::Create has a single thing to obey and a test has a single thing to run.
+     *
+     * WHY IT IS A FREE FUNCTION IN THE HEADER AND NOT THREE LINES INSIDE Create(). Create() cannot be
+     * linked without the whole Vulkan backend, so a gate over it could never fire on a machine with no
+     * device — and a refusal nobody can make fire is decoration. Here the DECISION is device-free and
+     * Desert/Tests/Engine/GraphicsPipelineRefusal calls it directly.
+     *
+     * THE THREE DOORS IT CLOSES, each of which was a crash and not a refusal before Г22:
+     *   * NO SHADER AT ALL. Four renderers (Tonemap, FXAA, SMAA, Skybox) took the result of
+     *     ShaderService::GetByName without looking at it and put it straight into a spec. The backend's
+     *     own guard read `Shader && !IsCompiled()`, so a NULL shader sailed past it into
+     *     CreatePipelineLayout, which dereferences it — a null-pointer call, not a bad pipeline.
+     *   * A SHADER THAT NEVER COMPILED. Its stage list is empty; vkCreateGraphicsPipelines answers
+     *     stageCount = 0 with a validation storm. The backend has refused this since its own crash, but
+     *     could not tell the caller, so the caller kept the object and drew nothing forever.
+     *   * NO FRAMEBUFFER. VulkanPipeline::CreateGraphicsPipeline THREW `std::runtime_error` for this,
+     *     which nothing in the engine catches: the refusal was std::terminate.
+     *
+     * It answers only what can be answered without a device. "Does this program have a VERTEX stage" is
+     * a different question, needs the backend's stage list, and is asked by VulkanPipeline::Invalidate
+     * through VulkanShader::GetVertexStage — the mirror of the compute side's GetComputeStage.
+     */
+    NO_DISCARD inline Common::BoolResultStr
+    CheckGraphicsPipelineSpecification( const GraphicsPipelineSpecification& spec )
+    {
+        // A NAMED COPY, not a string_view over the ternary: the arms are `const char[]` and
+        // `std::string`, so the ternary itself yields a std::string TEMPORARY, and a view of it would
+        // dangle at the semicolon.
+        const std::string name = spec.DebugName.empty() ? "<unnamed>" : spec.DebugName;
+        if ( !spec.Shader )
+        {
+            return Common::MakeFormattedError( "GraphicsPipeline '{}': no shader was given.", name );
+        }
+        if ( !spec.Shader->IsCompiled() )
+        {
+            return Common::MakeFormattedError(
+                 "GraphicsPipeline '{}': shader '{}' has no compiled stages (see the shader compilation "
+                 "error above). The draws using it are skipped.",
+                 name, spec.Shader->GetName() );
+        }
+        if ( !spec.Framebuffer )
+        {
+            return Common::MakeFormattedError(
+                 "GraphicsPipeline '{}': no target framebuffer was given; a graphics pipeline is built "
+                 "against its target's render pass and cannot exist without one.",
+                 name );
+        }
+        return BOOLSUCCESS;
+    }
+
     class GraphicsPipeline : public IPipeline
     {
     public:
@@ -181,8 +234,23 @@ namespace Desert::Graphic
         }
 
         [[nodiscard]] virtual const GraphicsPipelineSpecification& GetSpecification() const = 0;
-        
-        static std::shared_ptr<GraphicsPipeline> Create( const GraphicsPipelineSpecification& spec );
+
+        /**
+         * The ONLY way to obtain a graphics pipeline, and it hands back one that is already BUILT.
+         *
+         * IT RETURNS A RESULT BECAUSE IT CAN REFUSE, AND IT COULD NOT BEFORE. It used to return a bare
+         * `shared_ptr` that `make_shared` can never leave null, so every one of the thirty-five call
+         * sites in the engine was either unchecked or carried an `if ( !pipeline )` branch that COULD
+         * NOT RUN. That is what hid the three crashes listed on the rule above: the code looked like it
+         * handled a failure it was structurally unable to see.
+         *
+         * BUILT, NOT MERELY ALLOCATED. Every call site used to read `Create(...)` then `Invalidate()` on
+         * the next line — a two-step whose first half returns an object that cannot draw and whose second
+         * half could not report anything. Folding it here is what makes the returned pipeline's success a
+         * property of the OBJECT rather than of the caller having remembered the second line.
+         */
+        NO_DISCARD static Common::ResultStr<std::shared_ptr<GraphicsPipeline>>
+        Create( const GraphicsPipelineSpecification& spec );
     };
 
     // --- Compute Pipeline ---

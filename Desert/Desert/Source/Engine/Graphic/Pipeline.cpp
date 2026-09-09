@@ -6,17 +6,44 @@
 
 namespace Desert::Graphic
 {
-    std::shared_ptr<GraphicsPipeline> GraphicsPipeline::Create( const GraphicsPipelineSpecification& spec )
+    Common::ResultStr<std::shared_ptr<GraphicsPipeline>>
+    GraphicsPipeline::Create( const GraphicsPipelineSpecification& spec )
     {
+        // ASKED BEFORE ANYTHING IS CONSTRUCTED. The leaf's Invalidate dereferences spec.Shader to read
+        // its descriptor set layouts, and threw std::runtime_error on a missing framebuffer — both are
+        // process death, which is the outcome the caller is being handed a Result in order to avoid.
+        if ( const auto buildable = CheckGraphicsPipelineSpecification( spec ); !buildable )
+        {
+            return Common::MakeError<std::shared_ptr<GraphicsPipeline>>( buildable.GetError() );
+        }
+
         switch ( RendererAPI::GetAPIType() )
         {
             case RendererAPIType::None:
-                return nullptr;
+                // A REFUSAL WITH A REASON, not a null nobody could tell apart from "the shader was bad".
+                return Common::MakeError<std::shared_ptr<GraphicsPipeline>>(
+                     "GraphicsPipeline '" + spec.DebugName + "': no rendering API is selected." );
             case RendererAPIType::Vulkan:
-                return std::make_shared<API::Vulkan::VulkanPipeline>( spec );
+            {
+                auto pipeline = std::make_shared<API::Vulkan::VulkanPipeline>( spec );
+                pipeline->Invalidate();
+
+                // THE HANDLE, NOT A FLAG. Invalidate's own refusal (a program with no vertex stage,
+                // e.g. a compute shader reached by name) leaves the VkPipeline null, and asking the
+                // object what it actually built is the one question that cannot drift away from what it
+                // did — a second `bool m_Built` beside it would be exactly the mirror this engine keeps
+                // finding out of step with its subject.
+                if ( pipeline->GetVkPipeline() == VK_NULL_HANDLE )
+                {
+                    return Common::MakeError<std::shared_ptr<GraphicsPipeline>>(
+                         "GraphicsPipeline '" + spec.DebugName +
+                         "': the Vulkan pipeline was not built (see the error above)." );
+                }
+                return Common::MakeSuccess<std::shared_ptr<GraphicsPipeline>>( std::move( pipeline ) );
+            }
         }
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
-        return nullptr;
+        return Common::MakeError<std::shared_ptr<GraphicsPipeline>>( "Unknown RenderingAPI" );
     }
 
     Common::ResultStr<std::shared_ptr<ComputePipeline>>

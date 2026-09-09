@@ -107,11 +107,17 @@ namespace Desert::Graphic::System
         // framebuffer's LOAD render pass.
         spec.UseLoadRenderPass = true;
 
-        m_ApplyPipeline = GraphicsPipeline::Create( spec );
-        if ( m_ApplyPipeline )
-            m_ApplyPipeline->Invalidate();
+        const auto apply = GraphicsPipeline::Create( spec );
+        if ( !apply )
+        {
+            LOG_ERROR( "[HeightFog] the apply pipeline was not built: {}", apply.GetError() );
+            return false;
+        }
+        m_ApplyPipeline = apply.GetValue();
 
-        return m_FogPipeline && m_ApplyPipeline;
+        // `return m_FogPipeline && m_ApplyPipeline;` stood here: both were assigned from a Result already
+        // checked at the line above, so it could not be false. The refusals are at their own sites now.
+        return true;
     }
 
     void HeightFogRenderer::SetFogSettings( bool present, const ECS::ExponentialHeightFogData& data,

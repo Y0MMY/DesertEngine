@@ -188,23 +188,30 @@ namespace Desert::Graphic
         RegisterSystem<System::JumpFloodOutlineRenderer>( "JumpFloodSystem", this, m_TargetFramebuffer,
                                                           m_RenderGraphBuilder );
 
+        // NAMED AND SURVIVED, NOT VERIFIED. `DESERT_VERIFY( false )` stood at each of the nine sites
+        // below, so a render system that refused to initialise took the whole process with it — and
+        // after Г22 that became REACHABLE for the first time: a typo in StaticMeshPBR.shader now
+        // produces an honest refusal from MeshRenderer::Initialize, which this line then turned into a
+        // crash. The engine already has the rule for this one rung lower — VulkanRendererAPI::
+        // BindGraphicsPipeline skips every draw through a pipeline that was not built — so a system
+        // that could not initialise means its passes draw nothing, not that the editor vanishes.
         if ( !SP_CAST( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->Initialize() )
-            DESERT_VERIFY( false );
+            LOG_ERROR( "[SceneRenderer] the skybox system did not initialise; the sky will not draw." );
 
         const auto& meshSystem = SP_CAST( System::MeshRenderer, m_RenderSystems["MeshSystem"] );
         if ( !meshSystem->Initialize() )
-            DESERT_VERIFY( false );
+            LOG_ERROR( "[SceneRenderer] the mesh system did not initialise; meshes will not draw." );
 
         // GPU terrain (tessellated patch grid; opaque geometry, depth-tested with the meshes).
         RegisterSystem<System::TerrainRenderer>( "TerrainSystem", this, m_TargetFramebuffer,
                                                  m_RenderGraphBuilder );
         if ( !SP_CAST( System::TerrainRenderer, m_RenderSystems["TerrainSystem"] )->Initialize() )
-            DESERT_VERIFY( false );
+            LOG_ERROR( "[SceneRenderer] the terrain system did not initialise; terrain will not draw." );
 
         const auto& jumpFloodSystem =
              SP_CAST( System::JumpFloodOutlineRenderer, m_RenderSystems["JumpFloodSystem"] );
         if ( !jumpFloodSystem->Initialize() )
-            DESERT_VERIFY( false );
+            LOG_ERROR( "[SceneRenderer] the outline system did not initialise; selection outlines are off." );
 
         // Feed the silhouette mask (produced by the mesh system) into the Jump Flood outline.
         jumpFloodSystem->SetMaskFramebuffer( meshSystem->GetSilhouetteMaskFramebuffer() );
@@ -214,7 +221,7 @@ namespace Desert::Graphic
                                                  m_RenderGraphBuilder );
         const auto& tonemapSystem = SP_CAST( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] );
         if ( !tonemapSystem->Initialize() )
-            DESERT_VERIFY( false );
+            LOG_ERROR( "[SceneRenderer] the tonemap system did not initialise; the viewport stays black." );
 
         // Backdrop blur: a blurred snapshot of the scene colour the UI canvas samples for "glass" panels.
         // Runs before the UI phase (which writes into this same target, so it cannot sample it directly).
@@ -231,7 +238,7 @@ namespace Desert::Graphic
         RegisterSystem<System::BloomRenderer>( "BloomSystem", this, m_TargetFramebuffer, m_RenderGraphBuilder );
         const auto& bloomSystem = SP_CAST( System::BloomRenderer, m_RenderSystems["BloomSystem"] );
         if ( !bloomSystem->Initialize() )
-            DESERT_VERIFY( false );
+            LOG_ERROR( "[SceneRenderer] the bloom system did not initialise; the scene renders without glow." );
 
         // Light shafts: the atmosphere sun's screen-space streaks, masked and radially blurred from the
         // HDR scene colour; tonemap adds them in the way it adds bloom. Non-fatal: a sky without streaks
@@ -308,7 +315,7 @@ namespace Desert::Graphic
         const auto& autoExposureSystem =
              SP_CAST( System::AutoExposureRenderer, m_RenderSystems["AutoExposureSystem"] );
         if ( !autoExposureSystem->Initialize() )
-            DESERT_VERIFY( false );
+            LOG_ERROR( "[SceneRenderer] auto-exposure did not initialise; exposure stays at its default." );
         tonemapSystem->SetAutoExposureImage( autoExposureSystem->GetAdaptedLuminanceImage() );
 
         // FXAA consumes the tonemapped image (LDR). It only runs when the machine's post AA is FXAA
@@ -316,13 +323,13 @@ namespace Desert::Graphic
         RegisterSystem<System::FXAARenderer>( "FXAASystem", this, tonemapSystem->GetSystemFramebuffer(),
                                               m_RenderGraphBuilder );
         if ( !SP_CAST( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Initialize() )
-            DESERT_VERIFY( false );
+            LOG_ERROR( "[SceneRenderer] FXAA did not initialise; the image is drawn without post AA." );
 
         // SMAA consumes the same tonemapped image. Runs only when the machine's post AA is SMAA.
         RegisterSystem<System::SMAARenderer>( "SMAASystem", this, tonemapSystem->GetSystemFramebuffer(),
                                               m_RenderGraphBuilder );
         if ( !SP_CAST( System::SMAARenderer, m_RenderSystems["SMAASystem"] )->Initialize() )
-            DESERT_VERIFY( false );
+            LOG_ERROR( "[SceneRenderer] SMAA did not initialise; the image is drawn without post AA." );
 
         // The graph is NOT built here: RebindScene() runs immediately after and builds it once, over the
         // engine systems above plus whatever external passes survive. Building it twice on the first Init

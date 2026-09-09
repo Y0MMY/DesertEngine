@@ -29,8 +29,11 @@ namespace Desert::Graphic::System
         pipeSpec.Framebuffer = m_Framebuffer;
         pipeSpec.Shader      = m_Shader;
 
-        m_Pipeline = Graphic::GraphicsPipeline::Create( pipeSpec );
-        m_Pipeline->Invalidate();
+        // Same unchecked GetByName as TonemapRenderer: a missing 'FXAA' shader was a null dereference.
+        const auto pipeline = Graphic::GraphicsPipeline::Create( pipeSpec );
+        if ( !pipeline )
+            return Common::MakeError( pipeline.GetError() );
+        m_Pipeline = pipeline.GetValue();
 
         m_MaterialFXAA = std::make_unique<MaterialFXAA>();
 

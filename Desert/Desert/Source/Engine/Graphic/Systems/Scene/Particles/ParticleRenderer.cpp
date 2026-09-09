@@ -83,20 +83,33 @@ namespace Desert::Graphic::System
         addSpec.DebugName                     = "ParticleAdd";
         addSpec.SrcColorBlendFactor           = BlendFactor::SrcAlpha;
         addSpec.DstColorBlendFactor           = BlendFactor::One; // additive glow
-        m_AddPipeline                         = GraphicsPipeline::Create( addSpec );
-        m_AddPipeline->Invalidate();
+        const auto add                        = GraphicsPipeline::Create( addSpec );
+        if ( !add )
+        {
+            LOG_ERROR( "ParticleRenderer: {}", add.GetError() );
+            return false;
+        }
+        m_AddPipeline = add.GetValue();
 
         GraphicsPipelineSpecification alphaSpec = base;
         alphaSpec.DebugName                     = "ParticleAlpha";
         alphaSpec.SrcColorBlendFactor           = BlendFactor::SrcAlpha;
         alphaSpec.DstColorBlendFactor           = BlendFactor::OneMinusSrcAlpha; // soft over
-        m_AlphaPipeline                         = GraphicsPipeline::Create( alphaSpec );
-        m_AlphaPipeline->Invalidate();
+        const auto alpha                        = GraphicsPipeline::Create( alphaSpec );
+        if ( !alpha )
+        {
+            LOG_ERROR( "ParticleRenderer: {}", alpha.GetError() );
+            return false;
+        }
+        m_AlphaPipeline = alpha.GetValue();
 
         // No shared billboard material here — each emitter owns one (created in GetOrCreate). The
         // particle SSBO is a descriptor, and one material can hold exactly one per frame.
 
-        return m_SimPipeline && m_AddPipeline && m_AlphaPipeline;
+        // `return m_SimPipeline && m_AddPipeline && m_AlphaPipeline;` stood here and could not be false:
+        // every one of the three was assigned from a factory that could not fail. Each is refused above,
+        // at the point that knows which one it was.
+        return true;
     }
 
     ParticleRenderer::EmitterGpu& ParticleRenderer::GetOrCreate( uint32_t entityId, int maxParticles )
