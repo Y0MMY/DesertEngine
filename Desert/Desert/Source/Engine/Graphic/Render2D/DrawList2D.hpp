@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Engine/Graphic/Render2D/Transform2D.hpp>
+
 #include <glm/glm.hpp>
 
 #include <cstdint>
@@ -33,9 +35,17 @@ namespace Desert::Graphic::Render2D
         // masks itself with a rounded rectangle. Every glass rect carries its own rect/radius/blur in push
         // constants, so glass commands are never merged with anything — one element, one draw.
         bool      Glass      = false;
-        glm::vec4 GlassRect  = { 0.0f, 0.0f, 0.0f, 0.0f }; // min.xy, max.xy in pixels
+        glm::vec4 GlassRect  = { 0.0f, 0.0f, 0.0f, 0.0f }; // min.xy, max.xy in the rect's OWN space, px
         float     GlassRound = 0.0f;                       // corner radius, px
         float     GlassLod   = 0.0f;                       // blur level in the backdrop pyramid
+
+        // Screen px -> the rect's own space, so the mask above can be evaluated where the rect is
+        // axis-aligned however the element is turned. Identity for an untransformed panel, and identity
+        // maps gl_FragCoord onto itself EXACTLY, which is what keeps the untransformed picture unchanged.
+        glm::mat3 GlassInverse = glm::mat3( 1.0f );
+        // One screen pixel measured in that own space — the antialiasing feather, so a scaled-up panel
+        // does not get a scaled-up soft edge. Exactly 1 when untransformed.
+        float GlassFeather = 1.0f;
     };
 
     class DrawList2D
@@ -80,8 +90,38 @@ namespace Desert::Graphic::Render2D
 
         // Clip subsequently-added primitives to `min`..`max` (px), intersected with the current clip (so
         // nested masks compose). Pair with PopClipRect. The backend applies it as a scissor per batch.
+        //
+        // `min`/`max` are read in the CURRENT transform's space and stored as their SCREEN-space bounding
+        // box, because a scissor is the only clip the hardware has and it is axis-aligned. So a clipper
+        // that is itself rotated clips to the box around it — conservatively (it never clips away a pixel
+        // it should keep), and the walk's pointer clip goes through the same TransformedAABB2D so the
+        // picture and the pointer cannot disagree about where the clip is. Clipping to the rotated
+        // quadrilateral itself needs a stencil and is the task behind this one.
         void PushClipRect( const glm::vec2& min, const glm::vec2& max );
         void PopClipRect();
+
+        // --- Render transform ------------------------------------------------------------------------
+        // Everything added between a Push and its Pop has its POSITIONS mapped through @p xform, composed
+        // with whatever is already on the stack (so a child inherits its parent's). Nothing else changes:
+        // UVs, colours and the batch state are untouched, which is precisely why a rotated element does
+        // not open a draw call of its own.
+        //
+        // NOTHING IS PUSHED FOR A NEUTRAL TRANSFORM AND THAT IS THE INVARIANT: with an empty stack the
+        // positions are stored verbatim, so a canvas that rotates nothing emits the same bytes it emitted
+        // before this existed.
+        void PushTransform( const glm::mat3& xform );
+        void PopTransform();
+
+        // The accumulated transform, for a caller that must undo it — the hit test inverts THIS matrix
+        // rather than rebuilding its own, so the pointer lands where the geometry did.
+        const glm::mat3& GetTransform() const
+        {
+            return m_Transform;
+        }
+        bool HasTransform() const
+        {
+            return m_HasTransform;
+        }
 
         // Textured axis-aligned quad. `texture` is an opaque id (engine Image2D*) the backend binds; `uv0`/
         // `uv1` are the top-left / bottom-right texture coordinates (0..1), `tint` multiplies the sampled
@@ -122,11 +162,23 @@ namespace Desert::Graphic::Render2D
         void AddQuad( const void* texture, const glm::vec2& min, const glm::vec2& max, const glm::vec2& uv0,
                       const glm::vec2& uv1, const glm::vec4& color, bool text );
 
+        // The one place a position becomes a vertex. With an empty transform stack it is the identity in
+        // the strongest sense — the value is not touched at all.
+        glm::vec2 Xf( const glm::vec2& p ) const
+        {
+            return m_HasTransform ? TransformPoint2D( m_Transform, p ) : p;
+        }
+
         std::vector<Vertex2D>    m_Vertices;
         std::vector<uint32_t>    m_Indices;
         std::vector<DrawCommand> m_Commands;
 
         glm::vec4              m_CurrentClip = { 0.0f, 0.0f, 0.0f, 0.0f }; // x,y,w,h px; W<=0 => unclipped
         std::vector<glm::vec4> m_ClipStack;
+
+        glm::mat3 m_Transform    = glm::mat3( 1.0f );
+        bool      m_HasTransform = false; // == !m_TransformStack.empty(), kept as a flag so
+                                          // the per-vertex test is a bool and not a compare
+        std::vector<glm::mat3> m_TransformStack;
     };
 } // namespace Desert::Graphic::Render2D

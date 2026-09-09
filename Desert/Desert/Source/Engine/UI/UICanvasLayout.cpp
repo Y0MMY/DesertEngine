@@ -1,6 +1,7 @@
 #include "UICanvasLayout.hpp"
 
 #include <Engine/ECS/Components.hpp>
+#include <Engine/Graphic/Render2D/Transform2D.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -208,8 +209,32 @@ namespace Desert::UI
             rects               = SolveLayoutGroup( container, params, sizes, flex );
         }
 
+        // The element's accumulated transform: its parent's, with its own composed inside it. THE SAME
+        // COMPOSITION ORDER THE RENDERER USES (DrawList2D::PushTransform), because a pick that composed
+        // the other way round would be right for one level and wrong for two.
+        glm::mat3 AccumulateTransform( entt::registry& reg, entt::entity e, const Rect& rect,
+                                       const glm::mat3& parentXform )
+        {
+            if ( !reg.has<ECS::UILayoutComponent>( e ) )
+                return parentXform;
+            const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
+            if ( L.Rotation == 0.0f && L.Scale == glm::vec2( 1.0f, 1.0f ) )
+                return parentXform;
+            const glm::vec2 pivotPx( rect.X + L.Pivot.x * rect.W, rect.Y + L.Pivot.y * rect.H );
+            return parentXform * Graphic::Render2D::MakeTransform2D( pivotPx, L.Rotation, L.Scale );
+        }
+
+        // The pointer brought into @p xform's space — the inverse of what the geometry went through, so
+        // "is the cursor inside this element" is asked about the rect the element actually has.
+        glm::vec2 UndoTransform( const glm::mat3& xform, const glm::vec2& p )
+        {
+            return Graphic::Render2D::IsIdentity2D( xform )
+                        ? p
+                        : Graphic::Render2D::TransformPoint2D( Graphic::Render2D::InverseTransform2D( xform ), p );
+        }
+
         void PickRecurse( entt::registry& reg, entt::entity e, const Rect& parent, float scale, const glm::vec2& p,
-                          entt::entity& hit, const Rect* forcedRect = nullptr )
+                          entt::entity& hit, const glm::mat3& parentXform, const Rect* forcedRect = nullptr )
         {
             // An element that is not drawn cannot be clicked in the viewport either — the same rule the
             // renderer applies to the pointer, applied to the editor's WYSIWYG pick, because a marquee
@@ -241,10 +266,15 @@ namespace Desert::UI
                         rect.H = content.y;
                 }
             }
+            // The element's render transform, composed onto its ancestors' — so a child of a rotated
+            // panel is picked where the panel carried it, not where its own anchors put it.
+            const glm::mat3 xform = AccumulateTransform( reg, e, rect, parentXform );
+            const glm::vec2 local = UndoTransform( xform, p );
+
             // Any element with a rect is selectable; later/deeper hits overwrite (matches draw order), so a
             // small button on top of a full-screen panel wins the pick instead of the panel behind it.
-            if ( ( forcedRect || hasLayout ) && p.x >= rect.X && p.x <= rect.X + rect.W && p.y >= rect.Y &&
-                 p.y <= rect.Y + rect.H )
+            if ( ( forcedRect || hasLayout ) && local.x >= rect.X && local.x <= rect.X + rect.W &&
+                 local.y >= rect.Y && local.y <= rect.Y + rect.H )
                 hit = e;
 
             if ( reg.has<ECS::RelationshipComponent>( e ) )
@@ -254,16 +284,17 @@ namespace Desert::UI
                 SolveGroupChildren( reg, e, rect, scale, kids, rects );
                 if ( !kids.empty() )
                     for ( std::size_t i = 0; i < kids.size(); ++i )
-                        PickRecurse( reg, kids[i], rect, scale, p, hit, &rects[i] );
+                        PickRecurse( reg, kids[i], rect, scale, p, hit, xform, &rects[i] );
                 else
                     for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
                         if ( reg.valid( c ) )
-                            PickRecurse( reg, c, rect, scale, p, hit );
+                            PickRecurse( reg, c, rect, scale, p, hit, xform );
             }
         }
 
         void RectRecurse( entt::registry& reg, entt::entity e, const Rect& parent, float scale,
-                          entt::entity target, Rect& out, bool& found, const Rect* forcedRect = nullptr )
+                          entt::entity target, Rect& out, bool& found, const glm::mat3& parentXform,
+                          glm::mat3* outXform, const Rect* forcedRect = nullptr )
         {
             Rect rect = parent;
             if ( forcedRect )
@@ -287,10 +318,13 @@ namespace Desert::UI
                         rect.H = content.y;
                 }
             }
+            const glm::mat3 xform = AccumulateTransform( reg, e, rect, parentXform );
             if ( e == target )
             {
                 out   = rect;
                 found = true;
+                if ( outXform )
+                    *outXform = xform;
                 return;
             }
             if ( reg.has<ECS::RelationshipComponent>( e ) )
@@ -300,11 +334,11 @@ namespace Desert::UI
                 SolveGroupChildren( reg, e, rect, scale, kids, rects );
                 if ( !kids.empty() )
                     for ( std::size_t i = 0; i < kids.size() && !found; ++i )
-                        RectRecurse( reg, kids[i], rect, scale, target, out, found, &rects[i] );
+                        RectRecurse( reg, kids[i], rect, scale, target, out, found, xform, outXform, &rects[i] );
                 else
                     for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
                         if ( reg.valid( c ) && !found )
-                            RectRecurse( reg, c, rect, scale, target, out, found );
+                            RectRecurse( reg, c, rect, scale, target, out, found, xform, outXform );
             }
         }
     } // namespace
@@ -325,13 +359,18 @@ namespace Desert::UI
         if ( reg.has<ECS::RelationshipComponent>( canvas ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvas ).Children )
                 if ( reg.valid( c ) )
-                    PickRecurse( reg, c, childRoot, scale, pointPx, hit );
+                    PickRecurse( reg, c, childRoot, scale, pointPx, hit, glm::mat3( 1.0f ) );
         return hit;
     }
 
     bool GetElementRect( entt::registry& reg, entt::entity canvas, entt::entity target, const Rect& viewportPx,
-                         Rect& out )
+                         Rect& out, glm::mat3* outXform )
     {
+        // Cleared up front, so a caller that reads it after a `false` gets the identity rather than
+        // whatever it happened to hold — and so `target == canvas` below reports one too.
+        if ( outXform )
+            *outXform = glm::mat3( 1.0f );
+
         const auto fit = ResolveNamedCanvas( reg, canvas, viewportPx );
         if ( !fit )
             return false;
@@ -349,7 +388,7 @@ namespace Desert::UI
         if ( reg.has<ECS::RelationshipComponent>( canvas ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvas ).Children )
                 if ( reg.valid( c ) && !found )
-                    RectRecurse( reg, c, childRoot, scale, target, out, found );
+                    RectRecurse( reg, c, childRoot, scale, target, out, found, glm::mat3( 1.0f ), outXform );
         return found;
     }
 

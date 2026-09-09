@@ -1144,6 +1144,65 @@ namespace Desert::UI
             rect.W += tween.Size.x * scale;
             rect.H += tween.Size.y * scale;
 
+            // --- The render transform (Ю8) ---------------------------------------------------------
+            // Pushed HERE, after the rect is final and before a single primitive of this element or of
+            // its sub-tree is emitted, and popped by the guard below on the way out. That placement is
+            // the whole of "the parent's transform acts on its children": there is no per-child code
+            // for inheritance, the children simply draw while their ancestors' matrices are on the
+            // stack. It is also after every early return above, so no path can leave one pushed.
+            //
+            // Nothing is pushed for a neutral transform, so a canvas that rotates nothing produces the
+            // byte-identical vertex stream it produced before this existed.
+            struct TransformRestore
+            {
+                Graphic::Render2D::DrawList2D& List;
+                bool                           Pushed;
+                ~TransformRestore()
+                {
+                    if ( Pushed )
+                        List.PopTransform();
+                }
+            } transformRestore{ dl, false };
+
+            if ( hasLayout )
+            {
+                const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
+                if ( L.Rotation != 0.0f || L.Scale != glm::vec2( 1.0f, 1.0f ) )
+                {
+                    // Pivot is a FRACTION of this element's own rect, so it keeps meaning across a
+                    // resize and across the canvas scale — the pixels it names are recomputed here.
+                    const glm::vec2 pivotPx( rect.X + L.Pivot.x * rect.W, rect.Y + L.Pivot.y * rect.H );
+                    dl.PushTransform( Graphic::Render2D::MakeTransform2D( pivotPx, L.Rotation, L.Scale ) );
+                    transformRestore.Pushed = true;
+                }
+            }
+
+            // THE POINTER GOES THROUGH THE SAME MATRIX, BACKWARDS. Everything below hit-tests against
+            // `rect`, which is the element's rect BEFORE the transform; the geometry that reaches the
+            // screen is that rect AFTER it. So the pointer is brought into the same space by inverting
+            // the accumulated matrix the draw list is holding — the very one the vertices went through,
+            // read back rather than rebuilt. Two matrices that must agree is the defect this project
+            // pays for most often; there is one here, used in two directions.
+            const glm::vec2 pointerPx =
+                 input ? ( dl.HasTransform()
+                                ? Graphic::Render2D::TransformPoint2D(
+                                       Graphic::Render2D::InverseTransform2D( dl.GetTransform() ), input->MousePx )
+                                : input->MousePx )
+                       : glm::vec2( 0.0f );
+
+            // This element's on-screen bounding box. The clip is a scissor and the scissor is axis
+            // aligned, so both the drawn clip and the pointer's clip are this box (DrawList2D::
+            // PushClipRect computes it through the same TransformedAABB2D).
+            const auto ScreenBounds = [&dl]( const Rect& r )
+            {
+                if ( !dl.HasTransform() )
+                    return r;
+                glm::vec2 mn, mx;
+                Graphic::Render2D::TransformedAABB2D( dl.GetTransform(), { r.X, r.Y }, { r.X + r.W, r.Y + r.H },
+                                                      mn, mx );
+                return Rect{ mn.x, mn.y, mx.x - mn.x, mx.y - mn.y };
+            };
+
             // Tints nest: a faded panel fades its children with it.
             const glm::vec4 parentTint = ctx.Tint;
             ctx.Tint                   = parentTint * tween.Tint * glm::vec4( 1.0f, 1.0f, 1.0f, screenFade );
@@ -1202,11 +1261,16 @@ namespace Desert::UI
 
                 // Elect the hot element: last writer in draw order = topmost. Clipped-away pixels don't
                 // count, so a scrolled-out row can't be clicked through its viewport.
-                if ( input && electsSelf && PointIn( rect, input->MousePx ) &&
-                     PointIn( clipRect, input->MousePx ) )
+                //
+                // `rect` is tested against the UNDONE pointer and `clipRect` against the screen one,
+                // because they live in different spaces on purpose: the element's own rect is what the
+                // transform acts on, the clip is the axis-aligned box the scissor actually cut.
+                if ( input && electsSelf && PointIn( rect, pointerPx ) && PointIn( clipRect, input->MousePx ) )
                 {
-                    ctx.HotNext     = e;
-                    ctx.HotNextRect = rect;
+                    ctx.HotNext = e;
+                    // The drag ghost is drawn at the cursor in SCREEN space, so what it needs is the
+                    // element's footprint on screen — the same box, for a straight element.
+                    ctx.HotNextRect = ScreenBounds( rect );
                 }
                 // This element is what the pointer is over (resolved last frame) AND it may be interacted
                 // with at all — the same predicate the keyboard sites below read.
@@ -1406,8 +1470,11 @@ namespace Desert::UI
                     const bool hover = input && hot;
                     if ( hover && input->MouseDown )
                     {
+                        // The slider's fraction is measured along ITS OWN track, so it takes the undone
+                        // pointer: dragging a rotated slider follows the track you can see rather than
+                        // the screen's x axis.
                         const float nt =
-                             std::clamp( ( input->MousePx.x - mn.x ) / std::max( 1.0f, rect.W ), 0.0f, 1.0f );
+                             std::clamp( ( pointerPx.x - mn.x ) / std::max( 1.0f, rect.W ), 0.0f, 1.0f );
                         sl.Value = sl.MinValue + nt * range;
                     }
                 }
@@ -1477,7 +1544,12 @@ namespace Desert::UI
                     if ( input && ( ( hover && input->MouseReleased ) || ( isFocused && input->Submit ) ) )
                         d.Open = !d.Open;
                     if ( d.Open && popups )
-                        popups->push_back( { e, rect, scale } ); // defer the option list to draw on top
+                        // Deferred to draw on top of everything — which means it is drawn AFTER the walk,
+                        // outside every transform, so what it is anchored to has to be a screen box and
+                        // not a rect in a space that no longer exists by then. An open list under a
+                        // rotated dropdown therefore hangs straight down from the box's bounds, which is
+                        // what a screen-space overlay does everywhere else in this engine.
+                        popups->push_back( { e, ScreenBounds( rect ), scale } );
                 }
 
                 if ( reg.has<ECS::UITextComponent2D>( e ) )
@@ -1556,8 +1628,9 @@ namespace Desert::UI
                     dl.PushClipRect( { rect.X, rect.Y }, { rect.X + rect.W, rect.Y + rect.H } );
 
                 // Children inherit the scissor for hit testing too, so what is scrolled out of view can't
-                // be clicked through its viewport.
-                const Rect childClip = clip ? IntersectRect( clipRect, rect ) : clipRect;
+                // be clicked through its viewport. Intersected in SCREEN space against the same box the
+                // scissor was given, so the pointer is refused exactly where the pixels were.
+                const Rect childClip = clip ? IntersectRect( clipRect, ScreenBounds( rect ) ) : clipRect;
 
                 const auto& children = reg.get<ECS::RelationshipComponent>( e ).Children;
                 if ( reg.has<ECS::UILayoutGroupComponent>( e ) )

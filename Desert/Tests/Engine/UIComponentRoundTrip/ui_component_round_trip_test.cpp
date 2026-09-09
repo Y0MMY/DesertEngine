@@ -273,6 +273,60 @@ TEST( UIComponentRoundTrip, AReferenceThatResolvesToNothingReachesTheResolverRat
     EXPECT_EQ( static_cast<uint64_t>( read.Sprite ), 0ull );
 }
 
+// --- (7) The render transform (Ю8) survives the trip ---------------------------------------------
+//
+// Three fields joined UILayoutData, and У13 had just closed a class of five components that could be
+// authored and never reached the file. A transform that does not survive a save is the same defect
+// wearing a matrix, and it is invisible in the editor — the element looks right until it is reopened.
+//
+// The values are deliberately not defaults: Rotation nonzero, Scale non-uniform AND not 1, Pivot away
+// from the centre. A round trip that dropped a field and left the default behind would be caught by
+// each of the three separately.
+TEST( UIComponentRoundTrip, TheRenderTransformSurvivesTheTrip )
+{
+    ECS::UILayoutData written;
+    written.Rotation = -37.5f;
+    written.Scale    = { 1.75f, 0.25f };
+    written.Pivot    = { 0.125f, 0.875f };
+
+    const auto object = SerializeReflected( Type( "UILayoutData" ), &written, nullptr );
+
+    ECS::UILayoutData read;
+    DeserializeReflected( Type( "UILayoutData" ), &read, ThroughJsonText( object ), nullptr );
+
+    EXPECT_FLOAT_EQ( read.Rotation, -37.5f );
+    EXPECT_FLOAT_EQ( read.Scale.x, 1.75f );
+    EXPECT_FLOAT_EQ( read.Scale.y, 0.25f );
+    EXPECT_FLOAT_EQ( read.Pivot.x, 0.125f );
+    EXPECT_FLOAT_EQ( read.Pivot.y, 0.875f );
+}
+
+// The other direction, and the one every scene in the repository depends on: NONE of them states these
+// keys, because they were written before the fields existed. An absent key has to leave the field
+// alone, or every existing .desce would come back with a zeroed Scale — an element scaled to nothing.
+TEST( UIComponentRoundTrip, ALayoutRecordFromBeforeTheTransformExistedLeavesItNeutral )
+{
+    // Exactly the keys UI_ElementProbe.desce carries for a UILayout, and not one more.
+    rfl::Generic::Object old;
+    old["AnchorMin"]         = rfl::Generic( rfl::Generic::Array{ rfl::Generic( 0.0 ), rfl::Generic( 0.0 ) } );
+    old["AnchorMax"]         = rfl::Generic( rfl::Generic::Array{ rfl::Generic( 1.0 ), rfl::Generic( 1.0 ) } );
+    old["OffsetMin"]         = rfl::Generic( rfl::Generic::Array{ rfl::Generic( 0.0 ), rfl::Generic( 0.0 ) } );
+    old["OffsetMax"]         = rfl::Generic( rfl::Generic::Array{ rfl::Generic( 0.0 ), rfl::Generic( 0.0 ) } );
+    old["CustomMinimumSize"] = rfl::Generic( rfl::Generic::Array{ rfl::Generic( 0.0 ), rfl::Generic( 0.0 ) } );
+    old["ClipContents"]      = rfl::Generic( false );
+
+    ECS::UILayoutData read; // its defaults ARE the neutral transform
+    DeserializeReflected( Type( "UILayoutData" ), &read, ThroughJsonText( old ), nullptr );
+
+    EXPECT_FLOAT_EQ( read.Rotation, 0.0f );
+    EXPECT_FLOAT_EQ( read.Scale.x, 1.0f ) << "an old scene came back with its element scaled away";
+    EXPECT_FLOAT_EQ( read.Scale.y, 1.0f ) << "an old scene came back with its element scaled away";
+    EXPECT_FLOAT_EQ( read.Pivot.x, 0.5f );
+    EXPECT_FLOAT_EQ( read.Pivot.y, 0.5f );
+    // ...and the keys it DID state still arrived, so this is not passing because the read did nothing.
+    EXPECT_FLOAT_EQ( read.AnchorMax.x, 1.0f );
+}
+
 int main( int argc, char** argv )
 {
     ReflectionRegistry::Get().ResolveStructLinks();

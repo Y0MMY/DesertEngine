@@ -20,8 +20,10 @@ Shader "UIGlass"
         PushConstant constants
         {
             mat4 Projection;   // pixel -> clip, same as UI2D
-            vec4 Rect;         // min.xy, max.xy in pixels
+            vec4 Rect;         // min.xy, max.xy in the rect's OWN space (px)
             vec4 Params;       // x = corner radius px, y = blur LOD, zw = 1 / viewport size
+            vec4 InvRow0;      // xyz = row 0 of screen px -> own space; w = one screen px in own space
+            vec4 InvRow1;      // xyz = row 1 of the same map
         } m_PushConstants;
 
         void main()
@@ -44,6 +46,8 @@ Shader "UIGlass"
             mat4 Projection;
             vec4 Rect;
             vec4 Params;
+            vec4 InvRow0;
+            vec4 InvRow1;
         } m_PushConstants;
 
         Out(0) vec4 o_Color;
@@ -68,9 +72,19 @@ Shader "UIGlass"
             vec2  halfSize = (m_PushConstants.Rect.zw - m_PushConstants.Rect.xy) * 0.5;
             float radius   = min(m_PushConstants.Params.x, min(halfSize.x, halfSize.y));
 
-            float dist = RoundedBoxSDF(gl_FragCoord.xy - center, halfSize, radius);
-            // One pixel of feather, so corners are smooth without any geometry.
-            float mask = 1.0 - smoothstep(-0.5, 0.5, dist);
+            // The mask is evaluated in the RECT'S OWN space, not on screen. A UI element can be rotated
+            // and scaled (UILayout Rotation/Scale), and every other primitive follows because its vertices
+            // move; this one is an SDF over the fragment's position, so the fragment is what has to move.
+            // For an untransformed panel InvRow0/InvRow1 are the identity rows, and 1*x + 0*y + 0 is x
+            // exactly in IEEE-754 -- so this path is bit-for-bit the screen-space one it replaced.
+            vec3 frag  = vec3(gl_FragCoord.xy, 1.0);
+            vec2 local = vec2(dot(frag, m_PushConstants.InvRow0.xyz), dot(frag, m_PushConstants.InvRow1.xyz));
+
+            float dist = RoundedBoxSDF(local - center, halfSize, radius);
+            // One SCREEN pixel of feather, measured in that own space (InvRow0.w, exactly 1 untransformed)
+            // so a scaled-up panel keeps a one-pixel edge instead of a scaled-up blur.
+            float feather = 0.5 * m_PushConstants.InvRow0.w;
+            float mask    = 1.0 - smoothstep(-feather, feather, dist);
             if (mask <= 0.0)
                 discard;
 

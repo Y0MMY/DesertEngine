@@ -12,11 +12,43 @@ namespace Desert::Graphic::Render2D
         m_Commands.clear();
         m_ClipStack.clear();
         m_CurrentClip = { 0.0f, 0.0f, 0.0f, 0.0f };
+        m_TransformStack.clear();
+        m_Transform    = glm::mat3( 1.0f );
+        m_HasTransform = false;
+    }
+
+    void DrawList2D::PushTransform( const glm::mat3& xform )
+    {
+        // Composed, not replaced: a child's transform acts INSIDE its parent's, which is what makes a
+        // rotated panel carry its sub-tree. The parent's matrix is the left operand because that is the
+        // order the points travel — the child's first, then the parent's.
+        m_TransformStack.push_back( m_Transform );
+        m_Transform    = m_Transform * xform;
+        m_HasTransform = true;
+    }
+
+    void DrawList2D::PopTransform()
+    {
+        if ( m_TransformStack.empty() )
+        {
+            m_Transform    = glm::mat3( 1.0f );
+            m_HasTransform = false;
+            return;
+        }
+        m_Transform = m_TransformStack.back();
+        m_TransformStack.pop_back();
+        // Back to the ground state EXACTLY: the flag goes false with the stack, so the outermost pop
+        // restores the untouched-position path rather than leaving an identity multiply behind.
+        m_HasTransform = !m_TransformStack.empty();
     }
 
     void DrawList2D::PushClipRect( const glm::vec2& min, const glm::vec2& max )
     {
-        glm::vec4 r( min.x, min.y, max.x - min.x, max.y - min.y );
+        glm::vec2 mn = min, mx = max;
+        if ( m_HasTransform )
+            TransformedAABB2D( m_Transform, min, max, mn, mx );
+
+        glm::vec4 r( mn.x, mn.y, mx.x - mn.x, mx.y - mn.y );
         if ( m_CurrentClip.z > 0.0f ) // intersect with the active clip so nested masks compose
         {
             const float x0 = std::max( m_CurrentClip.x, r.x );
@@ -77,13 +109,22 @@ namespace Desert::Graphic::Render2D
         cmd.GlassRect   = { min.x, min.y, max.x, max.y };
         cmd.GlassRound  = std::max( 0.0f, rounding );
         cmd.GlassLod    = std::clamp( blur01, 0.0f, 1.0f );
+        // The mask is an SDF the FRAGMENT shader evaluates, so unlike every other primitive here it
+        // cannot be transformed by moving vertices. It is given the rect in its OWN space plus the way
+        // back from the screen instead, which is the same transform read the other way round.
+        if ( m_HasTransform )
+        {
+            cmd.GlassInverse     = InverseTransform2D( m_Transform );
+            const float perPixel = MeanScale2D( m_Transform );
+            cmd.GlassFeather     = perPixel > 0.0f ? 1.0f / perPixel : 1.0f;
+        }
         m_Commands.push_back( cmd );
 
         const uint32_t base = static_cast<uint32_t>( m_Vertices.size() );
-        m_Vertices.push_back( { { min.x, min.y }, { 0.0f, 0.0f }, tint } );
-        m_Vertices.push_back( { { max.x, min.y }, { 1.0f, 0.0f }, tint } );
-        m_Vertices.push_back( { { max.x, max.y }, { 1.0f, 1.0f }, tint } );
-        m_Vertices.push_back( { { min.x, max.y }, { 0.0f, 1.0f }, tint } );
+        m_Vertices.push_back( { Xf( { min.x, min.y } ), { 0.0f, 0.0f }, tint } );
+        m_Vertices.push_back( { Xf( { max.x, min.y } ), { 1.0f, 0.0f }, tint } );
+        m_Vertices.push_back( { Xf( { max.x, max.y } ), { 1.0f, 1.0f }, tint } );
+        m_Vertices.push_back( { Xf( { min.x, max.y } ), { 0.0f, 1.0f }, tint } );
 
         const uint32_t quad[6] = { base + 0, base + 1, base + 2, base + 2, base + 3, base + 0 };
         m_Indices.insert( m_Indices.end(), quad, quad + 6 );
@@ -98,10 +139,10 @@ namespace Desert::Graphic::Render2D
         const uint32_t base = static_cast<uint32_t>( m_Vertices.size() );
 
         // Corners: top-left, top-right, bottom-right, bottom-left (CW in a top-left-origin, y-down space).
-        m_Vertices.push_back( { { min.x, min.y }, { uv0.x, uv0.y }, color } );
-        m_Vertices.push_back( { { max.x, min.y }, { uv1.x, uv0.y }, color } );
-        m_Vertices.push_back( { { max.x, max.y }, { uv1.x, uv1.y }, color } );
-        m_Vertices.push_back( { { min.x, max.y }, { uv0.x, uv1.y }, color } );
+        m_Vertices.push_back( { Xf( { min.x, min.y } ), { uv0.x, uv0.y }, color } );
+        m_Vertices.push_back( { Xf( { max.x, min.y } ), { uv1.x, uv0.y }, color } );
+        m_Vertices.push_back( { Xf( { max.x, max.y } ), { uv1.x, uv1.y }, color } );
+        m_Vertices.push_back( { Xf( { min.x, max.y } ), { uv0.x, uv1.y }, color } );
 
         const uint32_t quad[6] = { base + 0, base + 1, base + 2, base + 2, base + 3, base + 0 };
         m_Indices.insert( m_Indices.end(), quad, quad + 6 );
@@ -128,7 +169,7 @@ namespace Desert::Graphic::Render2D
         DrawCommand&    cmd    = CurrentCommand( nullptr, false );
         const uint32_t  base   = static_cast<uint32_t>( m_Vertices.size() );
         const glm::vec2 centre = ( min + max ) * 0.5f;
-        m_Vertices.push_back( { centre, { 0.5f, 0.5f }, color } );
+        m_Vertices.push_back( { Xf( centre ), { 0.5f, 0.5f }, color } );
 
         const glm::vec2 cc[4] = { { min.x + r, min.y + r },
                                   { max.x - r, min.y + r },
@@ -142,7 +183,7 @@ namespace Desert::Graphic::Render2D
             {
                 const float     a = a0[c] + ( PI * 0.5f ) * ( static_cast<float>( s ) / kSeg );
                 const glm::vec2 p = cc[c] + glm::vec2( std::cos( a ), std::sin( a ) ) * r;
-                m_Vertices.push_back( { p, { 0.5f, 0.5f }, color } );
+                m_Vertices.push_back( { Xf( p ), { 0.5f, 0.5f }, color } );
                 ++perim;
             }
 
@@ -168,10 +209,10 @@ namespace Desert::Graphic::Render2D
         const uint32_t base = static_cast<uint32_t>( m_Vertices.size() );
 
         // TL / TR carry the top colour, BR / BL the bottom colour -> a vertical gradient.
-        m_Vertices.push_back( { { min.x, min.y }, { 0.0f, 0.0f }, topColor } );
-        m_Vertices.push_back( { { max.x, min.y }, { 1.0f, 0.0f }, topColor } );
-        m_Vertices.push_back( { { max.x, max.y }, { 1.0f, 1.0f }, bottomColor } );
-        m_Vertices.push_back( { { min.x, max.y }, { 0.0f, 1.0f }, bottomColor } );
+        m_Vertices.push_back( { Xf( { min.x, min.y } ), { 0.0f, 0.0f }, topColor } );
+        m_Vertices.push_back( { Xf( { max.x, min.y } ), { 1.0f, 0.0f }, topColor } );
+        m_Vertices.push_back( { Xf( { max.x, max.y } ), { 1.0f, 1.0f }, bottomColor } );
+        m_Vertices.push_back( { Xf( { min.x, max.y } ), { 0.0f, 1.0f }, bottomColor } );
 
         const uint32_t quad[6] = { base + 0, base + 1, base + 2, base + 2, base + 3, base + 0 };
         m_Indices.insert( m_Indices.end(), quad, quad + 6 );
@@ -198,9 +239,9 @@ namespace Desert::Graphic::Render2D
     {
         DrawCommand&   cmd  = CurrentCommand( nullptr, false );
         const uint32_t base = static_cast<uint32_t>( m_Vertices.size() );
-        m_Vertices.push_back( { p0, { 0.5f, 0.5f }, color } );
-        m_Vertices.push_back( { p1, { 0.5f, 0.5f }, color } );
-        m_Vertices.push_back( { p2, { 0.5f, 0.5f }, color } );
+        m_Vertices.push_back( { Xf( p0 ), { 0.5f, 0.5f }, color } );
+        m_Vertices.push_back( { Xf( p1 ), { 0.5f, 0.5f }, color } );
+        m_Vertices.push_back( { Xf( p2 ), { 0.5f, 0.5f }, color } );
         m_Indices.push_back( base + 0 );
         m_Indices.push_back( base + 1 );
         m_Indices.push_back( base + 2 );
@@ -217,10 +258,10 @@ namespace Desert::Graphic::Render2D
 
         DrawCommand&   cmd  = CurrentCommand( nullptr, false );
         const uint32_t base = static_cast<uint32_t>( m_Vertices.size() );
-        m_Vertices.push_back( { a - n, { 0.5f, 0.5f }, color } );
-        m_Vertices.push_back( { a + n, { 0.5f, 0.5f }, color } );
-        m_Vertices.push_back( { b + n, { 0.5f, 0.5f }, color } );
-        m_Vertices.push_back( { b - n, { 0.5f, 0.5f }, color } );
+        m_Vertices.push_back( { Xf( a - n ), { 0.5f, 0.5f }, color } );
+        m_Vertices.push_back( { Xf( a + n ), { 0.5f, 0.5f }, color } );
+        m_Vertices.push_back( { Xf( b + n ), { 0.5f, 0.5f }, color } );
+        m_Vertices.push_back( { Xf( b - n ), { 0.5f, 0.5f }, color } );
         const uint32_t quad[6] = { base + 0, base + 1, base + 2, base + 2, base + 3, base + 0 };
         m_Indices.insert( m_Indices.end(), quad, quad + 6 );
         cmd.IndexCount += 6;
@@ -245,8 +286,8 @@ namespace Desert::Graphic::Render2D
             const float     t   = f < 0.5f ? f * 2.0f : ( 1.0f - f ) * 2.0f;
             const glm::vec4 col = colorA * ( 1.0f - t ) + colorB * t;
             const glm::vec2 dir( std::cos( a ), std::sin( a ) );
-            m_Vertices.push_back( { center + dir * outerRadius, { 0.5f, 0.5f }, col } );
-            m_Vertices.push_back( { center + dir * innerRadius, { 0.5f, 0.5f }, col } );
+            m_Vertices.push_back( { Xf( center + dir * outerRadius ), { 0.5f, 0.5f }, col } );
+            m_Vertices.push_back( { Xf( center + dir * innerRadius ), { 0.5f, 0.5f }, col } );
         }
 
         for ( int i = 0; i < segments; ++i ) // two triangles bridge rim pair i -> i+1

@@ -241,17 +241,28 @@ namespace Desert::Graphic::Render2D
                 if ( !exec )
                     continue;
 
-                // Per-element push block: projection, the rect in pixels, its corner radius, the blur LOD
-                // and 1/viewport (the shader maps gl_FragCoord into the snapshot with it).
+                // Per-element push block: projection, the rect in ITS OWN space, its corner radius, the
+                // blur LOD, 1/viewport (the shader maps gl_FragCoord into the snapshot with it) and the
+                // two rows that map a screen fragment back into that own space. 128 bytes, which is the
+                // size every Vulkan implementation is required to offer.
+                //
+                // The inverse travels as ROWS rather than as a mat3 because a std430 mat3 is three
+                // 16-byte columns of which four floats are padding, and the block has no room for four
+                // floats of nothing.
                 struct GlassPush
                 {
                     glm::mat4 Projection;
                     glm::vec4 Rect;
                     glm::vec4 Params;
+                    glm::vec4 InvRow0;
+                    glm::vec4 InvRow1;
                 } push{ m_Projection, cmd.GlassRect,
                         glm::vec4( cmd.GlassRound, cmd.GlassLod * static_cast<float>( m_BackdropMaxLod ),
                                    m_ViewportPx.z > 0.0f ? 1.0f / m_ViewportPx.z : 0.0f,
-                                   m_ViewportPx.w > 0.0f ? 1.0f / m_ViewportPx.w : 0.0f ) };
+                                   m_ViewportPx.w > 0.0f ? 1.0f / m_ViewportPx.w : 0.0f ),
+                        glm::vec4( cmd.GlassInverse[0].x, cmd.GlassInverse[1].x, cmd.GlassInverse[2].x,
+                                   cmd.GlassFeather ),
+                        glm::vec4( cmd.GlassInverse[0].y, cmd.GlassInverse[1].y, cmd.GlassInverse[2].y, 0.0f ) };
 
                 ApplyScissor( cmd );
                 exec->PushConstant( &push, (uint32_t)sizeof( push ) );

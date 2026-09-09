@@ -1077,11 +1077,11 @@ namespace Desert::ECS
     // rect each frame. AnchorMin==AnchorMax => fixed-size element positioned by offsets; spread anchors =>
     // element stretches with the parent.
     //
-    // There is deliberately NO Pivot here. One shipped for the component's whole life — reflected,
-    // serialized, drawn in Details — and was read by nothing, because the rect is resolved from anchors
-    // and offsets alone and nothing in this UI rotates or scales an element about a point. Deleted by
-    // Д26 (§1.3: a knob that moves nothing may not ship); the day rotation arrives, the field returns
-    // WITH its consumer.
+    // PIVOT IS BACK, AND IT IS BACK WITH ITS CONSUMER. Д26 deleted it because the rect was resolved from
+    // anchors and offsets alone and nothing in this UI rotated or scaled an element about a point, which
+    // made it a knob that moved nothing (§1.3). Ю8 is the rotation, so the three fields below arrive
+    // TOGETHER: Pivot on its own would be dead again, and Rotation without Pivot could only ever turn an
+    // element about its centre.
     struct UILayoutData
     {
         REFLECT()
@@ -1100,6 +1100,35 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Custom Minimum Size" ), Category( "UI Layout" ) )
         glm::vec2 CustomMinimumSize = glm::vec2( 0.0f, 0.0f );
+
+        // --- Render transform (Ю8) ---------------------------------------------------------------------
+        // These do NOT take part in layout: the rect is still resolved from anchors and offsets, and a
+        // rotated element occupies exactly the slot it would have occupied straight. They are applied
+        // afterwards, to the geometry that rect produces and to the pointer that hits it, and they are
+        // INHERITED — a rotated panel carries its whole sub-tree with it, because the transform is pushed
+        // before the children are walked and popped after.
+        //
+        // WHY LAYOUT IS LEFT ALONE. The alternative — feeding the rotated bounds back into the parent's
+        // auto-layout — makes a slider that spins an element also resize its siblings, and it makes the
+        // layout solution depend on its own output for a nested rotation. Unity and Godot both draw this
+        // line in the same place.
+
+        // Degrees, POSITIVE = CLOCKWISE on screen (this space has y pointing down — the CSS `rotate()`
+        // and Godot Control.rotation convention). About Pivot.
+        PROPERTY( DisplayName( "Rotation" ), Category( "UI Transform" ), Range( -360.0f, 360.0f ) )
+        float Rotation = 0.0f;
+
+        // Multiplies the element's own size about Pivot. Non-uniform is allowed and is what an author
+        // reaches for to flip a sprite (-1 on one axis). 1,1 = untouched, and an untouched element emits
+        // byte-identical geometry to one with no transform at all — the walk skips the matrix entirely.
+        PROPERTY( DisplayName( "Scale" ), Category( "UI Transform" ) )
+        glm::vec2 Scale = glm::vec2( 1.0f, 1.0f );
+
+        // The point Rotation and Scale act about, as a FRACTION of this element's own resolved rect:
+        // 0,0 = its top-left corner, 0.5,0.5 = its centre, 1,1 = its bottom-right. A fraction rather
+        // than pixels so it keeps its meaning when the element is resized or the canvas is scaled.
+        PROPERTY( DisplayName( "Pivot" ), Category( "UI Transform" ) )
+        glm::vec2 Pivot = glm::vec2( 0.5f, 0.5f );
 
         PROPERTY( DisplayName( "Clip Contents" ), Category( "UI Layout" ) )
         bool ClipContents = false;
