@@ -97,9 +97,13 @@ namespace Desert::Graphic::System
                 LOG_ERROR( "LightShaftRenderer: missing compute shader '{}'", shaderName );
                 return nullptr;
             }
-            auto pipeline = ComputePipeline::Create( { .Shader = shader, .DebugName = shaderName } );
-            pipeline->Invalidate();
-            return pipeline;
+            const auto built = ComputePipeline::Create( { .Shader = shader, .DebugName = shaderName } );
+            if ( !built )
+            {
+                LOG_ERROR( "LightShaftRenderer: {}", built.GetError() );
+                return nullptr;
+            }
+            return built.GetValue();
         };
 
         m_MaskPipeline = make( "LightShaftMask" );

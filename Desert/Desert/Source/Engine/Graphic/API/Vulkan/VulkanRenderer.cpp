@@ -259,6 +259,32 @@ namespace Desert::Graphic::API::Vulkan
             VKUtils::EndDebugLabel( m_CurrentCommandBuffer );
     }
 
+    bool VulkanRendererAPI::BindGraphicsPipeline( const GraphicsPipeline* pipeline )
+    {
+        if ( !pipeline )
+            return false;
+
+        const auto* vulkanPipeline = static_cast<const VulkanPipeline*>( pipeline );
+        if ( vulkanPipeline->GetVkPipeline() != VK_NULL_HANDLE )
+        {
+            vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                               vulkanPipeline->GetVkPipeline() );
+            return true;
+        }
+
+        // See the declaration: this is where "a shader that will not compile will not draw" stops being
+        // a sentence in a log message and starts being what happens. The name is the pipeline's, because
+        // that is what a reader can look up; the shader's own error was already written once, at compile.
+        const std::string& name = vulkanPipeline->GetSpecification().DebugName;
+        if ( m_WarnedUnbuiltPipelines.insert( name ).second )
+        {
+            LOG_ERROR( "[Renderer] pipeline '{}' was never built (its shader has no compiled stages) — "
+                       "everything drawn through it is skipped until the shader compiles.",
+                       name.empty() ? "<unnamed>" : name );
+        }
+        return false;
+    }
+
     void VulkanRendererAPI::RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh,
                                         const glm::mat4 transform, const MaterialExecutor* materialExecutor,
                                         uint32_t instanceCount, uint32_t firstInstance,
@@ -271,8 +297,8 @@ namespace Desert::Graphic::API::Vulkan
         if ( !m_CurrentCommandBuffer )
             return;
         const auto vulkanPipeline = static_cast<const VulkanPipeline*>( pipeline );
-        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                           vulkanPipeline->GetVkPipeline() );
+        if ( !BindGraphicsPipeline( pipeline ) )
+            return;
 
         // Bind Descriptor Sets
         if ( materialExecutor )
@@ -371,8 +397,8 @@ namespace Desert::Graphic::API::Vulkan
         if ( !m_CurrentCommandBuffer )
             return;
         const auto vulkanPipeline = static_cast<const VulkanPipeline*>( pipeline );
-        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                           vulkanPipeline->GetVkPipeline() );
+        if ( !BindGraphicsPipeline( pipeline ) )
+            return;
 
         // Bind Descriptor Sets
         if ( materialExecutor )
@@ -411,8 +437,8 @@ namespace Desert::Graphic::API::Vulkan
         if ( !m_CurrentCommandBuffer || !vertexBuffer || !indexBuffer || indexCount == 0 )
             return;
         const auto vulkanPipeline = static_cast<const VulkanPipeline*>( pipeline );
-        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                           vulkanPipeline->GetVkPipeline() );
+        if ( !BindGraphicsPipeline( pipeline ) )
+            return;
 
         // Bind Descriptor Sets (the batch's texture + any UBOs)
         if ( materialExecutor )
@@ -459,8 +485,8 @@ namespace Desert::Graphic::API::Vulkan
         if ( !m_CurrentCommandBuffer || vertexCount == 0 )
             return;
         const auto vulkanPipeline = static_cast<const VulkanPipeline*>( pipeline );
-        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                           vulkanPipeline->GetVkPipeline() );
+        if ( !BindGraphicsPipeline( pipeline ) )
+            return;
 
         if ( materialExecutor )
         {
@@ -493,8 +519,8 @@ namespace Desert::Graphic::API::Vulkan
         if ( !m_CurrentCommandBuffer || vertexCount == 0 || instanceCount == 0 )
             return;
         const auto vulkanPipeline = static_cast<const VulkanPipeline*>( pipeline );
-        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                           vulkanPipeline->GetVkPipeline() );
+        if ( !BindGraphicsPipeline( pipeline ) )
+            return;
 
         if ( materialExecutor )
         {
@@ -541,8 +567,8 @@ namespace Desert::Graphic::API::Vulkan
             return;
 
         const auto vulkanPipeline = static_cast<const VulkanPipeline*>( pipeline );
-        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                           vulkanPipeline->GetVkPipeline() );
+        if ( !BindGraphicsPipeline( pipeline ) )
+            return;
 
         const uint32_t frameIndex = Engine::FrameManager::GetInstance().GetCurrentFrameIndex();
 

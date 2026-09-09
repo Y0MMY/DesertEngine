@@ -45,9 +45,11 @@ namespace Desert::Graphic::System
             if ( !shader )
                 return Common::MakeError( "BackdropBlurRenderer: missing compute shader 'BloomDownsample'" );
 
-            m_DownsamplePipeline =
+            const auto built =
                  ComputePipeline::Create( { .Shader = shader, .DebugName = "BackdropBlurDownsample" } );
-            m_DownsamplePipeline->Invalidate();
+            if ( !built )
+                return Common::MakeError( built.GetError() );
+            m_DownsamplePipeline = built.GetValue();
 
             return BOOLSUCCESS;
         }

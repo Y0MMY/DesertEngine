@@ -87,9 +87,13 @@ namespace Desert::Graphic::System
                 LOG_ERROR( "BloomRenderer: missing compute shader '{}'", shaderName );
                 return nullptr;
             }
-            auto pipeline = ComputePipeline::Create( { .Shader = shader, .DebugName = shaderName } );
-            pipeline->Invalidate();
-            return pipeline;
+            const auto built = ComputePipeline::Create( { .Shader = shader, .DebugName = shaderName } );
+            if ( !built )
+            {
+                LOG_ERROR( "BloomRenderer: {}", built.GetError() );
+                return nullptr;
+            }
+            return built.GetValue();
         };
 
         m_DownsamplePipeline = make( "BloomDownsample" );

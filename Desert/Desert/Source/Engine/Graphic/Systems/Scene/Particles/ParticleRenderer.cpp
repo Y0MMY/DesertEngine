@@ -53,8 +53,13 @@ namespace Desert::Graphic::System
             return false;
         }
 
-        m_SimPipeline = ComputePipeline::Create( { .Shader = simShader, .DebugName = "ParticleSimulate" } );
-        m_SimPipeline->Invalidate();
+        const auto sim = ComputePipeline::Create( { .Shader = simShader, .DebugName = "ParticleSimulate" } );
+        if ( !sim )
+        {
+            LOG_ERROR( "ParticleRenderer: {}", sim.GetError() );
+            return false;
+        }
+        m_SimPipeline = sim.GetValue();
 
         const auto& target = m_TargetFramebuffer.lock();
         if ( !target )

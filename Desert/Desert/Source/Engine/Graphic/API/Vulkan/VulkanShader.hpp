@@ -58,6 +58,30 @@ namespace Desert::Graphic::API::Vulkan
             return m_PipelineShaderStageCreateInfos;
         }
 
+        /**
+         * This program's COMPUTE stage, or nullptr when it has none.
+         *
+         * A POINTER BECAUSE "NONE" IS A STATE THIS OBJECT REALLY REACHES, and the line this replaces was
+         * `GetPipelineShaderStageCreateInfos()[0]` in VulkanPipelineCompute::Invalidate — a subscript of
+         * a vector that a failed first compile leaves EMPTY. It killed the editor with SIGSEGV after a
+         * validation storm about a descriptor pool of size zero, for no worse a cause than a typo in a
+         * shader graph.
+         *
+         * It also answers a question `[0]` silently got wrong even when the vector was full: the first
+         * stage of a GRAPHICS program is a vertex stage, and feeding that to vkCreateComputePipelines is
+         * a different failure with the same shape. Searching by stage bit is what makes "this name is
+         * not a compute program" a refusal instead of undefined behaviour.
+         */
+        [[nodiscard]] const VkPipelineShaderStageCreateInfo* GetComputeStage() const
+        {
+            for ( const auto& stage : m_PipelineShaderStageCreateInfos )
+            {
+                if ( stage.stage == VK_SHADER_STAGE_COMPUTE_BIT )
+                    return &stage;
+            }
+            return nullptr;
+        }
+
         // No stages means CompileProgram never succeeded — it is transactional, so a shader that has ever
         // compiled keeps its modules even if a later recompile fails. Reading the stage list rather than
         // a separate bool keeps this from becoming a second piece of state that can disagree with the

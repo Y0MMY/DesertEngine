@@ -605,19 +605,29 @@ namespace Desert::Graphic::System
         const auto marchShader = acquire( kMarchShaderName, m_MarchMediumShader );
         if ( !marchShader )
             return false;
-        m_MarchPipeline = ComputePipeline::Create( { .Shader = marchShader, .DebugName = kMarchShaderName } );
-        if ( !m_MarchPipeline )
+        // THE REFUSAL IS NOW REACHABLE, AND IT WAS NOT. `if ( !m_MarchPipeline )` stood here against a
+        // Create() that returned `make_shared`, i.e. a branch that could not run — which is exactly what
+        // made the empty-stage crash look handled. The authored medium is the case it is for: an artist's
+        // graph that does not compile reaches this line.
+        const auto march = ComputePipeline::Create( { .Shader = marchShader, .DebugName = kMarchShaderName } );
+        if ( !march )
+        {
+            LOG_ERROR( "[Clouds] the march pipeline was not built: {}", march.GetError() );
             return false;
-        m_MarchPipeline->Invalidate();
+        }
+        m_MarchPipeline = march.GetValue();
 
         const auto shadowShader = acquire( kShadowMapShaderName, m_ShadowMapMediumShader );
         if ( !shadowShader )
             return false;
-        m_ShadowMapPipeline =
+        const auto shadow =
              ComputePipeline::Create( { .Shader = shadowShader, .DebugName = kShadowMapShaderName } );
-        if ( !m_ShadowMapPipeline )
+        if ( !shadow )
+        {
+            LOG_ERROR( "[Clouds] the shadow-map pipeline was not built: {}", shadow.GetError() );
             return false;
-        m_ShadowMapPipeline->Invalidate();
+        }
+        m_ShadowMapPipeline = shadow.GetValue();
 
         // THE SKY-LIGHT OCCLUSION VOLUME'S PRODUCER. Created unconditionally, like the two above, even
         // though the default layer never dispatches it: a pipeline is created once per renderer and a
@@ -627,11 +637,14 @@ namespace Desert::Graphic::System
         const auto skyOcclusionShader = acquire( kSkyOcclusionShaderName, m_SkyOcclusionMediumShader );
         if ( !skyOcclusionShader )
             return false;
-        m_SkyOcclusionPipeline =
+        const auto skyOcclusion =
              ComputePipeline::Create( { .Shader = skyOcclusionShader, .DebugName = kSkyOcclusionShaderName } );
-        if ( !m_SkyOcclusionPipeline )
+        if ( !skyOcclusion )
+        {
+            LOG_ERROR( "[Clouds] the sky-occlusion pipeline was not built: {}", skyOcclusion.GetError() );
             return false;
-        m_SkyOcclusionPipeline->Invalidate();
+        }
+        m_SkyOcclusionPipeline = skyOcclusion.GetValue();
 
         return true;
     }
@@ -700,11 +713,14 @@ namespace Desert::Graphic::System
                        kResolveShaderName, kResolveShaderName );
             return false;
         }
-        m_ResolvePipeline =
+        const auto resolve =
              ComputePipeline::Create( { .Shader = resolveShader, .DebugName = kResolveShaderName } );
-        if ( !m_ResolvePipeline )
+        if ( !resolve )
+        {
+            LOG_ERROR( "[Clouds] the resolve pipeline was not built: {}", resolve.GetError() );
             return false;
-        m_ResolvePipeline->Invalidate();
+        }
+        m_ResolvePipeline = resolve.GetValue();
 
         const auto target = m_TargetFramebuffer.lock();
         if ( !target )
