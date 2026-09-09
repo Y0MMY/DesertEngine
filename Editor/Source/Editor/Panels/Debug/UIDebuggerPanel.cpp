@@ -2,6 +2,7 @@
 
 #include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
+#include <Editor/Core/Selection/UIPreview.hpp>
 #include <Editor/Core/UIProbeRegistry.hpp>
 
 #include <Engine/Core/Scene.hpp>
@@ -311,6 +312,14 @@ namespace Desert::Editor
                 LabelledValue( "Pointer can stop here", node->ElectsSelf ? "yes"
                                                                          : "no (an ancestor or its "
                                                                            "own Hit Test forbids it)" );
+
+                // KEYBOARD FOCUS, and only while UI Preview is running. Focus is moved by Tab and read by
+                // Enter, and both only exist in preview — in Design mode the row would read "no" for every
+                // element forever, which is a column that answers nobody. UE's Widget Reflector shows the
+                // same fact in the same place (its Focus column) for the same reason: "the pointer is over
+                // this control and Enter went somewhere else" is otherwise unanswerable.
+                if ( Core::UIPreview::Get().Enabled )
+                    LabelledValue( "Keyboard focus", Core::UIPreview::Get().Focused == handle ? "yes" : "no" );
 
                 auto& reg = m_Scene->GetRegistry();
                 if ( reg.has<ECS::UILayoutComponent>( handle ) )
