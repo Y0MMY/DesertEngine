@@ -16,6 +16,27 @@
 // WHAT WOULD MAKE THIS RED, and each is a real mistake: adding a `Preload*` and wiring it into one layer
 // only (a packaged game silently missing that content); adding one and wiring it into neither; deleting
 // a call from a layer while the method stays.
+//
+// ---------------------------------------------------------------------------------------------------
+// THE SECOND SUBJECT IN THIS FILE, AND IT IS THE SAME QUESTION ONE CONTENT KIND LATER: who fills the
+// animation library, and when. It is here rather than in a suite of its own on purpose — a second suite
+// asking "is the content index reached from both hosts" would be a second answer to one question, and the
+// two would drift.
+//
+// What was broken, measured on 2026-09-09. `Runtime/Source/RuntimeLayer.cpp` created an AnimationLibrary
+// and handed it straight to `AnimationECSSystem` with NOT ONE `Register` call in between — the word
+// `AnimationLibrary` appeared exactly twice in the whole file. So the library of a PACKAGED GAME was
+// empty and every skinned character stood in its bind pose. `Editor/Source/EditorLayer.cpp` had its own
+// copy of the fill loop, which is why no editor session could reproduce it — and that copy was ALSO
+// wrong, in the other direction: it ran in `OnAttach`, several startup stages before the scan that finds
+// `.anim` files on disk, so with three clips in `Cooked/Meshes` the editor reported "4 clip(s) known",
+// exactly the four compiled-in procedural ones.
+//
+// Both halves are one thing — "who and when fills the library" — and the fix is one point,
+// `Animation::PopulateLibrary`, called from the tail of the scan that finds the clips. The checks below
+// pin all three properties that make that fix hold: the point exists inside the scan, the scan's own
+// count is what it is given (so the ordering cannot be reversed and still compile), and neither host has
+// grown a copy of the loop again.
 
 #include <gtest/gtest.h>
 
@@ -32,7 +53,19 @@ namespace
     // The two files that start the engine. There is no third: the editor's startup stage list and the
     // runtime's straight-line sequence are the only places a preload is ever asked for.
     constexpr const char* kPreloaderHeader = "Desert/Desert/Source/Engine/Assets/AssetPreloader.hpp";
+    constexpr const char* kPreloaderSource = "Desert/Desert/Source/Engine/Assets/AssetPreloader.cpp";
     constexpr const char* kLayers[] = { "Editor/Source/EditorLayer.cpp", "Runtime/Source/RuntimeLayer.cpp" };
+
+    // Spellings by which a HOST would be filling the animation library itself. Each is a line that used to
+    // exist in EditorLayer.cpp and must not come back in either layer: the population point is shared, and
+    // a host that re-grows its own copy re-creates both halves of the defect at once — the other host
+    // silently has none, and this one runs at whatever moment its own startup happens to reach.
+    constexpr const char* kHostFillSpellings[] = {
+         "m_AnimationLibrary->Register(",
+         "m_AnimationLibrary->Clear(",
+         "ProceduralCharacterAnimations::RegisterClips",
+         "PopulateLibrary",
+    };
 
     std::string RepoRoot()
     {
@@ -78,6 +111,93 @@ namespace
         }
         return names;
     }
+
+    /**
+     * @brief The source with its comments blanked out, so a check about CODE cannot be satisfied — or
+     *        broken — by prose.
+     *
+     * BOTH DIRECTIONS HAVE BITTEN. This file's own `DeclaredPreloads` skips comment lines because the
+     * preloader header NAMES a deleted method in a comment; and the checks below would fail on the
+     * comment `EditorLayer.cpp` now carries explaining that the fill loop moved, which mentions
+     * `PopulateLibrary` by name. Blanking rather than deleting keeps byte offsets intact, which the
+     * ordering check depends on.
+     *
+     * String and character literals are tracked because `//` inside one is not a comment — the layers
+     * contain URL-shaped strings, and a naive stripper would eat the rest of those lines.
+     */
+    std::string WithoutComments( const std::string& source )
+    {
+        std::string out = source;
+        enum class In
+        {
+            Code,
+            LineComment,
+            BlockComment,
+            String,
+            Char
+        } state = In::Code;
+
+        for ( size_t i = 0; i < out.size(); ++i )
+        {
+            const char c    = out[i];
+            const char next = ( i + 1 < out.size() ) ? out[i + 1] : '\0';
+
+            switch ( state )
+            {
+                case In::Code:
+                    if ( c == '/' && next == '/' )
+                    {
+                        state    = In::LineComment;
+                        out[i]   = ' ';
+                        out[++i] = ' ';
+                    }
+                    else if ( c == '/' && next == '*' )
+                    {
+                        state    = In::BlockComment;
+                        out[i]   = ' ';
+                        out[++i] = ' ';
+                    }
+                    else if ( c == '"' )
+                        state = In::String;
+                    else if ( c == '\'' )
+                        state = In::Char;
+                    break;
+
+                case In::LineComment:
+                    if ( c == '\n' )
+                        state = In::Code;
+                    else
+                        out[i] = ' ';
+                    break;
+
+                case In::BlockComment:
+                    if ( c == '*' && next == '/' )
+                    {
+                        state    = In::Code;
+                        out[i]   = ' ';
+                        out[++i] = ' ';
+                    }
+                    else if ( c != '\n' )
+                        out[i] = ' ';
+                    break;
+
+                case In::String:
+                    if ( c == '\\' )
+                        ++i;
+                    else if ( c == '"' )
+                        state = In::Code;
+                    break;
+
+                case In::Char:
+                    if ( c == '\\' )
+                        ++i;
+                    else if ( c == '\'' )
+                        state = In::Code;
+                    break;
+            }
+        }
+        return out;
+    }
 } // namespace
 
 TEST( AssetPreloadCensus, TheHeaderStillDeclaresPreloadsAtAll )
@@ -114,6 +234,98 @@ TEST( AssetPreloadCensus, EveryPreloadIsCalledByBothLayers )
                  << "(). A preload nothing calls is content that silently never loads: the scenes that "
                     "reference it log one line and render without it, and no test of the asset, the "
                     "format or the panel can see it. Add the call, or delete the method.";
+    }
+}
+
+// THE POPULATION POINT LIVES INSIDE THE SCAN, which is what makes it reachable from both hosts without
+// either host naming it: `AssetPreloadCensus.EveryPreloadIsCalledByBothLayers` above already proves both
+// layers call `PreloadCookedAssetsAndMaterials()`, so a fill at its tail runs in both, once, always.
+TEST( AssetPreloadCensus, TheAnimationLibraryIsFilledByTheScanThatFindsTheClips )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    const std::string source = WithoutComments( ReadFile( root + kPreloaderSource ) );
+    ASSERT_FALSE( source.empty() ) << "could not read " << kPreloaderSource;
+
+    EXPECT_NE( source.find( "Animation::PopulateLibrary(" ), std::string::npos )
+         << kPreloaderSource
+         << " never calls Animation::PopulateLibrary(). The animation library is an index over clip assets "
+            "exactly as the texture, mesh and material services are indexes over theirs, and every one of "
+            "those is published to HERE, at the tail of the scan that finds them. A library filled anywhere "
+            "else is filled by a host — which is how the packaged game shipped with an empty one and the "
+            "editor filled its own before the clips had been scanned.";
+}
+
+// THE ORDER IS A DATA DEPENDENCY, NOT A LINE NUMBER. This is the check that outlives a refactor: the
+// number of `.anim` files exists only after the scan has run, so a fill moved above the scan does not
+// compile. What a refactor CAN silently do is drop the parameter and with it the guarantee, and that is
+// what reddens here.
+TEST( AssetPreloadCensus, ThePopulationIsGivenTheScansOwnCountAndSoCannotPrecedeIt )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    const std::string source = WithoutComments( ReadFile( root + kPreloaderSource ) );
+    ASSERT_FALSE( source.empty() );
+
+    // The variable the `.anim` scan's result is bound to. `[\s\S]` rather than `.` because the assignment
+    // is wrapped across lines by the formatter.
+    std::smatch      scan;
+    const std::regex scanPattern( R"((\w+)\s*=\s*ProcessAssetFiles<\s*AnimationAsset\s*>)" );
+    ASSERT_TRUE( std::regex_search( source, scan, scanPattern ) )
+         << "the `.anim` scan in " << kPreloaderSource
+         << " no longer assigns its result to anything. That count is the only thing that can tell 'this "
+            "project has no clips' from 'the clips never reached the library', and it is what makes the "
+            "fill impossible to move above the scan.";
+    const std::string counter = scan[1].str();
+
+    const size_t scanAt = static_cast<size_t>( scan.position( 0 ) );
+    const size_t fillAt = source.find( "Animation::PopulateLibrary(" );
+    ASSERT_NE( fillAt, std::string::npos );
+    EXPECT_LT( scanAt, fillAt ) << "the animation library is filled BEFORE the `.anim` scan in "
+                                << kPreloaderSource
+                                << ". That is the editor's old defect moved into the asset layer: the fill "
+                                   "would run against a manager that has not been shown a clip file yet.";
+
+    // The call's own argument list must carry that variable. Bounded by the statement's semicolon rather
+    // than by brace matching — the call is one statement.
+    const size_t      fillEnd = source.find( ';', fillAt );
+    const std::string call    = source.substr( fillAt, fillEnd - fillAt );
+    EXPECT_NE( call.find( counter ), std::string::npos )
+         << "Animation::PopulateLibrary is no longer given '" << counter
+         << "', the count the `.anim` scan produced. Without that argument the ordering is back to being a "
+            "convention about line order, and an empty library stops being distinguishable from a project "
+            "with no clips in it.";
+}
+
+// AND NEITHER HOST FILLS IT ITSELF. The editor's own loop is what hid the runtime's missing one for as
+// long as it did, so the absence of a host-side fill is part of the fix rather than a tidiness rule.
+TEST( AssetPreloadCensus, NoLayerFillsTheAnimationLibraryItself )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    for ( const char* layer : kLayers )
+    {
+        const std::string source = WithoutComments( ReadFile( root + layer ) );
+        ASSERT_FALSE( source.empty() ) << "could not read " << layer;
+
+        // The census has to rule out its own empty answer first: a stripper that blanked the whole file
+        // would pass every check below for the wrong reason.
+        ASSERT_NE( source.find( "m_AnimationLibrary" ), std::string::npos )
+             << layer
+             << " no longer mentions m_AnimationLibrary at all, so this check is asserting "
+                "nothing. Either the layer stopped owning a library — in which case this suite "
+                "needs rewriting — or the comment stripper ate the file.";
+
+        for ( const char* spelling : kHostFillSpellings )
+            EXPECT_EQ( source.find( spelling ), std::string::npos )
+                 << layer << " contains '" << spelling
+                 << "', so this host fills the animation library itself. Both halves of the defect this "
+                    "forbids were live at once: the editor had exactly this loop and ran it before the "
+                    "`.anim` scan, and the runtime had nothing and shipped T-posing characters. The fill "
+                    "belongs to Animation::PopulateLibrary, called from AssetPreloader.";
     }
 }
 

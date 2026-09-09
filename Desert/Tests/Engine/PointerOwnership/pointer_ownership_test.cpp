@@ -222,11 +222,21 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   stores the VALUE and assigns it back. Its pointer is the same kind of pointer ByteCommand's is
     //   (into a live component's field) under the same guard (IsVolatile, so DropVolatile drops it), so
     //   it adds a row rather than a question.
-    EXPECT_EQ( CountOf( Form::Raw ), 345 );
+    //
+    //   816 -> 819 with D34, and all THREE are raw. One is a host reference: AssetPreloader now takes the
+    //   AnimationLibrary it publishes clips to, because the library was the one content index a HOST filled
+    //   rather than the scan — the editor with its own loop in the wrong place, the packaged game with no
+    //   loop at all and every character in its bind pose. The other two are the fix to what that made
+    //   reachable: Animator's bone->track memo was keyed on the clip's ADDRESS alone, and an asset unload +
+    //   reload leaves that address alone while freeing the Tracks vector the memo points into, so the memo
+    //   now carries the storage it was built from (TracksData, never dereferenced) beside the pointers it
+    //   guards (ByBone). The old m_TrackBinding row's argument for why the key was safe is retracted in
+    //   place rather than deleted — it was wrong in exactly the direction that cost a segfault.
+    EXPECT_EQ( CountOf( Form::Raw ), 348 );
     EXPECT_EQ( CountOf( Form::Shared ), 323 );
     EXPECT_EQ( CountOf( Form::Unique ), 110 );
     EXPECT_EQ( CountOf( Form::Weak ), 38 );
-    EXPECT_EQ( (int)Members().size(), 816 )
+    EXPECT_EQ( (int)Members().size(), 819 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }

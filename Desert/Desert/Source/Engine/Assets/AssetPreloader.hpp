@@ -4,6 +4,7 @@
 #include "Mesh/SurfaceMaterialAsset.hpp"
 #include "Skybox/SkyboxAsset.hpp"
 
+#include <Engine/Animation/AnimationLibrary.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 namespace Desert::Assets
@@ -11,7 +12,14 @@ namespace Desert::Assets
     class AssetPreloader
     {
     public:
-        explicit AssetPreloader( const std::shared_ptr<AssetManager>& assetManager );
+        // THE LIBRARY IS A CONSTRUCTOR PARAMETER, not something a host fills afterwards, and that is the
+        // decision this class exists to carry. Every other content kind here is scanned and then published
+        // to its service in the same function; animation clips were the one exception — scanned here,
+        // published by the editor layer in a loop of its own and by the runtime layer not at all — and the
+        // exception is the whole defect. A REFERENCE rather than a pointer: a preloader with no library to
+        // fill is not a state anything should be able to construct.
+        AssetPreloader( const std::shared_ptr<AssetManager>& assetManager,
+                        Animation::AnimationLibrary&         animationLibrary );
 
         // A `PreloadAllAssets()` USED TO SIT HERE and it is why the painted layout was dead for a
         // month. It called all seven preloads in one line, so the class LOOKED like it had an entry
@@ -68,5 +76,9 @@ namespace Desert::Assets
 
     private:
         std::weak_ptr<AssetManager> m_AssetManager;
+
+        // Non-owning: the library belongs to the layer, which outlives its preloader. Never null — the
+        // constructor takes a reference.
+        Animation::AnimationLibrary* m_AnimationLibrary;
     };
 } // namespace Desert::Assets

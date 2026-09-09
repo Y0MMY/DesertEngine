@@ -1123,12 +1123,37 @@ namespace Desert::Tests::PointerCensus
         { "Desert/Desert/Source/Engine/Animation/AnimationLibrary.hpp",
           "AnimationLibrary", "m_AssetManager", Guard::HostOutlivesUs,
           "EditorLayer declares the AssetManager before the library and destroys it after" },
+        { "Desert/Desert/Source/Engine/Assets/AssetPreloader.hpp",
+          "AssetPreloader", "m_AnimationLibrary", Guard::HostOutlivesUs,
+          "the library the scan publishes clips to. Taken as a REFERENCE by the constructor, so it can never "
+          "be null, and both hosts that own one declare it BEFORE their preloader -- EditorLayer.hpp and "
+          "RuntimeLayer.hpp both say so at the declaration, because members are destroyed in reverse "
+          "declaration order and that order is the whole guarantee" },
         { "Desert/Desert/Source/Engine/Animation/Animator.hpp",
           "ClipPlayback", "Clip", Guard::HostOutlivesUs,
           "an AnimationClip inside an AnimationLibrary entry; the library outlives the animator that plays it" },
         { "Desert/Desert/Source/Engine/Animation/Animator.hpp",
           "Animator", "m_TrackBinding", Guard::IdentityOnly,
-          "a memo keyed BY CLIP ADDRESS, and the BoneTrack pointers in the value point into that same clip. A recycled address would find a stale binding, which is why this is only ever populated for a clip the animator is currently playing and holding through the library" },
+          "a memo keyed BY CLIP ADDRESS. This row used to claim the key was safe because the animator only "
+          "ever memoises a clip it is currently playing and holding through the library -- and that argument "
+          "was WRONG in the one direction it needed to be right: the danger is not a recycled clip address, it "
+          "is the SAME clip address whose Tracks vector has been freed and reallocated under it by an asset "
+          "unload + reload (D34, a segfault in lower_bound). The value type now carries the storage it was "
+          "built from and is rebuilt when that storage moves; see TrackBinding::TracksData below" },
+        { "Desert/Desert/Source/Engine/Animation/Animator.hpp",
+          "TrackBinding", "TracksData", Guard::IdentityOnly,
+          "NOT DEREFERENCED, EVER. It is clip->Tracks.data() as it stood when the binding was built, kept only "
+          "to be compared against the clip's current data() -- an identity, exactly like Mouse::m_Window. That "
+          "comparison is what makes the ByBone pointers below safe, and it is the whole fix: the clip keeps one "
+          "address for its asset's life while AnimationAsset::Unload frees its Tracks and Load allocates a new "
+          "vector, so an address-only key handed back pointers into returned memory" },
+        { "Desert/Desert/Source/Engine/Animation/Animator.hpp",
+          "TrackBinding", "ByBone", Guard::ReboundBeforeEveryUse,
+          "BoneTracks inside the clip's own Tracks vector, and the caller's discipline that closes Q2 is "
+          "stated in code rather than in prose: ResolveTrack compares TracksData/TrackCount against the clip's "
+          "current vector before returning any of these and rebuilds them when they disagree. What would break "
+          "it is dropping that comparison -- Desert/Tests/Engine/AnimatorClipRebind is the test that would go "
+          "red, by replacing a clip's tracks in place and requiring the pose to follow" },
         { "Desert/Desert/Source/Engine/Animation/Graph/AnimGraph.hpp",
           "Result", "Current", Guard::HostOutlivesUs,
           "a State inside the AnimGraph asset the result was produced from; the graph outlives one evaluation" },

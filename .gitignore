@@ -122,11 +122,26 @@ Editor/Cooked/Textures/*
 # is visibly wrong rather than merely dimmer. Hand-authored, like the skinned pair: no source .fbx exists,
 # so re-running the cook would not recreate it. Desert/Tests/Engine/StaticMeshCooked parses this exact file
 # and pins what it carries; M10_MeshSlot.desce places it.
+# THE FOURTH: the animation clips, and the same sentence again one kind later. Until 2026-09-09 this
+# repository contained NOT ONE `.anim` file, so the clip half of the animation system — the scan, the
+# library, the rig match, the Animator, the skinning matrices — had never once been exercised end to end
+# from disk by anything a person could run. That is what let the library go UNFILLED in the packaged game
+# for as long as it did: every character T-posed and no frame in the tree could show it, because no frame
+# in the tree had a clip to play. Three files, 12 KB, hand-authored like the rigs above and not
+# reproducible by any importer: SkinProbe_Hover translates the one bone 200 cm up and back, SkinProbe_Tilt
+# turns it once about Z (a different KIND of motion, so a frame proves which clip played rather than only
+# that something did), and Foreign_Hips is the NEGATIVE CONTROL — a different rig signature animating a
+# bone name SkinProbe does not have, so a library that offers it to this rig is wrong in a way a passing
+# frame would otherwise hide. Editor/Resources/Assets/Scenes/ANIM_ClipProbe.desce plays the first two;
+# Desert/Tests/Engine/AnimationClipCorpus parses all three and pins what they carry.
 !Editor/Cooked/Meshes/
 Editor/Cooked/Meshes/*
 !Editor/Cooked/Meshes/SkinProbe.skeleton
 !Editor/Cooked/Meshes/SkinProbe.skmesh
 !Editor/Cooked/Meshes/StaticProbe.stmesh
+!Editor/Cooked/Meshes/SkinProbe_Hover.anim
+!Editor/Cooked/Meshes/SkinProbe_Tilt.anim
+!Editor/Cooked/Meshes/Foreign_Hips.anim
 
 # Fetched by scripts/MacOS/Setup.sh (not a submodule)
 ThirdParty/meshoptimizer/

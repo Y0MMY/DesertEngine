@@ -1,5 +1,6 @@
 #include "AnimationLibrary.hpp"
 
+#include <Engine/Animation/ProceduralCharacterAnimations.hpp>
 #include <Engine/Animation/Skeleton.hpp>
 
 #include <Common/Core/Logger.hpp>
@@ -108,5 +109,64 @@ namespace Desert::Animation
     void AnimationLibrary::Clear()
     {
         m_Clips.clear();
+    }
+
+    Common::ResultStr<LibraryPopulation> PopulateLibrary( Assets::AssetManager& assets, AnimationLibrary& library,
+                                                          const size_t clipFilesDiscovered )
+    {
+        // CLEARED FIRST because this is also the re-scan path: `AssetPreloader::ReloadCooked` ("Rebuild
+        // Cooked Assets") runs the whole discovery again, and a library that only ever grew would answer
+        // with two records per clip afterwards — the second of which resolves the same handle, so nothing
+        // would look wrong until a picker showed every clip twice.
+        library.Clear();
+
+        LibraryPopulation counts;
+
+        for ( const auto& [handle, animation] : assets.FindAllByType<Assets::AnimationAsset>() )
+        {
+            if ( !animation )
+                continue;
+
+            // The in-memory locomotion clips are in the manager too (RegisterClips creates them as assets
+            // so the pickers can offer them like any other), and they are registered below rather than
+            // here. Skipping them by "was there a file behind this?" is the same question the eviction
+            // path asks, and it is the only property that distinguishes them.
+            if ( !animation->IsReloadableFromFile() )
+                continue;
+
+            library.Register( animation );
+            ++counts.FromFiles;
+        }
+
+        counts.Procedural = ProceduralCharacterAnimations::RegisterClips( assets, library );
+
+        LOG_INFO( "[AnimationLibrary] {} clip(s) registered: {} from {} `.anim` file(s) on disk, {} built-in "
+                  "procedural.",
+                  counts.FromFiles + counts.Procedural, counts.FromFiles, clipFilesDiscovered, counts.Procedural );
+
+        // THE CASE THAT SHIPPED, said out loud. An empty library is the correct state for a project with no
+        // clips and a broken one for a project with clips on disk, and only the scan's own count can tell
+        // the two apart — which is why it is a parameter. Without this line the symptom is a character
+        // standing still and no log line anywhere in the process.
+        if ( clipFilesDiscovered > 0 && counts.FromFiles == 0 )
+        {
+            return Common::MakeFormattedError<LibraryPopulation>(
+                 "the asset scan found {} `.anim` file(s) under the cooked mesh root and NOT ONE of them "
+                 "reached the animation library. Every skinned character whose clip comes from a file will "
+                 "stand in its bind pose. {} built-in procedural clip(s) are registered, so a library that "
+                 "answers at all is not evidence the files arrived.",
+                 clipFilesDiscovered, counts.Procedural );
+        }
+
+        // Fewer than were found is a real loss too — a file that failed to parse never became an asset —
+        // but it is a partial one, and the per-file reason is already on the log from AnimationAsset::Load.
+        if ( counts.FromFiles < clipFilesDiscovered )
+        {
+            LOG_WARN( "[AnimationLibrary] {} of {} `.anim` file(s) did not become a clip asset and are not "
+                      "in the library; the reason for each is logged above by the asset load that failed.",
+                      clipFilesDiscovered - counts.FromFiles, clipFilesDiscovered );
+        }
+
+        return Common::MakeSuccess( counts );
     }
 } // namespace Desert::Animation

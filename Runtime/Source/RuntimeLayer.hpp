@@ -51,9 +51,11 @@ namespace Desert::Player
         std::string          m_ScenePathOverride;
         Engine::Application* m_Application = nullptr;
 
-        std::shared_ptr<Assets::AssetManager>        m_AssetManager;
-        std::unique_ptr<Assets::AssetPreloader>      m_AssetPreloader;
+        std::shared_ptr<Assets::AssetManager> m_AssetManager;
+        // BEFORE the preloader, which holds a non-owning reference to it and must therefore not outlive
+        // it: members are destroyed in reverse declaration order.
         std::unique_ptr<Animation::AnimationLibrary> m_AnimationLibrary;
+        std::unique_ptr<Assets::AssetPreloader>      m_AssetPreloader;
         std::unique_ptr<Graphic::SceneRenderer>      m_SceneRenderer;
         std::shared_ptr<Core::Scene>                 m_Scene;
 
