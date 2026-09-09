@@ -419,9 +419,10 @@ namespace Desert::Editor
                 {
                     if ( ImGui::MenuItem( ICON_MDI_PLUS "  UI Canvas" ) )
                     {
-                        auto& e = m_Scene->CreateNewEntity( "UI Canvas" );
-                        e.AddComponent<ECS::UICanvasComponent>();
-                        Core::SelectionManager::SetSelected( e.GetComponent<ECS::UUIDComponent>().UUID );
+                        // Through the factory so the creation is recorded: this used to build the
+                        // entity inline and Ctrl+Z walked straight past it (see UIElementFactory.hpp).
+                        if ( const entt::entity h = CreateUICanvas( *m_Scene ); h != entt::null )
+                            Core::SelectionManager::SetSelected( reg.get<ECS::UUIDComponent>( h ).UUID );
                     }
                 }
                 else
