@@ -863,19 +863,50 @@ namespace Desert::Editor::ShaderGraph
                 // Pin::Type in the file is a serialized MIRROR of the catalogue, and the canvas
                 // type-checks against that mirror. If the two disagree the file can make the canvas
                 // accept a link the compiler cannot emit, so the mirror is checked rather than trusted.
+                //
+                // AND SO IS Pin::Name, BECAUSE THE NAME IS NOT DECORATION — IT IS EMITTED. The Cloud
+                // Sample node hands out one struct member per output pin, and the emitter writes
+                // `<var>.<name>` with the name taken FROM THE DOCUMENT; the ShadowRay scope refusal
+                // matches on that same stored string. Until this loop compared names, a .dgraph whose
+                // pin had been renamed to something of the right type passed here untouched and then
+                // failed one of two ways: it reached shaderc and died on a line of GENERATED code —
+                // the exact failure this function's own comment above promises to prevent — or, when
+                // the new name happened to be another member of the struct, it compiled into a
+                // silently different value with the scope check never firing.
+                //
+                // REFUSED RATHER THAN REPAIRED, which is the answer MigrateToCatalogue already gives:
+                // a stored pin list that is not a PREFIX of the catalogue is left exactly as it is
+                // there rather than guessed at. A renamed pin is either a corrupt document or one
+                // written against a different catalogue, and substituting the catalogue's name for it
+                // would change what the graph MEANS with nothing to show for it. A catalogue rename
+                // travels as an explicit migration over the files, like every other format change here.
                 for ( size_t i = 0; i < node.Inputs.size(); ++i )
+                {
+                    if ( node.Inputs[i].Name != spec->Inputs[i].Name )
+                        return std::format( "node {}: input {} is named '{}' but kind '{}' declares '{}' at "
+                                            "that position",
+                                            NodeLabel( node ), i, node.Inputs[i].Name, node.Kind,
+                                            spec->Inputs[i].Name );
                     if ( node.Inputs[i].Type != static_cast<int>( spec->Inputs[i].Type ) )
                         return std::format( "node {}: input '{}' is stored as {} but kind '{}' declares it {}",
                                             NodeLabel( node ), node.Inputs[i].Name,
                                             GlslTypeName( static_cast<ValueType>( node.Inputs[i].Type ) ),
                                             node.Kind, GlslTypeName( spec->Inputs[i].Type ) );
+                }
 
                 for ( size_t i = 0; i < node.Outputs.size(); ++i )
+                {
+                    if ( node.Outputs[i].Name != spec->Outputs[i].Name )
+                        return std::format( "node {}: output {} is named '{}' but kind '{}' declares '{}' at "
+                                            "that position",
+                                            NodeLabel( node ), i, node.Outputs[i].Name, node.Kind,
+                                            spec->Outputs[i].Name );
                     if ( node.Outputs[i].Type != static_cast<int>( spec->Outputs[i].Type ) )
                         return std::format( "node {}: output '{}' is stored as {} but kind '{}' declares it {}",
                                             NodeLabel( node ), node.Outputs[i].Name,
                                             GlslTypeName( static_cast<ValueType>( node.Outputs[i].Type ) ),
                                             node.Kind, GlslTypeName( spec->Outputs[i].Type ) );
+                }
             }
 
             // ---- pin index, rejecting duplicate ids ----

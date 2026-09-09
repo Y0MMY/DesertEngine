@@ -205,6 +205,12 @@ namespace Desert::Editor
         // changed type, a reorder) is left exactly as it is, so ValidateGraph rejects it by name
         // instead of this function quietly rewriting the artist's graph into something else.
         //
+        // THAT SENTENCE WAS A PROMISE THIS PAIR DID NOT KEEP until O1-J, and it is recorded rather
+        // than quietly corrected because the shape recurs: ValidateGraph compared pin TYPES and not
+        // pin NAMES, so a rename that kept the type was left alone here and then accepted there —
+        // the one half of "not a prefix" that reached the emitter, which uses the stored name as a
+        // GLSL struct member. Both functions now give the same answer to a renamed pin, refuse.
+        //
         // Pure: takes a document, returns a document, touches no file and no global state.
         int MigrateToCatalogue( Document& doc );
 
