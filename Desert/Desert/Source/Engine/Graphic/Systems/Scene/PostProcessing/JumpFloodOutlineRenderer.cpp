@@ -94,9 +94,13 @@ namespace Desert::Graphic::System
             spec.DepthWriteEnabled = false;
             spec.CullMode          = CullMode::None;
 
-            auto pipeline = GraphicsPipeline::Create( spec );
-            pipeline->Invalidate();
-            return pipeline;
+            const auto pipeline = GraphicsPipeline::Create( spec );
+            if ( !pipeline )
+            {
+                LOG_ERROR( "JumpFloodOutlineRenderer: {}", pipeline.GetError() );
+                return nullptr;
+            }
+            return pipeline.GetValue();
         };
 
         m_InitPipeline  = makePipeline( "JFA_Init", m_SeedFramebuffers[0], "JFA_InitPipeline" );

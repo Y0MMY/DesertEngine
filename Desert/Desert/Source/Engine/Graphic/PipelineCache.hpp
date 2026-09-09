@@ -157,24 +157,47 @@ namespace Desert::Graphic
     // pipeline instead of every renderer creating its own. Owned by SceneRenderer and filled once, when that
     // renderer builds its systems; loading a different scene into the same renderer does NOT clear it,
     // because nothing in the key is scene-derived (see SceneRenderer::Init). Shader hot-reload drops the
-    // affected entries through InvalidateByShader after a WaitDeviceIdle. Created pipelines are
-    // Invalidate()'d here.
+    // affected entries through InvalidateByShader after a WaitDeviceIdle. Pipelines arrive from
+    // GraphicsPipeline::Create already built — the two-step `Create(); Invalidate();` that used to live
+    // here is gone, because its first half handed out an object that could not draw.
     class PipelineCache
     {
     public:
-        std::shared_ptr<GraphicsPipeline> GetOrCreate( const GraphicsPipelineSpecification& spec )
+        /**
+         * The cached pipeline for @p spec, BUILT — or the reason there is none.
+         *
+         * IT USED TO HAND BACK A PIPELINE THAT HAD NOT BEEN BUILT, and that is a second defect on top of
+         * the one Create carried. `Create(); if ( pipeline ) Invalidate();` cached whatever came back,
+         * built or not: an unbuilt pipeline is a live, non-null `shared_ptr` whose VkPipeline is null, so
+         * the ten call sites — seven of which tested `if ( !pipeline )`, a branch that could not run —
+         * stored it, drew through it every frame for the life of the renderer, and the only thing that
+         * ever said so was VulkanRendererAPI::BindGraphicsPipeline, once, from the far end of the frame.
+         *
+         * THE REFUSAL IS CACHED TOO, and that is deliberate. MeshRenderer::DrawGenericMeshes asks for a
+         * pipeline PER SUBMESH GROUP PER FRAME; if a refusal were not remembered, one mistyped shader
+         * would re-enter vkCreateGraphicsPipelines and re-log its reason sixty times a second. The cache
+         * entry IS the throttle, and shader hot-reload clears it through InvalidateByShader like any
+         * other entry, so a fixed shader recovers on its next compile without a special path.
+         *
+         * A MALFORMED SPEC IS NOT CACHED. Refusals from the device-free rule are the ones whose key is
+         * degenerate — a null Shader or Framebuffer is a null pointer IN THE KEY, so two different
+         * callers with two different bugs would collide on one entry and the second would be told the
+         * first one's story. Those are call-site defects that must be fixed, not results to remember.
+         */
+        NO_DISCARD Common::ResultStr<std::shared_ptr<GraphicsPipeline>>
+                   GetOrCreate( const GraphicsPipelineSpecification& spec )
         {
+            if ( const auto buildable = CheckGraphicsPipelineSpecification( spec ); !buildable )
+                return Common::MakeError<std::shared_ptr<GraphicsPipeline>>( buildable.GetError() );
+
             const Key key = MakeKey( spec );
 
             if ( auto it = m_Cache.find( key ); it != m_Cache.end() )
                 return it->second;
 
-            auto pipeline = GraphicsPipeline::Create( spec );
-            if ( pipeline )
-                pipeline->Invalidate();
-
-            m_Cache.emplace( key, pipeline );
-            return pipeline;
+            auto built = GraphicsPipeline::Create( spec );
+            m_Cache.emplace( key, built );
+            return built;
         }
 
         void Clear()
@@ -185,9 +208,16 @@ namespace Desert::Graphic
         // How many distinct GPU pipelines this renderer is holding. Logged by SceneRenderer::Init so a run's
         // log says whether a scene load rebuilt them or kept them — the number Г11 is about, readable
         // without re-measuring anything.
+        //
+        // THE BUILT ONES, not the entries: a remembered refusal occupies a row and is not a GPU pipeline,
+        // and this number is read as "what the device is holding". Counting instead of returning size()
+        // is what keeps the sentence above true after Г22 gave the map a second kind of row.
         NO_DISCARD size_t Size() const
         {
-            return m_Cache.size();
+            size_t built = 0;
+            for ( const auto& [key, entry] : m_Cache )
+                built += entry.IsSuccess() ? 1 : 0;
+            return built;
         }
 
         // Drops every pipeline built against @p shader — used by shader hot-reload so the next
@@ -372,7 +402,8 @@ namespace Desert::Graphic
             return k;
         }
 
-        std::unordered_map<Key, std::shared_ptr<GraphicsPipeline>, KeyHash> m_Cache;
+        // The OUTCOME per key, not the pipeline: see GetOrCreate for why a refusal is a row here too.
+        std::unordered_map<Key, Common::ResultStr<std::shared_ptr<GraphicsPipeline>>, KeyHash> m_Cache;
     };
 
 } // namespace Desert::Graphic

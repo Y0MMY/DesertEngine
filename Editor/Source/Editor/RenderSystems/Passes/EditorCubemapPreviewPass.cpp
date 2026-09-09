@@ -32,10 +32,10 @@ namespace Desert::Editor::Render
         spec.CullMode          = Graphic::CullMode::None;
         spec.BlendEnable       = false; // radiance, opaque; the post chain tonemaps it like any sky
 
-        m_Pipeline = Graphic::GraphicsPipeline::Create( spec );
-        if ( !m_Pipeline )
-            return Common::MakeError( "EditorCubemapPreviewPass: failed to create pipeline" );
-        m_Pipeline->Invalidate();
+        const auto pipeline = Graphic::GraphicsPipeline::Create( spec );
+        if ( !pipeline )
+            return Common::MakeError( "EditorCubemapPreviewPass: " + pipeline.GetError() );
+        m_Pipeline = pipeline.GetValue();
 
         m_Material = std::make_unique<Graphic::MaterialCubemapSphere>();
 

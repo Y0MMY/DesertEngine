@@ -400,9 +400,18 @@ namespace Desert::Graphic::System
             spec.Layout            = meshLayout;
             spec.UseLoadRenderPass = useLoadPass; // deferred manual pass begins with LOAD
             ApplyShaderRenderState( spec, shader->GetProgramMeta().State );
-            auto pipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
-            if ( !pipeline )
+            // NAMED ONCE PER SHADER, for the reason the domain refusal above gives: this runs per frame
+            // per submesh group. The cache remembers the refusal itself, so the rebuild happens once;
+            // this set is only about the log line.
+            const auto built = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
+            if ( !built )
+            {
+                static std::unordered_set<std::string> s_RefusedPipelines;
+                if ( s_RefusedPipelines.insert( shaderName ).second )
+                    LOG_ERROR( "[MeshRenderer] this submesh is not drawn: {}", built.GetError() );
                 continue;
+            }
+            const auto& pipeline = built.GetValue();
 
             // ── This draw's ROW ─────────────────────────────────────────────────────────────────────
             //
@@ -522,6 +531,19 @@ namespace Desert::Graphic::System
         auto targetFb = m_TargetFramebuffer.lock();
         if ( !targetFb )
             return;
+
+        // A PASS WITHOUT ITS PIPELINE IS NOT A PASS, and this guard is what makes the refusal above
+        // survivable. Before Г22 `m_StaticPipeline` could not be null (Create returned a make_shared),
+        // so `m_StaticPipeline->GetSpecification()` two lines down was safe by accident; now that
+        // SetupStaticPass can honestly refuse, the same line is a null dereference — the refusal became
+        // expressible and its first reader crashed on it. Registering nothing is the right answer: the
+        // graph simply has no geometry pass, and the sky, terrain and post chain still draw.
+        if ( !m_StaticPipeline )
+        {
+            LOG_ERROR( "[MeshRenderer] no geometry pass this scene: the static-mesh pipeline was never "
+                       "built." );
+            return;
+        }
 
         builder.AddPass( "MeshGeometryPass", RenderPhase::Geometry,
                          [this]()
@@ -1087,8 +1109,22 @@ namespace Desert::Graphic::System
             GraphicsPipelineSpecification spec = m_SkinnedPipeline->GetSpecification();
             spec.UseLoadRenderPass             = true;
             spec.DebugName                     = "SkinnedMesh_Load";
-            if ( auto p = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec ) )
-                pipeline = p.get();
+            // A refusal here is not fatal: `pipeline` still holds the non-LOAD skinned pipeline, which
+            // draws over a cleared target instead of the composited one. Named once, because this runs
+            // every frame.
+            const auto loadVariant = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
+            if ( loadVariant )
+            {
+                pipeline = loadVariant.GetValue().get();
+            }
+            else
+            {
+                static bool s_Warned = false;
+                if ( !std::exchange( s_Warned, true ) )
+                    LOG_ERROR( "[MeshRenderer] skinned meshes draw through the non-LOAD pipeline in the "
+                               "deferred path: {}",
+                               loadVariant.GetError() );
+            }
         }
 
         // Grouped by material, exactly like DrawStaticMeshes — and for the same two reasons, which the
@@ -1202,13 +1238,23 @@ namespace Desert::Graphic::System
 
         // Pipelines come from the shared cache (deduped by shader + target + state). The mesh keeps its
         // explicit state for now; PBR's render-state moves to the shader's #pragma state in Phase 2.
-        m_StaticPipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
+        const auto staticPipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
+        if ( !staticPipeline )
+        {
+            LOG_ERROR( "[MeshRenderer] static meshes will not draw: {}", staticPipeline.GetError() );
+            return false;
+        }
+        m_StaticPipeline = staticPipeline.GetValue();
 
         // Wireframe variant — identical spec, line polygon mode (device feature fillModeNonSolid is on).
         // Selected per-frame by the SceneSettings debug toggle; shares the same framebuffer/render pass.
+        // A debug view, so a refusal costs the view and not the pass.
         spec.DebugName   = "StaticMeshWireframe";
         spec.PolygonMode = PrimitivePolygonMode::Wireframe;
-        m_StaticWireframePipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
+        if ( const auto wireframe = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec ) )
+            m_StaticWireframePipeline = wireframe.GetValue();
+        else
+            LOG_ERROR( "[MeshRenderer] the wireframe view is off: {}", wireframe.GetError() );
 
         // Instanced variant: same vertex layout + state, but the vertex shader pulls the per-instance model
         // matrix from the InstanceTransforms SSBO (binding 16) by gl_InstanceIndex. Drawn via one instanced
@@ -1228,7 +1274,10 @@ namespace Desert::Graphic::System
             ispec.CullMode       = CullMode::Back;
             ispec.Shader         = m_InstancedGeometryShader;
             ispec.Framebuffer    = targetFb;
-            m_StaticInstancedPipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( ispec );
+            if ( const auto instanced = m_SceneRenderer->GetPipelineCache().GetOrCreate( ispec ) )
+                m_StaticInstancedPipeline = instanced.GetValue();
+            else
+                LOG_ERROR( "[MeshRenderer] instanced static drawing is off: {}", instanced.GetError() );
         }
 
         return true;
@@ -1258,9 +1307,14 @@ namespace Desert::Graphic::System
         spec.Shader         = m_StaticGBufferShader;
         spec.Framebuffer    = gbuffer; // 2 color attachments -> the shader's 2 MRT outputs
 
-        m_StaticGBufferPipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
-        if ( !m_StaticGBufferPipeline )
+        const auto gbufferPipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
+        if ( !gbufferPipeline )
+        {
+            LOG_ERROR( "[MeshRenderer] the deferred path is off, the forward one still draws: {}",
+                       gbufferPipeline.GetError() );
             return false;
+        }
+        m_StaticGBufferPipeline = gbufferPipeline.GetValue();
 
         // The RSM renders the same shader, layout and attachment set from the sun's POV, with a DEDICATED
         // material — but NOT the same pipeline, because it is drawn through a CASCADE matrix, and the
@@ -1272,9 +1326,14 @@ namespace Desert::Graphic::System
         GraphicsPipelineSpecification rsmSpec = spec;
         rsmSpec.DebugName                     = "StaticMeshRSM";
         rsmSpec.DepthCompareOp                = CompareOp::LessOrEqual;
-        m_RSMPipeline                         = m_SceneRenderer->GetPipelineCache().GetOrCreate( rsmSpec );
-        if ( !m_RSMPipeline )
+        const auto rsmPipeline                = m_SceneRenderer->GetPipelineCache().GetOrCreate( rsmSpec );
+        if ( !rsmPipeline )
+        {
+            LOG_ERROR( "[MeshRenderer] the deferred path is off, the forward one still draws: {}",
+                       rsmPipeline.GetError() );
             return false;
+        }
+        m_RSMPipeline = rsmPipeline.GetValue();
 
         // (Static x GBuffer): the RSM reuses the G-buffer shader and its pipeline, rasterized from the
         // sun. A DEDICATED material (rather than the objects' own) because this pass writes a camera UB
@@ -1333,9 +1392,13 @@ namespace Desert::Graphic::System
         spec.BlendEnable       = true;       // src-alpha over the composited scene
         spec.UseLoadRenderPass = true;       // begun with clearFrame=false to preserve the opaque scene
 
-        m_StaticGlassPipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
-        if ( !m_StaticGlassPipeline )
+        const auto glassPipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
+        if ( !glassPipeline )
+        {
+            LOG_ERROR( "[MeshRenderer] glass materials will not draw: {}", glassPipeline.GetError() );
             return false;
+        }
+        m_StaticGlassPipeline = glassPipeline.GetValue();
 
         // A dedicated material (+ one instance) owns the glass pass's per-frame UBs / Materials SSBO. It is
         // descriptor-layout-compatible with the glass pipeline because Glass.glsl.frag declares the same
@@ -1377,8 +1440,13 @@ namespace Desert::Graphic::System
         spec.Shader         = m_SkinnedShader;
         spec.Framebuffer    = targetFb;
 
-        m_SkinnedPipeline = GraphicsPipeline::Create( spec );
-        m_SkinnedPipeline->Invalidate();
+        const auto skinned = GraphicsPipeline::Create( spec );
+        if ( !skinned )
+        {
+            LOG_ERROR( "[MeshRenderer] skinned meshes will not draw: {}", skinned.GetError() );
+            return false;
+        }
+        m_SkinnedPipeline = skinned.GetValue();
 
         return true;
     }
@@ -1420,8 +1488,13 @@ namespace Desert::Graphic::System
         spec.Shader             = m_SilhouetteShader;
         spec.Framebuffer        = m_SilhouetteMaskFramebuffer;
 
-        m_SilhouettePipeline = GraphicsPipeline::Create( spec );
-        m_SilhouettePipeline->Invalidate();
+        const auto silhouette = GraphicsPipeline::Create( spec );
+        if ( !silhouette )
+        {
+            LOG_ERROR( "[MeshRenderer] selection outlines are off: {}", silhouette.GetError() );
+            return false;
+        }
+        m_SilhouettePipeline = silhouette.GetValue();
 
         m_SilhouetteMaterial = std::make_unique<MaterialSilhouette>();
 
@@ -1441,9 +1514,17 @@ namespace Desert::Graphic::System
                                 { Graphic::ShaderDataType::Int4, "a_BoneIndices" },
                                 { Graphic::ShaderDataType::Float4, "a_BoneWeights" } };
             sspec.Shader            = m_SilhouetteSkinnedShader;
-            m_SilhouetteSkinnedPipeline = GraphicsPipeline::Create( sspec );
-            m_SilhouetteSkinnedPipeline->Invalidate();
-            m_SilhouetteSkinnedMaterial = std::make_unique<MaterialSilhouetteSkinned>();
+            // Optional variant: a refusal costs the outline on skinned meshes, not the pass.
+            if ( const auto skinnedSilhouette = GraphicsPipeline::Create( sspec ) )
+            {
+                m_SilhouetteSkinnedPipeline = skinnedSilhouette.GetValue();
+                m_SilhouetteSkinnedMaterial = std::make_unique<MaterialSilhouetteSkinned>();
+            }
+            else
+            {
+                LOG_ERROR( "[MeshRenderer] skinned meshes get no selection outline: {}",
+                           skinnedSilhouette.GetError() );
+            }
         }
 
         return true;
@@ -1546,8 +1627,13 @@ namespace Desert::Graphic::System
         // compatible with all of them.
         spec.Framebuffer       = m_CascadeFB[0];
 
-        m_ShadowPipeline = GraphicsPipeline::Create( spec );
-        m_ShadowPipeline->Invalidate();
+        const auto shadow = GraphicsPipeline::Create( spec );
+        if ( !shadow )
+        {
+            LOG_ERROR( "[MeshRenderer] nothing will cast a shadow: {}", shadow.GetError() );
+            return false;
+        }
+        m_ShadowPipeline = shadow.GetValue();
 
         // Instanced shadow caster (optional): same depth-only state, but the vertex pulls per-instance model
         // matrices from the InstanceTransforms SSBO. One instanced material per cascade (each its own light
@@ -1559,11 +1645,17 @@ namespace Desert::Graphic::System
             GraphicsPipelineSpecification ispec = spec;
             ispec.DebugName = "ShadowPipelineInstanced";
             ispec.Shader    = m_ShadowInstancedShader;
-            m_ShadowInstancedPipeline = GraphicsPipeline::Create( ispec );
-            m_ShadowInstancedPipeline->Invalidate();
+            if ( const auto instanced = GraphicsPipeline::Create( ispec ) )
+            {
+                m_ShadowInstancedPipeline = instanced.GetValue();
 
-            for ( uint32_t i = 0; i < m_Shadow.CascadeCount; ++i )
-                m_ShadowInstancedMaterial[i] = std::make_unique<MaterialShadowInstanced>();
+                for ( uint32_t i = 0; i < m_Shadow.CascadeCount; ++i )
+                    m_ShadowInstancedMaterial[i] = std::make_unique<MaterialShadowInstanced>();
+            }
+            else
+            {
+                LOG_ERROR( "[MeshRenderer] instanced shadow casting is off: {}", instanced.GetError() );
+            }
         }
 
         // SKINNED caster (optional): same depth-only state and the same standard-Z convention, but the
@@ -1584,11 +1676,17 @@ namespace Desert::Graphic::System
                                                     { Graphic::ShaderDataType::Int4, "a_BoneIndices" },
                                                     { Graphic::ShaderDataType::Float4, "a_BoneWeights" } };
             sspec.Shader                        = m_ShadowSkinnedShader;
-            m_ShadowSkinnedPipeline             = GraphicsPipeline::Create( sspec );
-            m_ShadowSkinnedPipeline->Invalidate();
+            if ( const auto skinnedShadow = GraphicsPipeline::Create( sspec ) )
+            {
+                m_ShadowSkinnedPipeline = skinnedShadow.GetValue();
 
-            for ( uint32_t i = 0; i < m_Shadow.CascadeCount; ++i )
-                m_ShadowSkinnedMaterial[i] = std::make_unique<MaterialShadowSkinned>();
+                for ( uint32_t i = 0; i < m_Shadow.CascadeCount; ++i )
+                    m_ShadowSkinnedMaterial[i] = std::make_unique<MaterialShadowSkinned>();
+            }
+            else
+            {
+                LOG_ERROR( "[MeshRenderer] skinned meshes will cast no shadow: {}", skinnedShadow.GetError() );
+            }
         }
         else
         {
@@ -1721,6 +1819,12 @@ namespace Desert::Graphic::System
 
     void MeshRenderer::RegisterShadowPass( RenderGraphBuilder& builder )
     {
+        // Same guard as the geometry pass: the cascade pass reads m_ShadowPipeline's spec, and
+        // SetupShadowPass can now refuse. No caster pipeline means no cascade passes and an unshadowed
+        // scene, not a dead editor.
+        if ( !m_ShadowPipeline )
+            return;
+
         // One depth-only pass per cascade, all in DepthPrePass (before Geometry, which depends on it).
         // Cascade matrices are computed in UpdateCascades() before the graph records (intra-phase order is
         // nondeterministic, so per-pass matrix computation can't be relied on for ordering).
@@ -1918,11 +2022,18 @@ namespace Desert::Graphic::System
         spec.CullMode          = CullMode::None;
         // No vertex Layout: the DebugLine shader pulls endpoints from the Lines storage buffer by index.
 
-        m_DebugLinePipeline = GraphicsPipeline::Create( spec );
-        m_DebugLinePipeline->Invalidate();
+        // `return m_DebugLinePipeline != nullptr;` stood at the end of this function and could not be
+        // false: Create returned a make_shared. The refusal is here now, where it can happen.
+        const auto debugLine = GraphicsPipeline::Create( spec );
+        if ( !debugLine )
+        {
+            LOG_ERROR( "[MeshRenderer] debug lines will not draw: {}", debugLine.GetError() );
+            return false;
+        }
+        m_DebugLinePipeline = debugLine.GetValue();
 
         m_DebugLineMaterial = std::make_unique<MaterialDebugLine>();
-        return m_DebugLinePipeline != nullptr;
+        return true;
     }
 
     bool MeshRenderer::SetupOverdrawPass()
@@ -1961,8 +2072,13 @@ namespace Desert::Graphic::System
         spec.BlendEnable         = true;
         spec.SrcColorBlendFactor = BlendFactor::One;
         spec.DstColorBlendFactor = BlendFactor::One;
-        m_OverdrawPipeline       = GraphicsPipeline::Create( spec );
-        m_OverdrawPipeline->Invalidate();
+        const auto overdraw      = GraphicsPipeline::Create( spec );
+        if ( !overdraw )
+        {
+            LOG_ERROR( "[MeshRenderer] the overdraw view is off: {}", overdraw.GetError() );
+            return false;
+        }
+        m_OverdrawPipeline = overdraw.GetValue();
         m_OverdrawMaterial = std::make_unique<MaterialOverdraw>();
 
         // Fullscreen resolve: heat-map the accumulation over the scene colour (LOAD so the scene shows through).
@@ -1973,8 +2089,13 @@ namespace Desert::Graphic::System
         rspec.DepthTestEnabled    = false;
         rspec.DepthWriteEnabled   = false;
         rspec.UseLoadRenderPass   = true;
-        m_OverdrawResolvePipeline = GraphicsPipeline::Create( rspec );
-        m_OverdrawResolvePipeline->Invalidate();
+        const auto overdrawResolve = GraphicsPipeline::Create( rspec );
+        if ( !overdrawResolve )
+        {
+            LOG_ERROR( "[MeshRenderer] the overdraw view is off: {}", overdrawResolve.GetError() );
+            return false;
+        }
+        m_OverdrawResolvePipeline = overdrawResolve.GetValue();
         m_OverdrawResolveMaterial = std::make_unique<MaterialOverdrawResolve>();
 
         return true;
@@ -2089,7 +2210,9 @@ namespace Desert::Graphic::System
 
     void MeshRenderer::RegisterSilhouettePass( RenderGraphBuilder& builder )
     {
-        if ( !m_SilhouetteMaskFramebuffer )
+        // The mask target AND the pipeline that writes it: the second half is new, because
+        // SetupSilhouettePass can now refuse and this function reads the pipeline's spec.
+        if ( !m_SilhouetteMaskFramebuffer || !m_SilhouettePipeline )
             return;
 
         builder.AddPass( "MeshSilhouettePass", RenderPhase::Outline,

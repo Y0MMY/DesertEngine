@@ -30,10 +30,10 @@ namespace Desert::Editor::Render
         spec.CullMode          = Graphic::CullMode::None;
         spec.BlendEnable       = true; // alpha-composite the lines over the scene
 
-        m_Pipeline = Graphic::GraphicsPipeline::Create( spec );
-        if ( !m_Pipeline )
-            return Common::MakeError( "EditorGridPass: failed to create pipeline" );
-        m_Pipeline->Invalidate();
+        const auto pipeline = Graphic::GraphicsPipeline::Create( spec );
+        if ( !pipeline )
+            return Common::MakeError( "EditorGridPass: " + pipeline.GetError() );
+        m_Pipeline = pipeline.GetValue();
 
         m_Material = std::make_unique<Graphic::MaterialGrid>();
 

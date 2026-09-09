@@ -82,6 +82,28 @@ namespace Desert::Graphic::API::Vulkan
             return nullptr;
         }
 
+        /**
+         * This program's VERTEX stage, or nullptr when it has none — the mirror of GetComputeStage, and
+         * it exists because the mistake is symmetric.
+         *
+         * A graphics pipeline built from a program whose only stage is a COMPUTE stage is handed to
+         * vkCreateGraphicsPipelines with a stage bit that call does not accept. Nothing about the
+         * spec says so: both sides are a Shader that compiled, and both call sites reach their
+         * program BY NAME through ShaderService::GetByName, where one typo swaps a compute program for
+         * a graphics one. Asking for the stage that a graphics pipeline is REQUIRED to have (Vulkan
+         * spec: a graphics pipeline without mesh shading must include a vertex stage) is what turns
+         * that into a refusal instead of a driver-dependent failure.
+         */
+        [[nodiscard]] const VkPipelineShaderStageCreateInfo* GetVertexStage() const
+        {
+            for ( const auto& stage : m_PipelineShaderStageCreateInfos )
+            {
+                if ( stage.stage == VK_SHADER_STAGE_VERTEX_BIT )
+                    return &stage;
+            }
+            return nullptr;
+        }
+
         // No stages means CompileProgram never succeeded — it is transactional, so a shader that has ever
         // compiled keeps its modules even if a later recompile fails. Reading the stage list rather than
         // a separate bool keeps this from becoming a second piece of state that can disagree with the

@@ -79,10 +79,10 @@ namespace Desert::Editor::Render
         spec.CullMode          = Graphic::CullMode::None;
         // No vertex layout: the DebugLine shader pulls endpoints from the Lines storage buffer by index.
 
-        m_Pipeline = Graphic::GraphicsPipeline::Create( spec );
-        if ( !m_Pipeline )
-            return Common::MakeError( "EditorColliderPass: failed to create pipeline" );
-        m_Pipeline->Invalidate();
+        const auto pipeline = Graphic::GraphicsPipeline::Create( spec );
+        if ( !pipeline )
+            return Common::MakeError( "EditorColliderPass: " + pipeline.GetError() );
+        m_Pipeline = pipeline.GetValue();
 
         m_Material = std::make_unique<Graphic::MaterialDebugLine>();
 

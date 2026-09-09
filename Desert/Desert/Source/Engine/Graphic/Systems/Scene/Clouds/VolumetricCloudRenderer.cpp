@@ -755,12 +755,18 @@ namespace Desert::Graphic::System
         // framebuffer's LOAD render pass.
         spec.UseLoadRenderPass = true;
 
-        m_CompositePipeline = GraphicsPipeline::Create( spec );
-        if ( m_CompositePipeline )
-            m_CompositePipeline->Invalidate();
+        const auto composite = GraphicsPipeline::Create( spec );
+        if ( !composite )
+        {
+            LOG_ERROR( "[Clouds] the composite pipeline was not built: {}", composite.GetError() );
+            return false;
+        }
+        m_CompositePipeline = composite.GetValue();
 
-        return m_MarchPipeline && m_ResolvePipeline && m_ShadowMapPipeline && m_SkyOcclusionPipeline &&
-               m_CompositePipeline;
+        // The final `return m_MarchPipeline && ... && m_CompositePipeline;` that stood here is gone: each
+        // of those five members is assigned from a Result that was checked at the line above it, so the
+        // conjunction could not be false and hid nothing. Each refusal now names WHICH pipeline it was.
+        return true;
     }
 
     bool VolumetricCloudRenderer::EnsureSkyOcclusionVolume()

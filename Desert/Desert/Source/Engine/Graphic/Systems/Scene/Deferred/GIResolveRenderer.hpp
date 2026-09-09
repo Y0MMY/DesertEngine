@@ -49,8 +49,10 @@ namespace Desert::Graphic::System
             spec.Shader            = m_Shader;
             spec.DepthTestEnabled  = false;
             spec.DepthWriteEnabled = false;
-            m_Pipeline             = Graphic::GraphicsPipeline::Create( spec );
-            m_Pipeline->Invalidate();
+            const auto pipeline    = Graphic::GraphicsPipeline::Create( spec );
+            if ( !pipeline )
+                return Common::MakeError( pipeline.GetError() );
+            m_Pipeline = pipeline.GetValue();
 
             GraphicsPipelineSpecification resolveSpec;
             resolveSpec.DebugName         = "GITemporalResolve";
@@ -58,8 +60,10 @@ namespace Desert::Graphic::System
             resolveSpec.Shader            = m_ResolveShader;
             resolveSpec.DepthTestEnabled  = false;
             resolveSpec.DepthWriteEnabled = false;
-            m_ResolvePipeline             = Graphic::GraphicsPipeline::Create( resolveSpec );
-            m_ResolvePipeline->Invalidate();
+            const auto resolvePipeline    = Graphic::GraphicsPipeline::Create( resolveSpec );
+            if ( !resolvePipeline )
+                return Common::MakeError( resolvePipeline.GetError() );
+            m_ResolvePipeline = resolvePipeline.GetValue();
 
             m_Material        = std::make_unique<MaterialGIResolve>();
             m_ResolveMaterial = std::make_unique<MaterialSSRResolve>();

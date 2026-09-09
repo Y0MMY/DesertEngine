@@ -60,8 +60,10 @@ namespace Desert::Graphic::System
             traceSpec.Shader            = m_TraceShader;
             traceSpec.DepthTestEnabled  = false;
             traceSpec.DepthWriteEnabled = false;
-            m_TracePipeline             = Graphic::GraphicsPipeline::Create( traceSpec );
-            m_TracePipeline->Invalidate();
+            const auto tracePipeline    = Graphic::GraphicsPipeline::Create( traceSpec );
+            if ( !tracePipeline )
+                return Common::MakeError( tracePipeline.GetError() );
+            m_TracePipeline = tracePipeline.GetValue();
 
             GraphicsPipelineSpecification resolveSpec;
             resolveSpec.DebugName         = "SSRResolve";
@@ -69,8 +71,10 @@ namespace Desert::Graphic::System
             resolveSpec.Shader            = m_ResolveShader;
             resolveSpec.DepthTestEnabled  = false;
             resolveSpec.DepthWriteEnabled = false;
-            m_ResolvePipeline             = Graphic::GraphicsPipeline::Create( resolveSpec );
-            m_ResolvePipeline->Invalidate();
+            const auto resolvePipeline    = Graphic::GraphicsPipeline::Create( resolveSpec );
+            if ( !resolvePipeline )
+                return Common::MakeError( resolvePipeline.GetError() );
+            m_ResolvePipeline = resolvePipeline.GetValue();
 
             GraphicsPipelineSpecification compSpec;
             compSpec.DebugName         = "SSRComposite";
@@ -80,8 +84,10 @@ namespace Desert::Graphic::System
             compSpec.DepthWriteEnabled = false;
             compSpec.BlendEnable       = true; // src-alpha: reflection replaces the scene by reflectance
             compSpec.UseLoadRenderPass = true; // composite over the lit scene
-            m_CompositePipeline        = Graphic::GraphicsPipeline::Create( compSpec );
-            m_CompositePipeline->Invalidate();
+            const auto compPipeline    = Graphic::GraphicsPipeline::Create( compSpec );
+            if ( !compPipeline )
+                return Common::MakeError( compPipeline.GetError() );
+            m_CompositePipeline = compPipeline.GetValue();
 
             m_Material          = std::make_unique<MaterialSSR>();
             m_ResolveMaterial   = std::make_unique<MaterialSSRResolve>();

@@ -151,17 +151,48 @@ namespace Desert::Graphic::API::Vulkan
     {
         Release();
 
-        // A shader that never compiled carries no stages, and vkCreateGraphicsPipelines answers
-        // `stageCount = 0` with a validation storm and then a crash — the process dies before the frame
-        // is presented, so the artist sees the editor vanish rather than the typo they made. Refuse here,
-        // by name, and leave the pipeline null: the caller already treats a null pipeline as "skip this
-        // draw", so the rest of the scene keeps rendering. This is the last line of defence — callers are
-        // expected to ask Shader::IsCompiled() and not get this far — but it is the one place EVERY
-        // pipeline in the engine passes through, so it is the one that cannot be forgotten.
-        if ( m_Specification.Shader && !m_Specification.Shader->IsCompiled() )
+        // THE DEVICE-FREE HALF OF THE RULE, ASKED AGAIN AT THE ONE PLACE EVERY PIPELINE PASSES THROUGH.
+        // GraphicsPipeline::Create asks CheckGraphicsPipelineSpecification before it constructs this
+        // object, so in the engine as it stands this arm cannot be reached — it is the last line of
+        // defence for a future caller that builds a VulkanPipeline directly, and it is what makes
+        // "refuse by leaving the handle null" the leaf's own contract rather than the factory's.
+        //
+        // `Shader &&` USED TO STAND WHERE `!Shader ||` STANDS NOW, and that single operator was a live
+        // null dereference: four renderers put an unchecked ShaderService::GetByName straight into a
+        // spec, and a NULL shader passed this guard into CreatePipelineLayout, which calls a method on
+        // it. "Has no compiled stages" and "is not there at all" both mean this pipeline cannot exist.
+        if ( !m_Specification.Shader || !m_Specification.Shader->IsCompiled() )
         {
             LOG_ERROR( "[Pipeline] '{}' not created: shader '{}' has no compiled stages (see the shader "
                        "compilation error above). The draws using it are skipped.",
+                       m_Specification.DebugName,
+                       m_Specification.Shader ? m_Specification.Shader->GetName() : "<none>" );
+            return;
+        }
+
+        // A graphics pipeline is built against its target's render pass, so there is nothing to build
+        // without one. This THREW `std::runtime_error` from CreateGraphicsPipeline, five function calls
+        // further down and after a pipeline layout had already been created and leaked; nothing in the
+        // engine catches it, so the refusal was std::terminate. Refusing here leaves the handle null,
+        // which is the one signal every caller of this class already reads.
+        if ( !m_Specification.Framebuffer )
+        {
+            LOG_ERROR( "[Pipeline] '{}' not created: no target framebuffer. The draws using it are "
+                       "skipped.",
+                       m_Specification.DebugName );
+            return;
+        }
+
+        // WHAT THE STAGE LIST CONTAINS, NOT MERELY THAT IT IS NOT EMPTY — the same question
+        // VulkanPipelineCompute asks with GetComputeStage, from the other side. A compute program
+        // reached by name compiles, so IsCompiled() says yes, and its stage bit is one
+        // vkCreateGraphicsPipelines does not accept.
+        VulkanShader* vulkanShader =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader ).get();
+        if ( !vulkanShader->GetVertexStage() )
+        {
+            LOG_ERROR( "[Pipeline] '{}' not created: shader '{}' has no VERTEX stage — a graphics "
+                       "pipeline cannot be built from it. The draws using it are skipped.",
                        m_Specification.DebugName, m_Specification.Shader->GetName() );
             return;
         }
@@ -176,9 +207,8 @@ namespace Desert::Graphic::API::Vulkan
         CreateDepthStencilState();
         CreateColorBlendState();
 
-        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
-                              ->GetVulkanLogicalDevice();        VulkanShader* vulkanShader =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader ).get();
+        VkDevice device =
+             SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetVulkanLogicalDevice();
 
         CreateGraphicsPipeline( device, vulkanShader );
 
@@ -377,11 +407,10 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanPipeline::CreateGraphicsPipeline( VkDevice device, VulkanShader* vulkanShader )
     {
-        if ( !m_Specification.Framebuffer )
-        {
-            throw std::runtime_error( "Framebuffer is required for pipeline creation" );
-        }
-
+        // The `throw std::runtime_error( "Framebuffer is required for pipeline creation" )` that stood
+        // here is now a REFUSAL at the top of Invalidate, before a pipeline layout is created and
+        // leaked. It was never catchable: nothing in the engine catches, so it was std::terminate
+        // wearing an error message.
         const auto vkFb = std::static_pointer_cast<API::Vulkan::VulkanFramebuffer>( m_Specification.Framebuffer );
         VkRenderPass renderPass =
              m_Specification.UseLoadRenderPass ? vkFb->GetVKRenderPassLoad() : vkFb->GetVKRenderPass();

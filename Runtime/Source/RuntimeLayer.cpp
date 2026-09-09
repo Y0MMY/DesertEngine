@@ -295,10 +295,10 @@ namespace Desert::Player
         spec.DepthTestEnabled  = false;
         spec.DepthWriteEnabled = false;
         spec.CullMode          = Graphic::CullMode::None;
-        m_BlitPipeline         = Graphic::GraphicsPipeline::Create( spec );
-        if ( !m_BlitPipeline )
-            return Common::MakeError( "InitPresent: failed to create blit pipeline" );
-        m_BlitPipeline->Invalidate();
+        const auto blitPipeline = Graphic::GraphicsPipeline::Create( spec );
+        if ( !blitPipeline )
+            return Common::MakeError( "InitPresent: " + blitPipeline.GetError() );
+        m_BlitPipeline = blitPipeline.GetValue();
         m_BlitExecutor = Graphic::MaterialExecutor::Create( "SwapchainBlit", blitShader );
 
         m_Render2D = std::make_unique<Graphic::Render2D::Render2D>();
