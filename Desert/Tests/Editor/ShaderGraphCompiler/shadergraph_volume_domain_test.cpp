@@ -29,6 +29,8 @@
 
 #include <gtest/gtest.h>
 
+#include "graph_test_tree.hpp"
+
 #include <ShaderGraph.hpp>
 
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
@@ -40,9 +42,7 @@
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
-#include <fstream>
 #include <set>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -50,28 +50,11 @@ namespace SG = Desert::Editor::ShaderGraph;
 using Desert::Core::Preprocess::DShaderParser;
 using namespace Desert::Core::Formats;
 
+using Desert::Tests::ShaderGraph::ReadAll;
+using Desert::Tests::ShaderGraph::RepoRoot;
+
 namespace
 {
-    std::filesystem::path RepoRoot()
-    {
-        std::filesystem::path prefix = ".";
-        for ( int up = 0; up < 6; ++up )
-        {
-            if ( std::filesystem::exists( prefix / "Desert/Desert/Source/Engine/Core/SceneSettings.hpp" ) )
-                return prefix;
-            prefix /= "..";
-        }
-        return {};
-    }
-
-    std::string ReadAll( const std::filesystem::path& path )
-    {
-        std::ifstream      in( path, std::ios::binary );
-        std::ostringstream buffer;
-        buffer << in.rdbuf();
-        return buffer.str();
-    }
-
     /// The SHIPPED cloud material schema, parsed with the engine's own parser. Everything below is a
     /// relation against this rather than against a copy of it.
     const std::vector<ShaderParam>& CloudSchema()
@@ -1687,6 +1670,101 @@ TEST( ShaderGraphVolumeDomain, ShadowRayCompilesIntoTheOutputsItBelongsToAndIsRe
                  << "the refusal does not name the output it came from: " << compiled.GetError();
         }
     }
+}
+
+// O1-J. THE SCOPE REFUSAL ABOVE MATCHES ON A STRING THE DOCUMENT OWNS, and until ValidateGraph compared
+// pin NAMES with the catalogue that made it bypassable by editing the file: rename the pin to another
+// member of CloudGraphSample of the same type and the `Name == "ShadowRay"` test never fires, while the
+// emitter — which builds `<var>.<name>` out of the same stored string — writes a member that exists.
+// Valid GLSL, a compiled shader, and a medium reading something the author never wired. The worst of the
+// available outcomes, and the one a type check cannot see.
+//
+// The two halves are asserted together because either alone is misleading: the control shows the scope
+// refusal still fires under its own name, so the rename case below is not merely inheriting it.
+TEST( ShaderGraphVolumeDomain, RenamingShadowRayToAnotherMemberOfTheSampleStructIsRefusedByName )
+{
+    const auto docWiringShadowRayInto = []( const char* outputPin, const char* storedName )
+    {
+        SG::Document doc    = EmptyVolumeDoc();
+        SG::Node&    sample = NodeOfKind( doc, "CloudSample" );
+
+        size_t shadowPin = sample.Outputs.size();
+        for ( size_t i = 0; i < sample.Outputs.size(); ++i )
+            if ( sample.Outputs[i].Name == "ShadowRay" )
+                shadowPin = i;
+        EXPECT_LT( shadowPin, sample.Outputs.size() ) << "the Cloud Sample node has no ShadowRay output";
+        sample.Outputs[shadowPin].Name = storedName;
+        const uint64_t shadowOut       = sample.Outputs[shadowPin].Id;
+
+        SG::Node&    output = NodeOfKind( doc, "VolumeOutput" );
+        const size_t pin    = IndexOfInput( output, outputPin );
+        EXPECT_LT( pin, output.Inputs.size() );
+        doc.Links.push_back( { doc.NextId++, shadowOut, output.Inputs[pin].Id } );
+        return doc;
+    };
+
+    // The control: unrenamed, wired into an output no shadow march reaches. Refused, and by the scope
+    // rule — the sentence that names the register rather than the catalogue.
+    const auto control = SG::CompileToDShader( docWiringShadowRayInto( "AmbientOcclusion", "ShadowRay" ) );
+    ASSERT_FALSE( control.IsSuccess() );
+    EXPECT_NE( control.GetError().find( "only meaningful" ), std::string::npos )
+         << "the scope refusal is not the one that fired: " << control.GetError();
+
+    // And renamed to a member that EXISTS in CloudGraphSample and has the same type, which is the shape
+    // that used to compile. `Profile` is a float member of the struct, so the emitted `.Profile` would
+    // have been accepted by shaderc without a word.
+    const auto renamed = SG::CompileToDShader( docWiringShadowRayInto( "AmbientOcclusion", "Profile" ) );
+    ASSERT_FALSE( renamed.IsSuccess() )
+         << "a Cloud Sample pin renamed to another member of the same type compiled: the medium now reads "
+            "a value nobody wired, and nothing anywhere says so";
+    EXPECT_NE( renamed.GetError().find( "Profile" ), std::string::npos )
+         << "the refusal does not name the pin as the file stores it: " << renamed.GetError();
+    EXPECT_NE( renamed.GetError().find( "ShadowRay" ), std::string::npos )
+         << "the refusal does not say which pin the catalogue declares there: " << renamed.GetError();
+}
+
+// The other half of the same hole, and the one that reaches shaderc rather than compiling: a name the
+// struct does NOT have. It is asserted separately because the two fail in different places without the
+// check — this one in the shader compiler, the one above nowhere at all.
+TEST( ShaderGraphVolumeDomain, ARenamedCloudSamplePinNeverReachesTheGeneratedGlsl )
+{
+    // The control first: this exact wiring compiles, so the refusal below is about the rename and not
+    // about the graph.
+    SG::Document ok       = EmptyVolumeDoc();
+    SG::Node&    okSample = NodeOfKind( ok, "CloudSample" );
+
+    size_t okProfile = okSample.Outputs.size();
+    for ( size_t i = 0; i < okSample.Outputs.size(); ++i )
+        if ( okSample.Outputs[i].Name == "Profile" )
+            okProfile = i;
+    ASSERT_LT( okProfile, okSample.Outputs.size() );
+
+    SG::Node&    okOutput = NodeOfKind( ok, "VolumeOutput" );
+    const size_t density  = IndexOfInput( okOutput, "Density" );
+    ASSERT_LT( density, okOutput.Inputs.size() );
+    ok.Links.push_back( { ok.NextId++, okSample.Outputs[okProfile].Id, okOutput.Inputs[density].Id } );
+
+    const auto compiled = SG::CompileToDShader( ok );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    EXPECT_NE( compiled.GetValue().find( ".Profile" ), std::string::npos )
+         << "the pin's NAME is what the emitter writes as a struct member, which is the premise of this "
+            "test; it no longer is:\n"
+         << compiled.GetValue();
+
+    // Now the same graph with that pin renamed to something CloudGraphSample does not have. Its type is
+    // untouched, so every check ValidateGraph had before this one passes it.
+    SG::Document renamed = ok;
+    for ( auto& node : renamed.Nodes )
+        if ( node.Kind == "CloudSample" )
+            node.Outputs[okProfile].Name = "Profil";
+
+    const auto refused = SG::CompileToDShader( renamed );
+    ASSERT_FALSE( refused.IsSuccess() )
+         << "a renamed pin of the right type compiled, so the emitter has written `.Profil` into a struct "
+            "that has no such member — a shaderc error on a line of GENERATED code, which is the failure "
+            "ValidateGraph exists to prevent";
+    EXPECT_NE( refused.GetError().find( "Profil'" ), std::string::npos )
+         << "the refusal does not name the pin: " << refused.GetError();
 }
 
 // The two frame controls of O1-F, emitted by the EMITTER rather than hand-written, for the same reason
