@@ -552,8 +552,11 @@ namespace Desert::Assets
     float CloudClusterFootprintGain( const Graphic::CloudTypeShape& shape )
     {
         // THE SAME TEST THE EMISSION MAKES, and it has to be the same one: a canopy this function priced
-        // and the emission then declined to place would shrink every storm in the sky for nothing.
-        if ( shape.AnvilStrength <= 1e-3f || shape.AnvilThicknessKm <= 1e-4f )
+        // and the emission then declined to place would shrink every storm in the sky for nothing. It is
+        // now literally the same call rather than the same digits typed a second time — this comment
+        // promised an agreement that three hand-written copies could only ever approximate, and the third
+        // copy (Graphic::CloudTypeTopKm) had already drifted.
+        if ( !Graphic::CloudTypeHasAnvil( shape ) )
             return 1.0f;
 
         // THE CANOPY'S FOOTPRINT IS EXACT AND NOT ESTIMATED, because it is ONE solid ellipse rather than a
@@ -1351,7 +1354,15 @@ namespace Desert::Assets
                     // tropopause with a GAP between it and the tower that fed it. A product of two ramps has
                     // exactly one maximum for any choice of constants, which is the argument decision D-13 made
                     // for a table; a second lump makes it without a table at all.
-                    if ( shape.AnvilStrength > 1e-3f && shape.AnvilThicknessKm > 1e-4f )
+                    //
+                    // THE QUESTION IS ASKED BY Graphic::CloudTypeHasAnvil AND NOT BY TWO LITERALS HERE,
+                    // because Graphic::CloudTypeTopKm asks the SAME question to decide how tall the shell
+                    // has to be. While the two were spelled out separately they disagreed — the envelope
+                    // grew for any strength above zero and this site drew nothing below a thousandth — and
+                    // the symptom is a shell kilometres taller than anything in it, with the vertical
+                    // resolution and the march's search step paying for it silently. See the note above
+                    // that predicate.
+                    if ( Graphic::CloudTypeHasAnvil( shape ) )
                     {
                         CloudModellingBlob anvil;
                         anvil.Primitive = CloudModellingPrimitive::Ellipsoid;

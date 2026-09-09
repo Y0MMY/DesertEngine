@@ -375,6 +375,37 @@ namespace Desert::Graphic
         float TopKm;
     };
 
+    /**
+     * DOES THIS TYPE HAVE AN ANVIL AT ALL — asked in ONE place, because two places asked it differently and
+     * the disagreement inflates the shell.
+     *
+     * The bake emits the canopy only when BOTH numbers are past these thresholds
+     * (Engine/Assets/CloudProceduralVolume.cpp, the anvil block); the envelope below used to ask only
+     * `AnvilStrength > 0`. A strength inside `(0, kCloudAnvilMinStrength]` is a legal `.decloudtype` — the
+     * loader's own range is [0, 1] and its only cross-check is that a strength above zero comes with a
+     * thickness above zero — so a type could declare a canopy at 16 km that the bake refuses to draw and
+     * still take the shell up there. Nothing is drawn, nothing is logged, and the layer pays twice:
+     *
+     *   * the modelling volume has a FIXED kCloudProceduralVolumeHeight rows spread over the shell, so a
+     *     shell stretched from 0.40 km to 15.85 km takes the vertical voxel from 12.5 m to 495 m and a
+     *     stratus deck stops being expressible by the trilinear fetch at all;
+     *   * the march's step is `segment / MaxSteps` once the segment passes
+     *     CLOUD_DISTANCE_TO_MAX_STEPS_KM, so a taller shell is a longer segment and a coarser SEARCH —
+     *     measured on a 0.15..9.40 km shell against a 2.20..5.80 km one, the resolvable chord at 45° goes
+     *     159 m to 409 m.
+     *
+     * Both halves are the same defect: a shell that is not the shell the bake fills. One predicate, read by
+     * the envelope here and by the generator there, is what makes that impossible rather than merely
+     * unlikely.
+     */
+    inline constexpr float kCloudAnvilMinStrength    = 1e-3f;
+    inline constexpr float kCloudAnvilMinThicknessKm = 1e-4f;
+
+    inline bool CloudTypeHasAnvil( const CloudTypeShape& shape )
+    {
+        return shape.AnvilStrength > kCloudAnvilMinStrength && shape.AnvilThicknessKm > kCloudAnvilMinThicknessKm;
+    }
+
     // The bottom and the top of the shell a layer of this type needs. The ANVIL is above the tower, so
     // the top is not simply TopAltitudeKm — a type whose second lobe is outside the shell would have that
     // lobe silently cut off by the layer geometry, which is the "sky was a ceiling" defect in a new
@@ -386,7 +417,7 @@ namespace Desert::Graphic
 
     inline float CloudTypeTopKm( const CloudTypeShape& shape )
     {
-        const float anvilTop = shape.AnvilStrength > 0.0f ? shape.AnvilAltitudeKm + shape.AnvilThicknessKm : 0.0f;
+        const float anvilTop = CloudTypeHasAnvil( shape ) ? shape.AnvilAltitudeKm + shape.AnvilThicknessKm : 0.0f;
         return std::max( shape.TopAltitudeKm, anvilTop );
     }
 
