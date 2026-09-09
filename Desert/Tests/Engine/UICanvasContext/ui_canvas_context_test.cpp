@@ -465,11 +465,20 @@ TEST( UICanvasContext, AnUnresolvableCanvasBackgroundDrawsNothingRatherThanAWhit
 // one says a background that can resolve reaches the draw list, covers the whole canvas rect, and is the
 // FIRST thing emitted so every child lands on top of it.
 //
-// It is asserted here rather than in a frame because a canvas background cannot currently be authored in a
-// .desce at all — see the report: TextureAsset handles serialize as an absolute machine-local path, the
-// read side does not create-on-miss and returns 0 without a log, and a numeric handle above 2^53 is mangled
-// by the JSON double round-trip (measured: 5355760296319878840 came back as 5355760296319879168). All three
-// live in the scene serializer, none of them in this task's files.
+// It is asserted here rather than in a frame because RenderCanvas2D takes a registry and a draw list and
+// touches no file.
+//
+// THIS COMMENT USED TO SAY A CANVAS BACKGROUND COULD NOT BE AUTHORED IN A `.desce` AT ALL, and listed
+// three serializer defects behind that: an absolute machine-local path on the write side, a silent 0 with
+// no log on the read side, and a numeric handle above 2^53 mangled by a JSON double round trip (measured:
+// 5355760296319878840 came back as 5355760296319879168). All three were real and ALL THREE ARE FIXED — the
+// first two by Ф5's extraction of the texture reference into Engine/Core/Serialize/TextureSlot.cpp (which
+// stores the root-tagged stable key and logs every miss with the roots it searched), the third by
+// ReflectionSerializer's integral read path. Each has its own suite now: TextureSlotRoundTrip,
+// ReflectionSerializer and UIComponentRoundTrip, the last of which round-trips THIS component's Sprite
+// through JSON text on the very handle quoted above. `Editor/Resources/Assets/Scenes/UI_SpriteSlots.desce`
+// carries an authored canvas background as `cooked:Textures/T_Checker.tex`, which is the same claim made
+// in the corpus rather than in a comment.
 TEST( UICanvasContext, AResolvableCanvasBackgroundCoversTheCanvasAndIsDrawnFirst )
 {
     Fixture f;
