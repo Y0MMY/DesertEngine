@@ -108,10 +108,20 @@ namespace Desert::Editor::Render
             if ( auto* renderer = scene->GetSceneRenderer() )
                 renderer->SetBackdropBlurNeeded( m_Render2D.UsedBackdrop() );
 
-            // A button fired in preview: report it, but DON'T execute scene-load / quit here — that would
-            // close/switch the editor. Interactive toggles/sliders/inputs already mutated in the walk.
+            // A button fired in preview: report it, but DON'T execute scene-load / quit / open-URL here —
+            // that would close or switch the editor. Interactive toggles/sliders/inputs already mutated in
+            // the walk. Everything that is NOT one of those three process-level encodings is a gameplay
+            // message and goes on the same queue as the pointer events below, because a preview whose
+            // buttons are heard by scripts and whose pointer events are heard by scripts is one preview;
+            // dropping the button half was the defect this replaces.
             if ( feed && !clicked.empty() )
+            {
                 LOG_INFO( "[UI Preview] button action: {}", clicked );
+                const bool processLevel =
+                     clicked == "quit" || clicked.rfind( "scene:", 0 ) == 0 || clicked.rfind( "url:", 0 ) == 0;
+                if ( !processLevel )
+                    UI::UIMessageQueue::Get().Push( clicked );
+            }
             for ( const std::string& msg : uiMessages ) // pointer enter/exit, press/release, drops
             {
                 LOG_INFO( "[UI Preview] {}", msg );

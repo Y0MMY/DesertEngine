@@ -481,7 +481,14 @@ namespace Desert::Player
             }
             else
             {
-                LOG_INFO( "[Runtime] UI message: '{}' (consume it in a ScriptSystem)", clicked );
+                // ON THE SAME QUEUE AS THE POINTER EVENTS ABOVE, and that is the whole point. A button's
+                // SendMessage action is documented as "gameplay event name (Lua/scripts)" and three
+                // comments said it reached Lua, but this branch only LOGGED it: the canvas raised the
+                // message, ScriptEngine::BroadcastUIMessage was ready to deliver it, and the host in
+                // between dropped it on the floor. An author who typed a name into "Action Target" got a
+                // line in the log and no handler, with nothing to distinguish that from a typo.
+                UI::UIMessageQueue::Get().Push( clicked );
+                LOG_INFO( "[Runtime] UI message: '{}' (delivered to every script defining OnUIMessage)", clicked );
             }
         }
 
