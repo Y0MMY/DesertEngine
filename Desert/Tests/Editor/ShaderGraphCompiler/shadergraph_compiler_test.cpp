@@ -1,13 +1,17 @@
 #include <gtest/gtest.h>
 
+#include "graph_test_tree.hpp"
+
 #include <ShaderGraph.hpp> // editor: the graph document + compiler under test
 
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp> // engine: the real parser
 
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <format>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace SG = Desert::Editor::ShaderGraph;
@@ -455,6 +459,28 @@ TEST( ShaderGraphCompiler, PinTypeDisagreeingWithTheCatalogueIsRejected )
     EXPECT_NE( compiled.GetError().find( "Color Param" ), std::string::npos ) << compiled.GetError();
 }
 
+// O1-J. Pin::Name is a mirror of the catalogue in exactly the way Pin::Type is, and it was not checked.
+// It is not a label: the emitter builds `<var>.<name>` for the multi-output nodes out of the name THE
+// FILE carries, so a rename of the right type used to travel all the way into generated GLSL. This is
+// the Surface-domain half — the domain-specific consequences are in shadergraph_volume_domain_test.cpp,
+// where the struct member and the scope rule live.
+TEST( ShaderGraphCompiler, APinRenamedInTheFileIsRejectedAndTheRefusalNamesIt )
+{
+    SG::Document doc = SurfaceDoc();
+    for ( auto& node : doc.Nodes )
+        if ( node.Kind == "SurfaceOutput" )
+            node.Inputs[1].Name = "Emissive"; // plausible, same type, wrong pin
+
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_FALSE( compiled.IsSuccess() ) << "a pin the catalogue does not declare compiled";
+    EXPECT_NE( compiled.GetError().find( "Emissive" ), std::string::npos )
+         << "the refusal does not name the pin as the file stores it: " << compiled.GetError();
+    EXPECT_NE( compiled.GetError().find( "Emission" ), std::string::npos )
+         << "the refusal does not name what the catalogue declares there: " << compiled.GetError();
+    EXPECT_NE( compiled.GetError().find( "Surface Output" ), std::string::npos )
+         << "the refusal does not name the node the artist can click: " << compiled.GetError();
+}
+
 // A link whose endpoint id belongs to no node was silently treated as "unlinked" — the input
 // quietly took its default and the artist saw a graph that did not do what it drew.
 TEST( ShaderGraphCompiler, DanglingLinkIsRejected )
@@ -680,6 +706,117 @@ TEST( ShaderGraphCompiler, MigrationRefusesToRewriteAGraphThatIsNotMerelyOld )
     EXPECT_EQ( SG::MigrateToCatalogue( doc ), 0 );
     EXPECT_EQ( output->Inputs.size(), 2u );
     EXPECT_FALSE( SG::CompileToDShader( doc ).IsSuccess() );
+}
+
+// THE TWO FUNCTIONS MUST GIVE A RENAMED PIN THE SAME ANSWER, and until O1-J they did not.
+//
+// The test above shortens the list AND renames a pin, so what refused it was the pin COUNT — and that
+// hid the disagreement completely: a document of the right LENGTH with one pin renamed was left alone by
+// MigrateToCatalogue (correctly: it is not a prefix of the catalogue, so nothing may be appended and
+// nothing may be rewritten) and then accepted by ValidateGraph, which compared only types. One half
+// refusing to touch a document while the other half declares it fine is worse than either policy on its
+// own, because the refusal to repair was justified by a rejection that never happened.
+TEST( ShaderGraphCompiler, TheMigrationAndTheValidatorAgreeOnARenamedPin )
+{
+    SG::Document doc    = LitSurfaceDoc();
+    SG::Node*    output = nullptr;
+    for ( auto& node : doc.Nodes )
+        if ( node.Kind == "SurfaceOutput" )
+            output = &node;
+    ASSERT_NE( output, nullptr );
+
+    const size_t pins      = output->Inputs.size();
+    output->Inputs[1].Name = "Emissive"; // right count, right types, one wrong name
+
+    // The migration's answer: not a prefix, so not repaired — and not truncated or grown either.
+    EXPECT_EQ( SG::MigrateToCatalogue( doc ), 0 );
+    ASSERT_EQ( output->Inputs.size(), pins );
+    EXPECT_EQ( output->Inputs[1].Name, "Emissive" ) << "the migration rewrote a name it must not touch";
+
+    // The validator's answer: the same refusal, and it says which pin.
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_FALSE( compiled.IsSuccess() );
+    EXPECT_NE( compiled.GetError().find( "Emissive" ), std::string::npos ) << compiled.GetError();
+}
+
+// ============================================================== the corpus on disk ============
+
+namespace
+{
+    std::filesystem::path GraphsDirectory()
+    {
+        return Desert::Tests::ShaderGraph::RepoRoot() / "Editor/Resources/Assets/ShaderGraphs";
+    }
+} // namespace
+
+// WHAT MAKES "REFUSE A RENAMED PIN" SURVIVABLE. Refusing rather than repairing is only the right answer
+// if a catalogue rename is discovered by whoever makes it rather than by an artist opening a file, and
+// nothing in this suite ever read a committed `.dgraph` — every document above is built in memory from
+// the very catalogue it is checked against, so a rename moves both sides at once and no assertion can
+// see it. This one reads the files, so renaming a pin in Specs() reddens here and names the graph that
+// has to be migrated.
+TEST( ShaderGraphCompiler, EveryGraphCommittedToTheProjectStillCompiles )
+{
+    const std::filesystem::path directory = GraphsDirectory();
+    ASSERT_TRUE( std::filesystem::is_directory( directory ) )
+         << "the project's graph corpus is not where this test looks: " << directory;
+
+    int seen = 0;
+    for ( const auto& entry : std::filesystem::directory_iterator( directory ) )
+    {
+        if ( entry.path().extension() != ".dgraph" )
+            continue;
+        ++seen;
+
+        const std::string json = Desert::Tests::ShaderGraph::ReadAll( entry.path() );
+        ASSERT_FALSE( json.empty() ) << entry.path().string() << " is empty or unreadable";
+
+        // Through Deserialize, not through a hand-built Document: the migration is part of what a load
+        // IS, and a corpus that only compiles after somebody edits it by hand is not a corpus that works.
+        const auto loaded = SG::Deserialize( json );
+        ASSERT_TRUE( loaded.IsSuccess() ) << entry.path().string() << ": " << loaded.GetError();
+
+        const auto compiled = SG::CompileToDShader( loaded.GetValue().Doc );
+        EXPECT_TRUE( compiled.IsSuccess() )
+             << entry.path().filename().string()
+             << " no longer compiles against the current node catalogue: " << compiled.GetError()
+             << "\nA catalogue change that a saved graph cannot follow is a migration, not a rename: the "
+                "compiler refuses such a document by design rather than guessing what the artist meant.";
+    }
+
+    // Printed, not asserted. A number here is a number somebody edits when they delete a graph; what the
+    // test is for is that whatever the corpus contains, all of it compiles.
+    ASSERT_GT( seen, 0 ) << "no .dgraph was found at all, so this test measured nothing";
+    std::printf( "[ShaderGraphCompiler] %d committed .dgraph compiled\n", seen );
+}
+
+// THE ONE GRAPH THAT MUST NOT COMPILE, and the reason it is HERE rather than in the corpus above.
+//
+// `MatBroken` is the Stage-1 reproduction of "a graph that compiles to invalid GLSL takes the editor
+// down with it": a vec2 wired into the vec4 Albedo pin, legal in the file and refused by the canvas.
+// Г20 already moved the SHADER it produced out of the shipped tree into a test fixture, because it was
+// compiled at every editor start and put two errors into every clean log. The `.dgraph` half was left
+// behind in Editor/Resources/Assets/ShaderGraphs with no consumer anywhere — the only graph in that
+// directory without a `.shader`, a `.demat` and a scene — where it was still offered to an artist by the
+// panel's Load popup and still counted as content the project ships. O1-J finishes that move: it lives
+// beside this suite, and what it demonstrates is asserted instead of shipped.
+TEST( ShaderGraphCompiler, TheDeliberatelyBrokenGraphIsRefusedBeforeAnyGlslIsEmitted )
+{
+    const std::filesystem::path fixture = Desert::Tests::ShaderGraph::RepoRoot() /
+                                          "Desert/Tests/Editor/ShaderGraphCompiler/Fixtures" / "MatBroken.dgraph";
+    const std::string json = Desert::Tests::ShaderGraph::ReadAll( fixture );
+    ASSERT_FALSE( json.empty() ) << "the fixture is not where this test looks: " << fixture;
+
+    const auto loaded = SG::Deserialize( json );
+    ASSERT_TRUE( loaded.IsSuccess() ) << loaded.GetError();
+
+    const auto compiled = SG::CompileToDShader( loaded.GetValue().Doc );
+    ASSERT_FALSE( compiled.IsSuccess() )
+         << "the reproduction of the defect this validator was written for now compiles";
+    EXPECT_NE( compiled.GetError().find( "Albedo" ), std::string::npos )
+         << "the refusal does not name the pin the artist wired into: " << compiled.GetError();
+    EXPECT_NE( compiled.GetError().find( "UV" ), std::string::npos )
+         << "the refusal does not name the node the value came from: " << compiled.GetError();
 }
 
 int main( int argc, char** argv )
