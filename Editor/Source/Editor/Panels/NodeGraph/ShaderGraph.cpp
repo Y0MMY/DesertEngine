@@ -471,7 +471,24 @@ namespace Desert::Editor::ShaderGraph
             }
 
             // Expression feeding @p inputPin of @p node, or the type's default when unlinked.
-            std::string InputExpr( const Node& node, size_t inputIndex, const char* fallback )
+            //
+            // NAMED `Emit...` BECAUSE IT EMITS, AND THAT IS THE WHOLE STORY OF Г24. Reading an input
+            // WRITES the subgraph behind it: it advances `nextVar` and appends statements to `body`. It
+            // used to be called `InputExpr`, which reads like a pure accessor, and thirteen emitter
+            // branches consequently called it twice or three times inside ONE `std::format(...)`
+            // argument list. C++ does not order function arguments: clang evaluates them left to right,
+            // MSVC right to left. So the same `.dgraph` compiled to DIFFERENT GLSL on macOS and on
+            // Windows — `n1 = <noise>; n2 = <density>; n0 = n2 * n1.x;` there against
+            // `n1 = <density>; n2 = <noise>; n0 = n1 * n2.x;` here — which is not cosmetic: the emitted
+            // text is hashed by Core::ShaderVariant::Hash(), that hash is mixed into the SPIR-V cache
+            // key and into Graphic::CloudEnvironmentFingerprint, and the text itself is written to a
+            // committed `.shader`. One graph, two machines, two artifacts.
+            //
+            // THE RULE THAT REPLACES IT: at most one call to this function per full expression. Every
+            // caller that needs two inputs resolves them into named locals first, in pin order, because
+            // consecutive statements ARE sequenced. `ShaderGraphDeterminism` enforces the rule over this
+            // file's own text, so the shape cannot come back at the fourteenth branch.
+            std::string EmitInput( const Node& node, size_t inputIndex, const char* fallback )
             {
                 const Pin& pin = node.Inputs[inputIndex];
                 auto       it  = linkIntoPin.find( pin.Id );
@@ -555,7 +572,7 @@ namespace Desert::Editor::ShaderGraph
 
                 if ( node.Kind == "TextureSample" )
                 {
-                    const std::string uv = InputExpr( node, 0, "v_UV" );
+                    const std::string uv = EmitInput( node, 0, "v_UV" );
                     decl = std::format( "vec4 {} = texture( {}, {} );", var, node.ParamName, uv );
                 }
                 else if ( node.Kind == "MediumTexture" )
@@ -572,8 +589,11 @@ namespace Desert::Editor::ShaderGraph
                     // because a volume sample has no screen-space footprint to derive one from.
                     // Only .rgb: the RGB pin is a Vec3 (see the catalogue), because this domain has no
                     // vec4 sink to wire a fourth channel into.
+                    const std::string u = EmitInput( node, 0, "0.0" );
+                    const std::string v = EmitInput( node, 1, "0.0" );
+
                     decl = std::format( "vec3 {} = textureLod( {}, vec2( {}, {} ), 0.0 ).rgb;", var,
-                                        node.ParamName, InputExpr( node, 0, "0.0" ), InputExpr( node, 1, "0.0" ) );
+                                        node.ParamName, u, v );
                 }
                 else if ( node.Kind == "Vec3Param" )
                 {
@@ -610,7 +630,7 @@ namespace Desert::Editor::ShaderGraph
                     // an out-of-range index would take the fetch's `else` branch and read as "my second
                     // cloud type stopped eroding".
                     const std::string slot =
-                         IsLinked( node, 0 ) ? std::format( "CloudNoiseSlotOf( {} )", InputExpr( node, 0, "0.0" ) )
+                         IsLinked( node, 0 ) ? std::format( "CloudNoiseSlotOf( {} )", EmitInput( node, 0, "0.0" ) )
                                              : std::string( "field.NoiseSlot" );
                     // The macro, not a sampler: Common/CloudField.glslh keeps every fetch behind one so
                     // its maths can also be compiled as C++, and the medium is substituted INSIDE those
@@ -618,7 +638,7 @@ namespace Desert::Editor::ShaderGraph
                     // sampler named here would be a fifth declaration of volumes the scene already bound.
                     decl =
                          std::format( "vec4 {} = CLOUD_SAMPLE_NOISE( {}, {} );", var, slot,
-                                      InputExpr( node, 1, "CloudDefaultNoiseCoordinate( params, positionKm )" ) );
+                                      EmitInput( node, 1, "CloudDefaultNoiseCoordinate( params, positionKm )" ) );
                 }
                 else if ( node.Kind == "DefaultDensity" )
                     decl = std::format( "float {} = CloudDefaultDensity( params, field, positionKm );", var );
@@ -666,24 +686,45 @@ namespace Desert::Editor::ShaderGraph
                     decl = std::format( "vec3 {} = vec3( {}, {}, {} );", var, Lit( node.Value[0] ),
                                         Lit( node.Value[1] ), Lit( node.Value[2] ) );
                 else if ( node.Kind == "MultiplyVec3" )
-                    decl = std::format( "vec3 {} = {} * {};", var, InputExpr( node, 0, "vec3( 1.0 )" ),
-                                        InputExpr( node, 1, "vec3( 1.0 )" ) );
+                {
+                    const std::string a = EmitInput( node, 0, "vec3( 1.0 )" );
+                    const std::string b = EmitInput( node, 1, "vec3( 1.0 )" );
+
+                    decl = std::format( "vec3 {} = {} * {};", var, a, b );
+                }
                 else if ( node.Kind == "ScaleVec3" )
-                    decl = std::format( "vec3 {} = {} * {};", var, InputExpr( node, 0, "vec3( 1.0 )" ),
-                                        InputExpr( node, 1, "1.0" ) );
+                {
+                    const std::string value = EmitInput( node, 0, "vec3( 1.0 )" );
+                    const std::string scale = EmitInput( node, 1, "1.0" );
+
+                    decl = std::format( "vec3 {} = {} * {};", var, value, scale );
+                }
                 else if ( node.Kind == "SplitVec3" )
-                    decl = std::format( "vec3 {} = {};", var, InputExpr( node, 0, "vec3( 0.0 )" ) );
+                    decl = std::format( "vec3 {} = {};", var, EmitInput( node, 0, "vec3( 0.0 )" ) );
                 else if ( node.Kind == "AddFloat" )
-                    decl = std::format( "float {} = {} + {};", var, InputExpr( node, 0, "0.0" ),
-                                        InputExpr( node, 1, "0.0" ) );
+                {
+                    const std::string a = EmitInput( node, 0, "0.0" );
+                    const std::string b = EmitInput( node, 1, "0.0" );
+
+                    decl = std::format( "float {} = {} + {};", var, a, b );
+                }
                 else if ( node.Kind == "SaturateFloat" )
-                    decl = std::format( "float {} = clamp( {}, 0.0, 1.0 );", var, InputExpr( node, 0, "0.0" ) );
+                    decl = std::format( "float {} = clamp( {}, 0.0, 1.0 );", var, EmitInput( node, 0, "0.0" ) );
                 else if ( node.Kind == "PowerFloat" )
-                    decl = std::format( "float {} = pow( max( {}, 0.0 ), {} );", var, InputExpr( node, 0, "0.0" ),
-                                        InputExpr( node, 1, "1.0" ) );
+                {
+                    const std::string base     = EmitInput( node, 0, "0.0" );
+                    const std::string exponent = EmitInput( node, 1, "1.0" );
+
+                    decl = std::format( "float {} = pow( max( {}, 0.0 ), {} );", var, base, exponent );
+                }
                 else if ( node.Kind == "LerpFloat" )
-                    decl = std::format( "float {} = mix( {}, {}, {} );", var, InputExpr( node, 0, "0.0" ),
-                                        InputExpr( node, 1, "1.0" ), InputExpr( node, 2, "0.5" ) );
+                {
+                    const std::string from = EmitInput( node, 0, "0.0" );
+                    const std::string to   = EmitInput( node, 1, "1.0" );
+                    const std::string t    = EmitInput( node, 2, "0.5" );
+
+                    decl = std::format( "float {} = mix( {}, {}, {} );", var, from, to, t );
+                }
                 else if ( node.Kind == "ColorConst" )
                     decl = std::format( "vec4 {} = {};", var, Vec4Lit( node.Value ) );
                 else if ( node.Kind == "FloatConst" )
@@ -693,35 +734,63 @@ namespace Desert::Editor::ShaderGraph
                 else if ( node.Kind == "UV" )
                     decl = std::format( "vec2 {} = v_UV;", var );
                 else if ( node.Kind == "TileUV" )
-                    decl = std::format( "vec2 {} = {} * {};", var, InputExpr( node, 0, "v_UV" ),
-                                        InputExpr( node, 1, "1.0" ) );
+                {
+                    const std::string uv     = EmitInput( node, 0, "v_UV" );
+                    const std::string tiling = EmitInput( node, 1, "1.0" );
+
+                    decl = std::format( "vec2 {} = {} * {};", var, uv, tiling );
+                }
                 else if ( node.Kind == "Multiply" )
-                    decl = std::format( "vec4 {} = {} * {};", var, InputExpr( node, 0, "vec4( 1.0 )" ),
-                                        InputExpr( node, 1, "vec4( 1.0 )" ) );
+                {
+                    const std::string a = EmitInput( node, 0, "vec4( 1.0 )" );
+                    const std::string b = EmitInput( node, 1, "vec4( 1.0 )" );
+
+                    decl = std::format( "vec4 {} = {} * {};", var, a, b );
+                }
                 else if ( node.Kind == "Scale" )
-                    decl = std::format( "vec4 {} = {} * {};", var, InputExpr( node, 0, "vec4( 1.0 )" ),
-                                        InputExpr( node, 1, "1.0" ) );
+                {
+                    const std::string value = EmitInput( node, 0, "vec4( 1.0 )" );
+                    const std::string scale = EmitInput( node, 1, "1.0" );
+
+                    decl = std::format( "vec4 {} = {} * {};", var, value, scale );
+                }
                 else if ( node.Kind == "Add" )
-                    decl = std::format( "vec4 {} = {} + {};", var, InputExpr( node, 0, "vec4( 0.0 )" ),
-                                        InputExpr( node, 1, "vec4( 0.0 )" ) );
+                {
+                    const std::string a = EmitInput( node, 0, "vec4( 0.0 )" );
+                    const std::string b = EmitInput( node, 1, "vec4( 0.0 )" );
+
+                    decl = std::format( "vec4 {} = {} + {};", var, a, b );
+                }
                 else if ( node.Kind == "Lerp" )
-                    decl = std::format( "vec4 {} = mix( {}, {}, {} );", var,
-                                        InputExpr( node, 0, "vec4( 0.0 )" ),
-                                        InputExpr( node, 1, "vec4( 1.0 )" ), InputExpr( node, 2, "0.5" ) );
+                {
+                    const std::string from = EmitInput( node, 0, "vec4( 0.0 )" );
+                    const std::string to   = EmitInput( node, 1, "vec4( 1.0 )" );
+                    const std::string t    = EmitInput( node, 2, "0.5" );
+
+                    decl = std::format( "vec4 {} = mix( {}, {}, {} );", var, from, to, t );
+                }
                 else if ( node.Kind == "OneMinus" )
-                    decl = std::format( "vec4 {} = vec4( 1.0 ) - {};", var,
-                                        InputExpr( node, 0, "vec4( 0.0 )" ) );
+                    decl = std::format( "vec4 {} = vec4( 1.0 ) - {};", var, EmitInput( node, 0, "vec4( 0.0 )" ) );
                 else if ( node.Kind == "MultiplyFloat" )
-                    decl = std::format( "float {} = {} * {};", var, InputExpr( node, 0, "1.0" ),
-                                        InputExpr( node, 1, "1.0" ) );
+                {
+                    const std::string a = EmitInput( node, 0, "1.0" );
+                    const std::string b = EmitInput( node, 1, "1.0" );
+
+                    decl = std::format( "float {} = {} * {};", var, a, b );
+                }
                 else if ( node.Kind == "Saturate" )
                     decl = std::format( "vec4 {} = clamp( {}, vec4( 0.0 ), vec4( 1.0 ) );", var,
-                                        InputExpr( node, 0, "vec4( 0.0 )" ) );
+                                        EmitInput( node, 0, "vec4( 0.0 )" ) );
                 else if ( node.Kind == "Power" )
-                    decl = std::format( "vec4 {} = pow( max( {}, vec4( 0.0 ) ), vec4( {} ) );", var,
-                                        InputExpr( node, 0, "vec4( 0.0 )" ), InputExpr( node, 1, "1.0" ) );
+                {
+                    const std::string base     = EmitInput( node, 0, "vec4( 0.0 )" );
+                    const std::string exponent = EmitInput( node, 1, "1.0" );
+
+                    decl = std::format( "vec4 {} = pow( max( {}, vec4( 0.0 ) ), vec4( {} ) );", var, base,
+                                        exponent );
+                }
                 else if ( node.Kind == "Sine" )
-                    decl = std::format( "float {} = sin( {} );", var, InputExpr( node, 0, "0.0" ) );
+                    decl = std::format( "float {} = sin( {} );", var, EmitInput( node, 0, "0.0" ) );
                 else if ( node.Kind == "Time" )
                     decl = std::format( "float {} = timeUB.TimeData.x;", var );
                 else
@@ -1073,7 +1142,7 @@ namespace Desert::Editor::ShaderGraph
 
                 Compiler compiler( doc );
                 compiler.currentOutput       = function.Pin;
-                const std::string expression = compiler.InputExpr( *output, pinIndex, function.Fallback );
+                const std::string expression = compiler.EmitInput( *output, pinIndex, function.Fallback );
                 if ( !compiler.error.empty() )
                     return Common::MakeError<std::string>( compiler.error );
 
@@ -1218,13 +1287,13 @@ namespace Desert::Editor::ShaderGraph
         std::string metallic, roughness, occlusion;
         if ( domain == Domain::PostProcess )
         {
-            sceneOut = compiler.InputExpr( *output, 0, "vec4( 0.0 )" );
+            sceneOut = compiler.EmitInput( *output, 0, "vec4( 0.0 )" );
         }
         else
         {
-            albedo   = compiler.InputExpr( *output, 0, "vec4( 0.8, 0.8, 0.8, 1.0 )" );
-            emission = compiler.InputExpr( *output, 1, "vec4( 0.0 )" );
-            alpha    = compiler.InputExpr( *output, 2, "1.0" );
+            albedo   = compiler.EmitInput( *output, 0, "vec4( 0.8, 0.8, 0.8, 1.0 )" );
+            emission = compiler.EmitInput( *output, 1, "vec4( 0.0 )" );
+            alpha    = compiler.EmitInput( *output, 2, "1.0" );
             // Only when the surface is lit: an unlit graph has no shading model to feed, and asking
             // for these would emit the nodes behind them into a shader that never reads the result.
             // The fallbacks are the schema defaults of the standard material (StaticMeshPBR's
@@ -1232,9 +1301,9 @@ namespace Desert::Editor::ShaderGraph
             // PBR material describe the same surface.
             if ( doc.Lit )
             {
-                metallic  = compiler.InputExpr( *output, 3, "0.0" );
-                roughness = compiler.InputExpr( *output, 4, "0.5" );
-                occlusion = compiler.InputExpr( *output, 5, "1.0" );
+                metallic  = compiler.EmitInput( *output, 3, "0.0" );
+                roughness = compiler.EmitInput( *output, 4, "0.5" );
+                occlusion = compiler.EmitInput( *output, 5, "1.0" );
             }
         }
         if ( !compiler.error.empty() )
