@@ -5,7 +5,9 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cmath>
+#include <vector>
 
 using Desert::Graphic::Render2D::DrawList2D;
 namespace R2D = Desert::Graphic::Render2D;
@@ -56,8 +58,15 @@ TEST( DrawList2D, AddRectFilledEmitsQuad )
         EXPECT_NEAR( vert.Color.a, 1.0f, kEps );
     }
 
-    // Two triangles referencing the four corners.
-    const std::vector<uint32_t> expected = { 0, 1, 2, 2, 3, 0 };
+    // Two triangles referencing the four corners, fanned from corner 0.
+    //
+    // THE SECOND TRIANGLE USED TO BE WRITTEN {2,3,0} AND IS NOW {0,2,3}, which is the same three corners in
+    // the same cyclic order — same triangle, same winding, same pixels — and the change is not cosmetic.
+    // Every fan triangle now starts at corner 0, so the diagonal 0->2 is traversed in ONE direction by both
+    // triangles. When a rotated clipper cuts a quad (Ю9) each triangle is cut separately, and two triangles
+    // that met that diagonal from opposite ends would split it at two floats one ULP apart — a crack the
+    // rasterizer can sample through. Fanning from a single corner removes the possibility.
+    const std::vector<uint32_t> expected = { 0, 1, 2, 0, 2, 3 };
     EXPECT_EQ( dl.GetIndices(), expected );
 
     const auto& cmd = dl.GetCommands()[0];
@@ -416,8 +425,8 @@ TEST( DrawList2D, NestedTransformsComposeOuterAfterInner )
     EXPECT_FALSE( dl.HasTransform() );
 }
 
-// The clip is a scissor, and hardware scissors are axis-aligned — so a rotated clipper is stored as the
-// box AROUND it, and stored in SCREEN space rather than in the space it was written in.
+// The BOX half of a rotated clip: a scissor is all the hardware has and it is axis-aligned, so the command
+// still carries the box around the clipper. What changed in Ю9 is that the box is no longer the WHOLE clip.
 TEST( DrawList2D, AClipUnderATransformIsStoredAsItsScreenBoundingBox )
 {
     DrawList2D dl;
@@ -500,6 +509,298 @@ TEST( DrawList2D, ADegenerateTransformInvertsToSomethingFinite )
     EXPECT_TRUE( std::isfinite( p.x ) ) << "an infinity from a singular inverse reached a pointer position";
     EXPECT_TRUE( std::isfinite( p.y ) ) << "an infinity from a singular inverse reached a pointer position";
     EXPECT_EQ( R2D::MeanScale2D( flat ), 0.0f );
+}
+
+// ==================================================================================================
+// Ю9 — EXACT CLIPPING BY A ROTATED CLIPPER. The box above is a superset of the clipper; the four oblique
+// edges are the rest of it, and they cut the geometry here rather than being handed to a scissor that
+// cannot express them. Everything below is about that cut, and about the cases where it must NOT happen.
+// ==================================================================================================
+
+namespace
+{
+    // Is `p` inside the region, allowing for the fact that a cut vertex lands exactly ON a plane?
+    bool InsideRegion( const R2D::ClipRegion2D& r, const glm::vec2& p, float slack )
+    {
+        for ( uint32_t i = 0; i < r.PlaneCount; ++i )
+            if ( R2D::ClipPlaneDistance( r.Planes[i], p ) < -slack )
+                return false;
+        return true;
+    }
+} // namespace
+
+// THE INVARIANT THE WHOLE FEATURE RESTS ON, and the one that separates it from Ю8: after a rotated clipper,
+// no emitted vertex lies outside the clipper's own quadrilateral. Written as "every vertex" rather than as
+// a count, because a count would pass for a clipper that cut the wrong corner.
+TEST( DrawList2D, ARotatedClipperCutsTheGeometryAndNotOnlyTheScissorBox )
+{
+    DrawList2D dl;
+    dl.PushTransform( R2D::MakeTransform2D( { 50.0f, 50.0f }, 45.0f, { 1.0f, 1.0f } ) );
+    dl.PushClipRect( { 0.0f, 0.0f }, { 100.0f, 100.0f } );
+    ASSERT_EQ( dl.GetClipRegion().PlaneCount, 4u ) << "a 45-degree clipper produced no oblique constraint";
+
+    // A rectangle covering the clipper's whole SCREEN BOUNDING BOX. Under Ю8 every corner of it survived,
+    // because the box was the entire clip; now the four corners of the box are outside the diamond.
+    const float diag = 100.0f * std::sqrt( 2.0f );
+    dl.PushTransform( R2D::MakeTransform2D( { 0.0f, 0.0f }, 0.0f, { 1.0f, 1.0f } ) ); // straight, inside the turn
+    dl.PopTransform();
+    dl.AddRectFilled( { -100.0f, -100.0f }, { 200.0f, 200.0f }, { 1, 1, 1, 1 } );
+    dl.PopClipRect();
+    dl.PopTransform();
+
+    ASSERT_FALSE( dl.GetVertices().empty() ) << "the clipper removed everything, so nothing is asserted";
+    DrawList2D probe;
+    probe.PushTransform( R2D::MakeTransform2D( { 50.0f, 50.0f }, 45.0f, { 1.0f, 1.0f } ) );
+    probe.PushClipRect( { 0.0f, 0.0f }, { 100.0f, 100.0f } );
+    const R2D::ClipRegion2D region = probe.GetClipRegion();
+
+    for ( const auto& v : dl.GetVertices() )
+        EXPECT_TRUE( InsideRegion( region, v.Position, 1e-2f ) )
+             << "a vertex at (" << v.Position.x << "," << v.Position.y << ") survived outside the clipper";
+
+    // Not vacuous: the box the scissor gets is strictly bigger than the diamond, so something WAS removed.
+    EXPECT_NEAR( dl.GetCommands()[0].ClipRect.z, diag, 1e-2f );
+    EXPECT_LT( dl.GetVertices()[0].Position.x, 1e6f ); // finite, i.e. no infinity walked out of a split
+}
+
+// THE NEUTRAL CASES, and they are what "byte-identical" rests on. A clipper that is not turned — untouched,
+// purely scaled, or turned by a quarter or a half — IS its own box, so it must carry no plane and cut no
+// triangle: same four shared corners, same six indices, same bytes as before any of this existed. The
+// quarter and half turns are in the list because cos(pi/2) is -4.37e-8 rather than 0 in float, so a test
+// written against the matrix would have sent a square clipper down the cutting path.
+TEST( DrawList2D, AnUnrotatedClipperCarriesNoObliquePlaneAtAll )
+{
+    const glm::mat3 cases[] = { glm::mat3( 1.0f ), R2D::MakeTransform2D( { 7.0f, 9.0f }, 0.0f, { 3.0f, 0.5f } ),
+                                R2D::MakeTransform2D( { 7.0f, 9.0f }, 90.0f, { 1.0f, 1.0f } ),
+                                R2D::MakeTransform2D( { 7.0f, 9.0f }, 180.0f, { 1.0f, 1.0f } ) };
+    for ( const glm::mat3& m : cases )
+    {
+        DrawList2D dl;
+        dl.PushTransform( m );
+        dl.PushClipRect( { 0.0f, 0.0f }, { 100.0f, 100.0f } );
+        dl.AddRectFilled( { 10.0f, 20.0f }, { 40.0f, 50.0f }, { 1, 1, 1, 1 } );
+        EXPECT_EQ( dl.GetClipRegion().PlaneCount, 0u ) << "an axis-aligned clipper produced a plane";
+        // Four shared corners and six indices: the clipper did not touch the geometry.
+        EXPECT_EQ( dl.GetVertices().size(), 4u );
+        EXPECT_EQ( dl.GetIndices().size(), 6u );
+    }
+
+    // And with no clip pushed at all, the position is still STORED rather than tested against anything.
+    DrawList2D bare;
+    bare.AddRectFilled( { 0.1f, 0.3f }, { 100.7f, 70.9f }, { 1, 1, 1, 1 } );
+    EXPECT_EQ( bare.GetVertices()[0].Position.x, 0.1f );
+    EXPECT_EQ( bare.GetClipRegion().PlaneCount, 0u );
+
+    // THE OTHER HALF OF THE SAME DECISION, without which the tolerance above is a hole rather than a rule:
+    // a turn small enough to see on a 300 px panel — a hundredth of a degree is 0.05 px at the corner —
+    // is oblique and IS cut. Only turns whose departure from the box is under a 256th of a pixel are free.
+    DrawList2D barely;
+    barely.PushTransform( R2D::MakeTransform2D( { 150.0f, 150.0f }, 0.01f, { 1.0f, 1.0f } ) );
+    barely.PushClipRect( { 0.0f, 0.0f }, { 300.0f, 300.0f } );
+    EXPECT_EQ( barely.GetClipRegion().PlaneCount, 4u )
+         << "a rotation visible on screen was rounded down to its bounding box";
+}
+
+// TWO PATHS THAT MUST AGREE, pinned rather than trusted: the clipping emitter and the verbatim one are
+// different code, and a primitive that lies entirely INSIDE a rotated clipper must come out of the first
+// exactly as it comes out of the second. Without this the clipper could be quietly wrong everywhere and
+// only the cut cases would show it.
+TEST( DrawList2D, AClipperThatCutsNothingEmitsWhatTheUnclippedPathEmits )
+{
+    const auto build = []( bool withClipper )
+    {
+        DrawList2D dl;
+        dl.PushTransform( R2D::MakeTransform2D( { 500.0f, 500.0f }, 33.0f, { 1.0f, 1.0f } ) );
+        if ( withClipper )
+            dl.PushClipRect( { -1000.0f, -1000.0f }, { 2000.0f, 2000.0f } ); // far outside everything below
+        dl.AddRectFilled( { 100.0f, 100.0f }, { 260.0f, 180.0f }, { 0.2f, 0.4f, 0.6f, 1.0f } );
+        dl.AddRectFilled( { 100.0f, 200.0f }, { 260.0f, 280.0f }, { 1, 1, 1, 1 }, 12.0f );  // rounded: a fan
+        dl.AddRing( { 400.0f, 400.0f }, 40.0f, 20.0f, { 1, 0, 0, 1 }, { 0, 1, 0, 1 }, 12 ); // a strip
+        dl.AddTriangleFilled( { 600, 600 }, { 640, 600 }, { 620, 640 }, { 1, 1, 1, 1 } );
+        dl.AddLine( { 700, 700 }, { 780, 740 }, { 1, 1, 1, 1 }, 3.0f );
+        return dl;
+    };
+
+    const DrawList2D plain   = build( false );
+    const DrawList2D clipped = build( true );
+    ASSERT_GT( clipped.GetClipRegion().PlaneCount, 0u ) << "the clipper was pruned away, so nothing is proven";
+
+    // The clipped path de-indexes (a cut triangle owns its corners), so the buffers cannot be compared byte
+    // for byte. What must match is the PICTURE: the same triangles, corner for corner.
+    const auto triangles = []( const DrawList2D& dl )
+    {
+        std::vector<std::array<glm::vec2, 3>> out;
+        const auto&                           v = dl.GetVertices();
+        const auto&                           i = dl.GetIndices();
+        for ( std::size_t t = 0; t + 2 < i.size(); t += 3 )
+            out.push_back( { v[i[t]].Position, v[i[t + 1]].Position, v[i[t + 2]].Position } );
+        return out;
+    };
+    const auto a = triangles( plain );
+    const auto b = triangles( clipped );
+    ASSERT_EQ( a.size(), b.size() ) << "the clipper added or dropped triangles where it should cut nothing";
+    for ( std::size_t t = 0; t < a.size(); ++t )
+        for ( int c = 0; c < 3; ++c )
+        {
+            EXPECT_NEAR( a[t][c].x, b[t][c].x, 1e-3f ) << "triangle " << t << " corner " << c;
+            EXPECT_NEAR( a[t][c].y, b[t][c].y, 1e-3f ) << "triangle " << t << " corner " << c;
+        }
+}
+
+// NESTING, AND THE TRAP Ю8 NAMED. Two rotated clippers whose quadrilaterals overlap only in part: what
+// survives must be inside BOTH. A composition that replaced the outer constraint with the inner one — or
+// that kept only the outer — leaves a point that this test names explicitly.
+TEST( DrawList2D, TwoRotatedClippersIntersectRatherThanReplace )
+{
+    DrawList2D dl;
+    dl.PushTransform( R2D::MakeTransform2D( { 200.0f, 200.0f }, 30.0f, { 1.0f, 1.0f } ) );
+    dl.PushClipRect( { 100.0f, 100.0f }, { 300.0f, 300.0f } ); // outer diamond
+    const R2D::ClipRegion2D outerOnly = dl.GetClipRegion();
+
+    dl.PushTransform( R2D::MakeTransform2D( { 260.0f, 200.0f }, -50.0f, { 1.0f, 1.0f } ) );
+    dl.PushClipRect( { 160.0f, 120.0f }, { 360.0f, 280.0f } ); // inner, turned the other way and offset
+    const R2D::ClipRegion2D both = dl.GetClipRegion();
+    dl.PopClipRect();
+    dl.PopTransform();
+
+    DrawList2D innerAlone;
+    innerAlone.PushTransform( R2D::MakeTransform2D( { 200.0f, 200.0f }, 30.0f, { 1.0f, 1.0f } ) );
+    innerAlone.PushTransform( R2D::MakeTransform2D( { 260.0f, 200.0f }, -50.0f, { 1.0f, 1.0f } ) );
+    innerAlone.PushClipRect( { 160.0f, 120.0f }, { 360.0f, 280.0f } );
+    const R2D::ClipRegion2D innerOnly = innerAlone.GetClipRegion();
+
+    // A point in the inner quad and NOT in the outer one: kept by "replace", refused by "intersect".
+    int inInnerNotOuter = 0, inOuterNotInner = 0, inBoth = 0;
+    for ( float y = 60.0f; y < 420.0f; y += 3.0f )
+        for ( float x = 60.0f; x < 420.0f; x += 3.0f )
+        {
+            const glm::vec2 p( x, y );
+            const bool      o = R2D::ClipRegionContains( outerOnly, p );
+            const bool      i = R2D::ClipRegionContains( innerOnly, p );
+            const bool      c = R2D::ClipRegionContains( both, p );
+            EXPECT_EQ( c, o && i ) << "at (" << x << "," << y << ") the nested clip is not the intersection";
+            inInnerNotOuter += ( i && !o ) ? 1 : 0;
+            inOuterNotInner += ( o && !i ) ? 1 : 0;
+            inBoth += ( o && i ) ? 1 : 0;
+        }
+    // The three counts together are what make the assertion above non-vacuous IN BOTH DIRECTIONS: there is
+    // a region only the outer refuses, a region only the inner refuses, and a region both accept.
+    EXPECT_GT( inInnerNotOuter, 50 ) << "the two clippers nearly coincide; replacement would be invisible";
+    EXPECT_GT( inOuterNotInner, 50 );
+    EXPECT_GT( inBoth, 50 );
+
+    dl.PopClipRect();
+    dl.PopTransform();
+}
+
+// A NESTED CLIP CAN BE EMPTY, and an empty clip used to be indistinguishable from NO clip: the intersection
+// stored a width of zero and the backend reads `w <= 0` as "unclipped", so two disjoint clippers drew over
+// the WHOLE viewport while the pointer was refused everywhere. One picture, two answers.
+TEST( DrawList2D, TwoDisjointClippersDrawNothingRatherThanEverything )
+{
+    DrawList2D dl;
+    dl.PushClipRect( { 0.0f, 0.0f }, { 100.0f, 100.0f } );
+    dl.PushClipRect( { 400.0f, 400.0f }, { 500.0f, 500.0f } ); // no overlap at all
+    dl.AddRectFilled( { 0.0f, 0.0f }, { 1000.0f, 1000.0f }, { 1, 1, 1, 1 } );
+    dl.AddText( reinterpret_cast<const void*>( 0x1 ), { 0, 0 }, { 10, 10 }, { 0, 0 }, { 1, 1 }, { 1, 1, 1, 1 } );
+    dl.AddGlassRect( { 0, 0 }, { 50, 50 }, { 1, 1, 1, 0.5f } );
+    dl.PopClipRect();
+    dl.PopClipRect();
+
+    EXPECT_TRUE( dl.Empty() ) << "geometry survived a clip region with no area in it";
+    EXPECT_TRUE( dl.GetCommands().empty() ) << "a command was opened for a clip that keeps nothing";
+
+    // And the pointer says the same thing about the same region.
+    DrawList2D probe;
+    probe.PushClipRect( { 0.0f, 0.0f }, { 100.0f, 100.0f } );
+    probe.PushClipRect( { 400.0f, 400.0f }, { 500.0f, 500.0f } );
+    EXPECT_FALSE( R2D::ClipRegionContains( probe.GetClipRegion(), { 50.0f, 50.0f } ) );
+    EXPECT_FALSE( R2D::ClipRegionContains( probe.GetClipRegion(), { 450.0f, 450.0f } ) );
+}
+
+// GLASS IS CUT TOO. Its mask is an SDF over gl_FragCoord and its push-constant block is full at 128 bytes,
+// so a fragment-side clip could not have reached it; cutting the geometry does, with no state at all.
+TEST( DrawList2D, GlassIsCutByARotatedClipperLikeEverythingElse )
+{
+    DrawList2D dl;
+    dl.PushTransform( R2D::MakeTransform2D( { 100.0f, 100.0f }, 45.0f, { 1.0f, 1.0f } ) );
+    dl.PushClipRect( { 50.0f, 50.0f }, { 150.0f, 150.0f } );
+    dl.AddGlassRect( { 0.0f, 0.0f }, { 200.0f, 200.0f }, { 1, 1, 1, 0.5f }, 8.0f, 1.0f );
+    const R2D::ClipRegion2D region = dl.GetClipRegion();
+    dl.PopClipRect();
+    dl.PopTransform();
+
+    ASSERT_EQ( dl.GetCommands().size(), 1u );
+    EXPECT_TRUE( dl.GetCommands()[0].Glass );
+    EXPECT_GT( dl.GetCommands()[0].IndexCount, 0u );
+    EXPECT_EQ( dl.GetCommands()[0].IndexCount, dl.GetIndices().size() )
+         << "the glass command's index count no longer describes what was emitted for it";
+    for ( const auto& v : dl.GetVertices() )
+        EXPECT_TRUE( InsideRegion( region, v.Position, 1e-2f ) ) << "a glass corner survived outside the clipper";
+
+    // Entirely outside: no command at all rather than a command drawing nothing.
+    DrawList2D away;
+    away.PushTransform( R2D::MakeTransform2D( { 100.0f, 100.0f }, 45.0f, { 1.0f, 1.0f } ) );
+    away.PushClipRect( { 50.0f, 50.0f }, { 150.0f, 150.0f } );
+    away.AddGlassRect( { 400.0f, 400.0f }, { 500.0f, 500.0f }, { 1, 1, 1, 0.5f } );
+    EXPECT_TRUE( away.GetCommands().empty() );
+}
+
+// THE BUDGET, AND WHAT HAPPENS PAST IT. Sixteen half-planes is four rotated clippers; a fifth cannot be
+// stored, and what must then hold is that the region stays a SUPERSET of the exact intersection — never
+// tighter — so the picture and the pointer still agree, about a slightly looser region, and the refusal is
+// reported rather than assumed.
+TEST( DrawList2D, PastThePlaneBudgetTheRegionStaysASupersetAndSaysSo )
+{
+    R2D::ClipRegion2D region;
+    bool              exact = true;
+    for ( int i = 0; i < 6; ++i )
+    {
+        const glm::mat3 m = R2D::MakeTransform2D( { 300.0f, 300.0f }, 7.0f + 11.0f * i, { 1.0f, 1.0f } );
+        exact             = R2D::IntersectClipRegion( region, m, { 100.0f, 100.0f }, { 500.0f, 500.0f } ) && exact;
+    }
+    EXPECT_FALSE( exact ) << "six rotated clippers fitted in a sixteen-plane budget without saying so";
+    EXPECT_LE( region.PlaneCount, R2D::kMaxClipPlanes );
+
+    // Superset: every point the exact intersection keeps, this region keeps too.
+    int kept = 0;
+    for ( float y = 90.0f; y < 510.0f; y += 4.0f )
+        for ( float x = 90.0f; x < 510.0f; x += 4.0f )
+        {
+            bool inAll = true;
+            for ( int i = 0; i < 6 && inAll; ++i )
+            {
+                R2D::ClipRegion2D one;
+                const glm::mat3   m = R2D::MakeTransform2D( { 300.0f, 300.0f }, 7.0f + 11.0f * i, { 1.0f, 1.0f } );
+                (void)R2D::IntersectClipRegion( one, m, { 100.0f, 100.0f }, { 500.0f, 500.0f } );
+                inAll = R2D::ClipRegionContains( one, { x, y } );
+            }
+            if ( inAll )
+            {
+                ++kept;
+                EXPECT_TRUE( R2D::ClipRegionContains( region, { x, y } ) )
+                     << "the overflowing region refused a point the exact intersection keeps";
+            }
+        }
+    EXPECT_GT( kept, 100 ) << "the exact intersection was empty, so the superset claim is vacuous";
+}
+
+// A ROTATED CLIP COSTS NO DRAW CALL, which is the measurement behind choosing the CPU over a stencil or a
+// push-constant mask: the oblique half never reaches the GPU, so it is not in the batch key. Two rects that
+// shared a command still share it when a turned clipper cuts them both.
+TEST( DrawList2D, AnObliqueClipDoesNotOpenADrawCallOfItsOwn )
+{
+    DrawList2D dl;
+    dl.PushTransform( R2D::MakeTransform2D( { 100.0f, 100.0f }, 20.0f, { 1.0f, 1.0f } ) );
+    dl.PushClipRect( { 0.0f, 0.0f }, { 200.0f, 200.0f } );
+    dl.AddRectFilled( { 10, 10 }, { 90, 90 }, { 1, 1, 1, 1 } );
+    dl.AddRectFilled( { 110, 10 }, { 190, 90 }, { 1, 1, 1, 1 } );
+    // Read while the clip is still in force: after the pops it is the ground state and says nothing.
+    ASSERT_EQ( dl.GetClipRegion().PlaneCount, 4u ) << "the clip was not oblique, so nothing is proven";
+    dl.PopClipRect();
+    dl.PopTransform();
+
+    EXPECT_EQ( dl.GetCommands().size(), 1u ) << "an oblique clip opened a draw call of its own";
 }
 
 int main( int argc, char** argv )

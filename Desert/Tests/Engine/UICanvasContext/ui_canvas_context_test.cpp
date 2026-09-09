@@ -1532,43 +1532,197 @@ TEST( UICanvasContext, TheSameRotationAboutTwoPivotsLandsInTwoPlaces )
     }
 }
 
-// A clip is a scissor and a scissor is a box, so a rotated clipper clips to the box around itself. That is
-// a deliberate limit (clipping to the quadrilateral needs a stencil) and it is pinned here so it is a
-// DECISION rather than something nobody noticed: what must hold is that the pointer is refused in exactly
-// the region the pixels were, which is that same box and not the unrotated rect.
-TEST( UICanvasContext, ARotatedClipperClipsThePointerToTheSameBoxItClippedThePixels )
+// =========================================================================================================
+// Ю9 — A ROTATED CLIPPER CUTS THE QUADRILATERAL, NOT THE BOX AROUND IT, AND THE POINTER IS CUT WITH IT.
+//
+// Ю8 shipped the box and recorded the looseness as a decision, pinned by a test that named it. This is that
+// decision closed, and the test that named it is replaced rather than kept beside its successor.
+//
+// The assertions below are all of ONE shape and it is not "the clip is at coordinates X": it is that the
+// set of points the walk elects and the set of points the emitted TRIANGLES cover are the same set. Either
+// half alone is satisfiable by a wrong clip that is wrong twice.
+// =========================================================================================================
+
+namespace
 {
-    XformFixture f;
+    // Is @p p covered by a triangle the draw list emitted whose corners all carry @p color? The colour is
+    // how one element's geometry is told from another's without the test knowing the emission order — and
+    // it is exact equality, because the fixture's colours are authored, not blended.
+    bool CoveredByColor( const R2D::DrawList2D& dl, const glm::vec2& p, const glm::vec3& color )
+    {
+        const auto& v = dl.GetVertices();
+        const auto& i = dl.GetIndices();
+        for ( std::size_t t = 0; t + 2 < i.size(); t += 3 )
+        {
+            const auto& a = v[i[t]];
+            const auto& b = v[i[t + 1]];
+            const auto& c = v[i[t + 2]];
+            if ( glm::vec3( a.Color ) != color || glm::vec3( b.Color ) != color || glm::vec3( c.Color ) != color )
+                continue;
+            const float e0 = ( b.Position.x - a.Position.x ) * ( p.y - a.Position.y ) -
+                             ( b.Position.y - a.Position.y ) * ( p.x - a.Position.x );
+            const float e1 = ( c.Position.x - b.Position.x ) * ( p.y - b.Position.y ) -
+                             ( c.Position.y - b.Position.y ) * ( p.x - b.Position.x );
+            const float e2 = ( a.Position.x - c.Position.x ) * ( p.y - c.Position.y ) -
+                             ( a.Position.y - c.Position.y ) * ( p.x - c.Position.x );
+            if ( ( e0 >= 0.0f && e1 >= 0.0f && e2 >= 0.0f ) || ( e0 <= 0.0f && e1 <= 0.0f && e2 <= 0.0f ) )
+                return true;
+        }
+        return false;
+    }
+
+    // A child panel of @p parent, sharp-cornered, in its own authored colour.
+    entt::entity AddChildPanel( XformFixture& f, entt::entity parent, const glm::vec2& mn, const glm::vec2& mx,
+                                const glm::vec3& color )
+    {
+        const entt::entity child = f.Registry.create();
+        auto&              cl    = f.Registry.emplace<ECS::UILayoutComponent>( child ).Data;
+        cl.AnchorMin             = { 0.0f, 0.0f };
+        cl.AnchorMax             = { 0.0f, 0.0f };
+        cl.OffsetMin             = mn;
+        cl.OffsetMax             = mx;
+        auto& panel              = f.Registry.emplace<ECS::UIPanelComponent>( child ).Data;
+        panel.CornerRadius       = 0.0f;
+        panel.Color              = color;
+        panel.Opacity            = 1.0f;
+        f.Registry.emplace<ECS::RelationshipComponent>( child ).Parent = parent;
+        f.Registry.get<ECS::RelationshipComponent>( parent ).Children.push_back( child );
+        return child;
+    }
+
+    // Sweep a grid and compare the two halves. Returns the number of points the picture covered, so a
+    // caller can refuse a vacuous agreement (two empty sets agree perfectly).
+    int SweepAgreement( XformFixture& f, entt::entity target, const glm::vec3& color, float step )
+    {
+        R2D::DrawList2D dl;
+        UICanvasContext ctx;
+        Draw( ctx, f.Registry, f.Canvas, dl, nullptr );
+
+        int covered = 0, disagreements = 0;
+        for ( float y = 5.0f; y < kSide; y += step )
+            for ( float x = 5.0f; x < kSide; x += step )
+            {
+                const glm::vec2 p( x, y );
+                const bool      drawn   = CoveredByColor( dl, p, color );
+                const bool      elected = ElectsAt( f, target, p );
+                covered += drawn ? 1 : 0;
+                if ( drawn != elected && ++disagreements <= 5 )
+                    ADD_FAILURE() << "at (" << x << "," << y << ") the pixels say " << drawn
+                                  << " and the pointer says " << elected;
+            }
+        EXPECT_EQ( disagreements, 0 );
+        return covered;
+    }
+} // namespace
+
+// ONE LEVEL. The clipper is turned 45 degrees and its child overflows it in every direction, so the corners
+// of the clipper's BOUNDING BOX are precisely the places the two answers can differ: under Ю8 the pixels
+// survived there and the pointer was accepted there; now neither is.
+TEST( UICanvasContext, ARotatedClipperRefusesThePointerExactlyWhereItCutThePixels )
+{
+    XformFixture    f;
+    const glm::vec3 kChild( 0.9f, 0.2f, 0.7f );
     f.Layout( f.Panel ).ClipContents = true;
     f.Layout( f.Panel ).Rotation     = 45.0f;
+    const entt::entity child = AddChildPanel( f, f.Panel, { -200.0f, -200.0f }, { 500.0f, 400.0f }, kChild );
 
-    const entt::entity child = f.Registry.create();
-    auto&              cl    = f.Registry.emplace<ECS::UILayoutComponent>( child ).Data;
-    cl.AnchorMin             = { 0.0f, 0.0f };
-    cl.AnchorMax             = { 0.0f, 0.0f };
-    cl.OffsetMin             = { 0.0f, 0.0f };
-    cl.OffsetMax             = { 300.0f, 120.0f };
-    f.Registry.emplace<ECS::UIPanelComponent>( child ).Data.CornerRadius = 0.0f;
-    f.Registry.emplace<ECS::RelationshipComponent>( child ).Parent       = f.Panel;
-    f.Registry.get<ECS::RelationshipComponent>( f.Panel ).Children.push_back( child );
+    EXPECT_GT( SweepAgreement( f, child, kChild, 7.0f ), 200 ) << "the child was never drawn at all";
 
+    // Not vacuous in the OTHER direction either: there is a point inside the clipper's box and outside the
+    // clipper itself, and it must now be refused by both halves. Under Ю8 both accepted it.
     R2D::DrawList2D dl;
     UICanvasContext ctx;
     Draw( ctx, f.Registry, f.Canvas, dl, nullptr );
-
-    // The child's command carries the scissor the pixels were cut with.
-    glm::vec4 clip{ 0.0f };
+    glm::vec4 box{ 0.0f };
     for ( const auto& cmd : dl.GetCommands() )
         if ( cmd.ClipRect.z > 0.0f )
-            clip = cmd.ClipRect;
-    ASSERT_GT( clip.z, 0.0f ) << "nothing was clipped at all";
+            box = cmd.ClipRect;
+    ASSERT_GT( box.z, 0.0f ) << "nothing was clipped at all";
+    const glm::vec2 boxCorner( box.x + 2.0f, box.y + 2.0f ); // inside the box, outside the 45-degree diamond
+    EXPECT_FALSE( CoveredByColor( dl, boxCorner, kChild ) ) << "a pixel survived in the corner of the box";
+    EXPECT_FALSE( ElectsAt( f, child, boxCorner ) ) << "the pointer was accepted in the corner of the box";
+    // ...while the middle of the same box is inside the clipper and kept by both.
+    const glm::vec2 middle( box.x + box.z * 0.5f, box.y + box.w * 0.5f );
+    EXPECT_TRUE( CoveredByColor( dl, middle, kChild ) );
+    EXPECT_TRUE( ElectsAt( f, child, middle ) );
+}
 
-    // A point inside that box and inside the child's own rect is electable; one outside the box is not,
-    // and the two together are what makes this an assertion about the SAME region twice.
-    const glm::vec2 inBox( clip.x + clip.z * 0.5f, clip.y + clip.w * 0.5f );
-    EXPECT_TRUE( ElectsAt( f, child, inBox ) );
-    EXPECT_FALSE( ElectsAt( f, child, { clip.x - 5.0f, clip.y - 5.0f } ) )
-         << "the pointer was accepted outside the box the scissor cut";
+// TWO LEVELS, BOTH TURNED, AND THE TRAP Ю8 NAMED. Its own propagation test did not redden on the mutation
+// it existed for, because a stack one deep cannot tell composition from replacement. So here BOTH the outer
+// panel and the inner clipper carry a rotation of their own, and the counts at the end assert that the two
+// clippers genuinely disagree somewhere — without which "intersect" and "keep the inner one" are the same
+// picture and the mutation is equivalent rather than survived.
+TEST( UICanvasContext, TwoRotatedClippersNestAsAnIntersectionOfBothQuadrilaterals )
+{
+    XformFixture    f;
+    const glm::vec3 kLeaf( 0.15f, 0.85f, 0.35f );
+
+    // Outer: the fixture's panel, turned and clipping.
+    f.Layout( f.Panel ).ClipContents = true;
+    f.Layout( f.Panel ).Rotation     = -35.0f;
+    f.Layout( f.Panel ).Pivot        = { 0.5f, 0.5f };
+
+    // Inner: a clipper of its own, turned the other way, deliberately hanging out of the outer one.
+    const entt::entity inner  = AddChildPanel( f, f.Panel, { 60.0f, -40.0f }, { 420.0f, 160.0f }, kLeaf );
+    auto&              innerL = f.Registry.get<ECS::UILayoutComponent>( inner ).Data;
+    innerL.ClipContents       = true;
+    innerL.Rotation           = 55.0f;
+    innerL.Pivot              = { 0.5f, 0.5f };
+    // The leaf overflows the inner clipper in every direction, so what survives is decided by the clips.
+    const entt::entity leaf = AddChildPanel( f, inner, { -300.0f, -300.0f }, { 700.0f, 600.0f }, kLeaf );
+
+    EXPECT_GT( SweepAgreement( f, leaf, kLeaf, 5.0f ), 150 ) << "the leaf was never drawn at all";
+
+    // AND THE COUNTS THAT MAKE IT NON-EQUIVALENT. Drawn with only the inner clip, the leaf would cover
+    // strictly more than it does now — the outer clipper must remove something. Measured by taking the
+    // outer clipper's ClipContents away and counting the difference.
+    const auto coveredCount = [&]( XformFixture& fx )
+    {
+        R2D::DrawList2D dl;
+        UICanvasContext ctx;
+        Draw( ctx, fx.Registry, fx.Canvas, dl, nullptr );
+        int n = 0;
+        for ( float y = 5.0f; y < kSide; y += 5.0f )
+            for ( float x = 5.0f; x < kSide; x += 5.0f )
+                n += CoveredByColor( dl, { x, y }, kLeaf ) ? 1 : 0;
+        return n;
+    };
+    const int both                                                    = coveredCount( f );
+    f.Layout( f.Panel ).ClipContents                                  = false;
+    const int innerAlone                                              = coveredCount( f );
+    f.Layout( f.Panel ).ClipContents                                  = true;
+    f.Registry.get<ECS::UILayoutComponent>( inner ).Data.ClipContents = false;
+    const int outerAlone                                              = coveredCount( f );
+
+    EXPECT_LT( both, innerAlone ) << "the outer clipper removed nothing, so nesting cannot be told from "
+                                     "replacement and this test would pass for the wrong reason";
+    EXPECT_LT( both, outerAlone ) << "the inner clipper removed nothing";
+}
+
+// THE EDITOR'S PICK IS THE THIRD ANSWER TO THE SAME QUESTION, and until Ю9 it did not ask about clipping at
+// all — not even about a straight one. A row scrolled out of its viewport was invisible, refused by the
+// renderer's election, and still selectable by clicking where it would have been.
+TEST( UICanvasContext, TheEditorsPickIsRefusedByAClipperTheWalkIsRefusedBy )
+{
+    XformFixture    f;
+    const glm::vec3 kChild( 0.9f, 0.2f, 0.7f );
+    f.Layout( f.Panel ).ClipContents = true;
+    f.Layout( f.Panel ).Rotation     = 45.0f;
+    const entt::entity child = AddChildPanel( f, f.Panel, { -200.0f, -200.0f }, { 500.0f, 400.0f }, kChild );
+
+    int disagreements = 0, hits = 0;
+    for ( float y = 5.0f; y < kSide; y += 9.0f )
+        for ( float x = 5.0f; x < kSide; x += 9.0f )
+        {
+            const bool picked  = Desert::UI::PickElement( f.Registry, f.Canvas, { x, y }, kViewport ) == child;
+            const bool elected = ElectsAt( f, child, { x, y } );
+            hits += picked ? 1 : 0;
+            if ( picked != elected && ++disagreements <= 5 )
+                ADD_FAILURE() << "at (" << x << "," << y << ") the editor pick says " << picked
+                              << " and the renderer's election says " << elected;
+        }
+    EXPECT_EQ( disagreements, 0 );
+    EXPECT_GT( hits, 100 ) << "the grid never hit the child, so the agreement is vacuous";
 }
 
 // TWO LEVELS, BOTH TURNED — and this one exists because the single-level test above did NOT catch the

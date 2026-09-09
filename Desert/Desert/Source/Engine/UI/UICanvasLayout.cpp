@@ -1,6 +1,7 @@
 #include "UICanvasLayout.hpp"
 
 #include <Engine/ECS/Components.hpp>
+#include <Engine/Graphic/Render2D/ClipRegion2D.hpp>
 #include <Engine/Graphic/Render2D/Transform2D.hpp>
 
 #include <algorithm>
@@ -234,7 +235,8 @@ namespace Desert::UI
         }
 
         void PickRecurse( entt::registry& reg, entt::entity e, const Rect& parent, float scale, const glm::vec2& p,
-                          entt::entity& hit, const glm::mat3& parentXform, const Rect* forcedRect = nullptr )
+                          entt::entity& hit, const glm::mat3& parentXform,
+                          const Graphic::Render2D::ClipRegion2D& clipRegion, const Rect* forcedRect = nullptr )
         {
             // An element that is not drawn cannot be clicked in the viewport either — the same rule the
             // renderer applies to the pointer, applied to the editor's WYSIWYG pick, because a marquee
@@ -273,22 +275,37 @@ namespace Desert::UI
 
             // Any element with a rect is selectable; later/deeper hits overwrite (matches draw order), so a
             // small button on top of a full-screen panel wins the pick instead of the panel behind it.
+            //
+            // AND AN ANCESTOR'S CLIP REFUSES IT, which this walk did not ask about at all until Ю9 — not
+            // even for a straight one. A row scrolled out of its viewport is not drawn, so clicking where it
+            // would have been selected an element the author cannot see, and the renderer's own election
+            // (UICanvasRenderer2D) refused the same point. Two answers to one question, and the header above
+            // says in as many words that these must not drift.
             if ( ( forcedRect || hasLayout ) && local.x >= rect.X && local.x <= rect.X + rect.W &&
-                 local.y >= rect.Y && local.y <= rect.Y + rect.H )
+                 local.y >= rect.Y && local.y <= rect.Y + rect.H &&
+                 Graphic::Render2D::ClipRegionContains( clipRegion, p ) )
                 hit = e;
 
             if ( reg.has<ECS::RelationshipComponent>( e ) )
             {
+                // The same narrowing the renderer performs, through the same function: ClipContents or a
+                // scroll view cuts the children to this element's rect, mapped by this element's transform.
+                Graphic::Render2D::ClipRegion2D childClip = clipRegion;
+                if ( ( hasLayout && reg.get<ECS::UILayoutComponent>( e ).Data.ClipContents ) ||
+                     reg.has<ECS::UIScrollViewComponent>( e ) )
+                    (void)Graphic::Render2D::IntersectClipRegion( childClip, xform, { rect.X, rect.Y },
+                                                                  { rect.X + rect.W, rect.Y + rect.H } );
+
                 std::vector<entt::entity> kids;
                 std::vector<Rect>         rects;
                 SolveGroupChildren( reg, e, rect, scale, kids, rects );
                 if ( !kids.empty() )
                     for ( std::size_t i = 0; i < kids.size(); ++i )
-                        PickRecurse( reg, kids[i], rect, scale, p, hit, xform, &rects[i] );
+                        PickRecurse( reg, kids[i], rect, scale, p, hit, xform, childClip, &rects[i] );
                 else
                     for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
                         if ( reg.valid( c ) )
-                            PickRecurse( reg, c, rect, scale, p, hit, xform );
+                            PickRecurse( reg, c, rect, scale, p, hit, xform, childClip );
             }
         }
 
@@ -355,11 +372,17 @@ namespace Desert::UI
         const Rect  childRoot = InsetRect( fit.GetValue().Root, cd.SafeArea.x * scale, cd.SafeArea.y * scale,
                                            cd.SafeArea.z * scale, cd.SafeArea.w * scale );
 
+        // The viewport is the outermost clip, the same one the renderer's walk starts from.
+        Graphic::Render2D::ClipRegion2D rootClip;
+        (void)Graphic::Render2D::IntersectClipRegion(
+             rootClip, glm::mat3( 1.0f ), { viewportPx.X, viewportPx.Y },
+             { viewportPx.X + viewportPx.W, viewportPx.Y + viewportPx.H } );
+
         entt::entity hit = entt::null;
         if ( reg.has<ECS::RelationshipComponent>( canvas ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvas ).Children )
                 if ( reg.valid( c ) )
-                    PickRecurse( reg, c, childRoot, scale, pointPx, hit, glm::mat3( 1.0f ) );
+                    PickRecurse( reg, c, childRoot, scale, pointPx, hit, glm::mat3( 1.0f ), rootClip );
         return hit;
     }
 
