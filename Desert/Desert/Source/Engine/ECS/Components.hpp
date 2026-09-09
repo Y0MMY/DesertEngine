@@ -1407,8 +1407,38 @@ namespace Desert::ECS
         UIScreenStackData Data;
     };
 
+    // WHERE ALONG THE ROUTE a listener fires. A press does not belong to one element: it belongs to the
+    // chain from the canvas down to whatever the pointer is over, and every element on that chain is
+    // entitled to see it. Until this existed the press was delivered to the elected element ALONE, so
+    // "this panel reacts to a click anywhere inside it" had to be spelled as a copy of the component on
+    // every leaf, and "this child handled it, the panel behind must not" could not be spelled at all.
+    //
+    // Bubble is target -> canvas and is what a handler almost always wants: the innermost thing that cares
+    // answers first. Tunnel is canvas -> target and is the only order in which an ancestor acts BEFORE its
+    // own children, which is what makes Tunnel + StopPropagation express "this panel takes every press
+    // inside it and its children never see one". (DOM calls Tunnel the capture phase; Slate calls it
+    // tunnelling and routes its Preview* handlers that way. Same thing.)
+    enum class UIEventPhase
+    {
+        Bubble, // fires on the way up: target first, canvas last
+        Tunnel  // fires on the way down: canvas first, target last -- before any Bubble listener
+    };
+
     // Pointer callbacks on any UI element. Each message is dispatched exactly like a button's action, so a
     // host that already handles UIButton actions handles these for free. Empty = that edge fires nothing.
+    //
+    // PRESS AND RELEASE ARE ROUTED along the ancestor chain (see UIEventPhase); ENTER AND EXIT ARE NOT, and
+    // that asymmetry is deliberate rather than an omission. Enter/Exit fire on the DIFFERENCE between the
+    // chain the pointer was on and the one it is on now, because the naive alternative -- bubble them like
+    // a press -- makes a parent that lights up on hover flicker every time the pointer crosses between two
+    // of its own children: the shared parent would receive Exit and then Enter although the pointer never
+    // left it. DOM draws the same line (mouseenter/mouseleave do not bubble, mouseover/mouseout do) and
+    // Slate walks the difference of the two widget paths for the same reason.
+    //
+    // A listener only fires on an element whose own UIHitTest is All. ChildrenOnly means the pointer does
+    // not see THIS element, so it must not be told about a press it is transparent to; Blocking means the
+    // element stops the pointer and responds to nothing. Both are the hit-test axis being obeyed by the
+    // routing rather than restated in it.
     struct UIPointerEventsData
     {
         REFLECT()
@@ -1424,6 +1454,18 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "On Release" ), Category( "UI Pointer Events" ) )
         std::string OnUpMessage;
+
+        // Which pass of the press/release route this listener answers on. No effect on Enter/Exit, which
+        // are not routed -- see the note above the struct.
+        PROPERTY( DisplayName( "Phase" ), Category( "UI Pointer Events" ) )
+        UIEventPhase Phase = UIEventPhase::Bubble;
+
+        // End the press/release route here: no further element on the chain hears this event, in either
+        // pass. Independent of whether this listener's own message is empty, so a full-screen scrim can
+        // swallow every press inside a modal without emitting anything -- and a scrim that DOES emit is
+        // click-outside-to-close, which UIHitTest::Blocking cannot be, because Blocking responds to nothing.
+        PROPERTY( DisplayName( "Stop Propagation" ), Category( "UI Pointer Events" ) )
+        bool StopPropagation = false;
     };
     struct UIPointerEventsComponent
     {

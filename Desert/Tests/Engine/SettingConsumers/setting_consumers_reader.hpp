@@ -445,6 +445,16 @@ namespace Desert::Tests::ConsumerText
         for ( std::size_t at : WordPositions( s, anchor ) )
         {
             std::size_t i = SkipSpace( s, at + anchor.size() );
+
+            // A POINTER TO MEMBER, `&ECS::UIPointerEventsData::OnDownMessage`, names the field on the type
+            // explicitly, so it is a STRICTER anchor than `x.Field` and not a looser one: the type and the
+            // field have to stand next to each other for it to match at all. It is here because
+            // UICanvasRenderer2D routes press and release through one function that takes the member as a
+            // parameter, and without this shape two live settings read as dead.
+            if ( i + 1 < s.size() && s[i] == ':' && s[i + 1] == ':' &&
+                 IdentAt( s, SkipSpace( s, i + 2 ) ) == field )
+                return true;
+
             if ( i < s.size() && s[i] == '>' )
                 i = SkipSpace( s, i + 1 );
             if ( i < s.size() && s[i] == '(' )
