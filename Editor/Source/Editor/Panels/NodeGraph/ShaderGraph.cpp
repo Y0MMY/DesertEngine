@@ -1,5 +1,7 @@
 #include "ShaderGraph.hpp"
 
+#include <Engine/Core/ShaderCompiler/ShaderGraphMedium.hpp>
+
 #include <rflcpp/rfl/json.hpp>
 #include <rflcpp/rfl/DefaultIfMissing.hpp>
 
@@ -29,26 +31,27 @@ namespace Desert::Editor::ShaderGraph
     static constexpr unsigned POST    = DomainBit( Domain::PostProcess );
     static constexpr unsigned VOLUME  = DomainBit( Domain::Volume );
 
-    // Nodes that are valid everywhere EXCEPT the cloud medium. The Volume domain has no UVs and no scene
-    // colour — there is neither in a volume — and no exposed properties or textures of its own.
+    // Nodes that are valid everywhere EXCEPT the cloud medium. What a volume has none of is UVs and scene
+    // colour — there is a `v_UV` in neither a compute march nor a participating medium, and no rendered
+    // scene colour to read back.
     //
-    // THE REASON FOR THAT LAST ONE CHANGED, AND THE OLD ONE IS NOW MEASURABLY WRONG. It read: "a graph
-    // that declared its own bindings would have to pick numbers that are free in all four consumers, and
-    // a collision between two GLSL declarations at one binding is silent". The collision is not silent
-    // any more (Г17 refuses it by name at reflection, in all four), and the numbers ARE free: О1-G
-    // compiled a medium declaring its own storage buffer AND its own sampler in the reserved window into
-    // each of the four real programs, and both came back at the numbers they asked for with nothing else
-    // displaced (Desert/Tests/Engine/ShaderCacheKey). The binding was never the expensive half.
+    // ITS THIRD MEMBER USED TO BE "no exposed properties or textures of its own", AND THAT IS GONE. Two
+    // successive reasons were given for it and both were retired by measurement: first "a collision
+    // between two GLSL declarations at one binding is silent", which Г17 had already made false (the
+    // engine refuses it by name at reflection, in all four consumers); then "a cloud material has no place
+    // to keep a value whose name comes from a graph", which is what О1-G-2 built — the medium carries its
+    // own Properties block, its values are filed in the `.demat` under Core::kCloudMediumOverridePrefix so
+    // they can never be read as the shipped schema's, and they reach all four consumers through one
+    // storage buffer and up to Core::kCloudMediumMaxTextures samplers in the reserved window.
     //
-    // What is missing is the OTHER end of such a parameter: a cloud material has no place to keep a value
-    // whose name comes from a graph. Its look is a TYPED struct (Graphic::CloudMaterialValues) mirrored
-    // field for field against the shipped Properties block and pinned by CloudMaterialSchema, and a
-    // per-graph name/value pair is not expressible in it; nor is there a buffer reaching the four
-    // consumers to carry one, nor a panel row to author it. That is the task, and it is a material task
-    // rather than a shader one — see Docs/Clouds/O1_DESIGN.md §12.3 and §12.7.
-    //
-    // Constants, maths and the cloud sample are what a medium is written from until then.
+    // TextureSample is still not here, and that is a scope fact rather than a leftover: it samples at
+    // `v_UV`. A medium samples at a place the march hands it, so it has a node of its own (MediumTexture)
+    // whose coordinates are two floats the graph computes.
     static constexpr unsigned NOT_VOLUME = CORE & ~VOLUME;
+
+    // The Category every medium property is emitted under, so the material window shows them as one group
+    // under a heading that says where they came from rather than mixed into the shipped schema's rows.
+    static constexpr const char* kMediumCategory = "Medium";
 
     // The catalogue is a TABLE and is kept as one: one node per visual row, pins grouped on their own
     // line. Left to itself clang-format explodes every entry into eleven lines of one field each,
@@ -145,7 +148,22 @@ namespace Desert::Editor::ShaderGraph
             { "ColorParam", "Color Param", RGBA( 160, 80, 90, 255 ), {},
               { { "Color", ValueType::Color } }, /*param*/ true, /*color*/ true, false, NOT_VOLUME },
             { "FloatParam", "Float Param", RGBA( 90, 140, 90, 255 ), {},
-              { { "Value", ValueType::Float } }, /*param*/ true, false, /*float*/ true, NOT_VOLUME },
+              { { "Value", ValueType::Float } }, /*param*/ true, false, /*float*/ true, CORE },
+            // A Vec3 AND NOT A COLOR PARAM, because a vec4 has nowhere to go in this domain: the medium's
+            // three-component outputs are an albedo and an emission per kilometre, and the only vec4 sink
+            // in the palette is none at all. A Color Param offered here would be a node that can never be
+            // wired to anything — a dead knob, refused in the same breath as a stub. It is emitted as the
+            // DSL's `Color3`, so the material window still shows it as a colour swatch.
+            { "Vec3Param", "Vector 3 Param", RGBA( 160, 80, 90, 255 ), {},
+              { { "Vector", ValueType::Vec3 } }, /*param*/ true, /*color*/ true, false, VOLUME },
+            // THE MEDIUM'S OWN IMAGE, sampled where the graph says rather than at a `v_UV` a volume does
+            // not have. Two floats and not a Vec2 because the Volume palette's arithmetic is float and
+            // vec3: a coordinate is almost always built out of Split (Vector 3) of the sample position,
+            // and a Vec2 pin would need a make-vec2 node whose only purpose is to feed this one.
+            { "MediumTexture", "Medium Texture", RGBA( 70, 110, 160, 255 ),
+              { { "U", ValueType::Float }, { "V", ValueType::Float } },
+              { { "RGBA", ValueType::Color }, { "R", ValueType::Float } },
+              /*param*/ true, false, false, VOLUME },
             { "ColorConst", "Color", RGBA( 120, 70, 80, 255 ), {},
               { { "Color", ValueType::Color } }, false, /*color*/ true, false, NOT_VOLUME },
             { "FloatConst", "Float", RGBA( 70, 110, 70, 255 ), {},
@@ -367,6 +385,20 @@ namespace Desert::Editor::ShaderGraph
             // pin instead.
             std::string currentOutput;
 
+            // EVERY PROPERTY NODE THAT ACTUALLY REACHED THE OUTPUT, and it is collected rather than
+            // assumed for a reason with two halves.
+            //
+            // The contract half: a property no function reads is a dead setting — a row in the material
+            // window that moves nothing. Emitting only what is reached makes that unexpressible instead of
+            // reviewable.
+            //
+            // The mechanical half, which is the one that would have cost a day: a Volume medium's
+            // declarations are BOUND from C++ by number, and this backend writes a descriptor for every
+            // binding the caller names. A block the emitter declared and no function read is eliminated
+            // from the SPIR-V, so the write would land on a binding the layout does not have — a
+            // validation error at best. Declared == statically referenced, by construction.
+            std::unordered_set<const Node*> touchedParams;
+
             explicit Compiler( const Document& d ) : doc( d )
             {
                 for ( const auto& node : doc.Nodes )
@@ -409,9 +441,11 @@ namespace Desert::Editor::ShaderGraph
                 if ( !error.empty() )
                     return fallback;
 
-                // Multi-output nodes: pick the component for the linked pin.
-                if ( src->Kind == "TextureSample" && src->Outputs.size() == 2 &&
-                     it->second == src->Outputs[1].Id )
+                // Multi-output nodes: pick the component for the linked pin. Both texture nodes have the
+                // same RGBA/R pair — the difference between them is where the coordinate comes from, not
+                // what a sample is.
+                if ( ( src->Kind == "TextureSample" || src->Kind == "MediumTexture" ) &&
+                     src->Outputs.size() == 2 && it->second == src->Outputs[1].Id )
                     return var + ".r";
 
                 // The Cloud Sample node hands out one struct member per output pin, and Split (Vector 3)
@@ -470,10 +504,37 @@ namespace Desert::Editor::ShaderGraph
                     const std::string uv = InputExpr( node, 0, "v_UV" );
                     decl = std::format( "vec4 {} = texture( {}, {} );", var, node.ParamName, uv );
                 }
+                else if ( node.Kind == "MediumTexture" )
+                {
+                    touchedParams.insert( &node );
+                    // textureLod AND NOT texture, AND IT IS NOT A STYLE CHOICE. All four programs a medium
+                    // is compiled into are COMPUTE, and an implicit-LOD fetch needs derivatives no compute
+                    // stage has — glslang refuses it, so `texture()` here would be a shader that will not
+                    // compile emitted from a canvas the artist drew correctly. Level 0 because a volume
+                    // sample has no screen-space footprint to derive a level from in the first place.
+                    decl = std::format( "vec4 {} = textureLod( {}, vec2( {}, {} ), 0.0 );", var, node.ParamName,
+                                        InputExpr( node, 0, "0.0" ), InputExpr( node, 1, "0.0" ) );
+                }
+                else if ( node.Kind == "Vec3Param" )
+                {
+                    touchedParams.insert( &node );
+                    decl = std::format( "vec3 {} = {}.{}.xyz;", var, ::Desert::Core::kCloudMediumInstanceName,
+                                        node.ParamName );
+                }
                 else if ( node.Kind == "ColorParam" || node.Kind == "FloatParam" )
                 {
+                    touchedParams.insert( &node );
                     const char* type = node.Kind == "ColorParam" ? "vec4" : "float";
-                    decl = std::format( "{} {} = u_Material.{};", type, var, node.ParamName );
+                    // TWO TRANSPORTS FOR ONE NODE, because the two domains keep their values in different
+                    // places. A surface or post-process graph reads its own row of the shared `Materials[]`
+                    // buffer, which the DSL's `Binding(n)` sugar declares and a push constant indexes. A
+                    // medium is compiled into four COMPUTE programs that have neither, so it declares one
+                    // block of its own in the reserved window — and every field of that block is a vec4,
+                    // which is why a float reads `.x` here.
+                    decl = doc.DomainEnum() == Domain::Volume
+                                ? std::format( "{} {} = {}.{}.x;", type, var,
+                                               ::Desert::Core::kCloudMediumInstanceName, node.ParamName )
+                                : std::format( "{} {} = u_Material.{};", type, var, node.ParamName );
                 }
                 else if ( node.Kind == "CloudSample" )
                     decl = std::format( "CloudGraphSample {} = CloudGraphSampleAt( params, field, "
@@ -839,8 +900,11 @@ namespace Desert::Editor::ShaderGraph
         //
         // A PROGRAM FRAGMENT AND NOT A PROGRAM. The medium is compiled INTO the four shipped programs
         // that sample the cloud field, as the substitution for one of their includes, so what is emitted
-        // here is a `Medium { ... }` block: no stages, no State, no vertex contract, and no Properties of
-        // its own (see NOT_VOLUME at the catalogue for why a graph declares no bindings here).
+        // here is a `Medium { ... }` block: no stages, no State and no vertex contract. It MAY carry a
+        // Properties block — the medium's own parameters and images — and that block is pure schema: the
+        // DSL's `Binding()/TextureBinding()` sugar declares a `Materials[]` row indexed by a push constant
+        // no compute program here has, so the declarations are written into the medium body below instead,
+        // at the numbers Core::kCloudMedium*Binding reserve.
         //
         // FIVE FUNCTIONS, EACH COMPILED SEPARATELY. Every output pin gets its own Compiler, so a node is
         // emitted only into the function that actually reads it — the alternative, one body shared by
@@ -874,14 +938,12 @@ namespace Desert::Editor::ShaderGraph
             };
             // clang-format on
 
-            std::ostringstream out;
-            out << "// GENERATED by the Desert Shader Graph editor — edit the .dgraph, not this file.\n";
-            out << "Shader \"" << doc.Name << "\"\n{\n    Domain Volume\n\n";
-            out << "    Medium\n    {\n";
-            // The shipped bodies, so every fallback above and every Default node below resolves. It is an
-            // ordinary include of an ordinary header: this text is substituted for
-            // Generated/CloudMedium.glslh, and Common/CloudMediumDefault.glslh is never substituted.
-            out << "        #include <Common/CloudMediumDefault.glslh>\n\n";
+            // THE FIVE BODIES FIRST, THE DECLARATIONS AFTER, and the order is the mechanism rather than a
+            // tidiness. Which properties this medium HAS is the set of property nodes the five functions
+            // actually reached (see Compiler::touchedParams), so the bodies have to exist before the block
+            // that declares them can be written.
+            std::ostringstream              bodies;
+            std::unordered_set<const Node*> touched;
 
             for ( const auto& function : kFunctions )
             {
@@ -904,12 +966,115 @@ namespace Desert::Editor::ShaderGraph
                 if ( !compiler.error.empty() )
                     return Common::MakeError<std::string>( compiler.error );
 
-                out << "        " << function.Signature << "\n        {\n";
-                out << compiler.body.str();
-                out << std::format( "            return {};\n", expression );
-                out << "        }\n\n";
+                touched.insert( compiler.touchedParams.begin(), compiler.touchedParams.end() );
+
+                bodies << "        " << function.Signature << "\n        {\n";
+                bodies << compiler.body.str();
+                bodies << std::format( "            return {};\n", expression );
+                bodies << "        }\n\n";
             }
 
+            // IN DOCUMENT ORDER, NOT IN THE ORDER THE FIVE TRAVERSALS HAPPENED TO REACH THEM. The order
+            // here IS the layout: the runtime packs one vec4 per numeric property and binds one sampler
+            // per image, both in the order the Properties block declares. A traversal order would make the
+            // packing depend on which output pin the artist wired first.
+            std::vector<const Node*>        mediumValues;   // Color and Float properties, this order
+            std::vector<const Node*>        mediumTextures; // Texture2D properties
+            std::unordered_set<std::string> seenMedium;
+            for ( const auto& node : doc.Nodes )
+            {
+                if ( !touched.count( &node ) )
+                    continue;
+                if ( !IsValidIdentifier( node.ParamName ) )
+                    return Common::MakeError<std::string>(
+                         std::format( "'{}' is not a valid parameter name", node.ParamName ) );
+                if ( !seenMedium.insert( node.ParamName ).second )
+                    continue; // same name used twice = one property, as in every other domain
+                if ( node.Kind == "MediumTexture" )
+                    mediumTextures.push_back( &node );
+                else
+                    mediumValues.push_back( &node );
+            }
+
+            if ( mediumValues.size() > ::Desert::Core::kCloudMediumMaxValues )
+                return Common::MakeError<std::string>( std::format(
+                     "this medium declares {} exposed values and a cloud medium may declare at most {}. "
+                     "The buffer that carries them is allocated once, before any medium exists, because a "
+                     "device allocation inside the frame has nowhere to report a failure",
+                     mediumValues.size(), ::Desert::Core::kCloudMediumMaxValues ) );
+
+            if ( mediumTextures.size() > ::Desert::Core::kCloudMediumMaxTextures )
+                return Common::MakeError<std::string>( std::format(
+                     "this medium declares {} Medium Texture properties and a cloud medium may declare at "
+                     "most {}. Every one of them is a descriptor that all four programs sampling the cloud "
+                     "field have to bind on every frame of every scene, with or without clouds in it",
+                     mediumTextures.size(), ::Desert::Core::kCloudMediumMaxTextures ) );
+
+            std::ostringstream out;
+            out << "// GENERATED by the Desert Shader Graph editor — edit the .dgraph, not this file.\n";
+            out << "Shader \"" << doc.Name << "\"\n{\n    Domain Volume\n\n";
+
+            // THE SCHEMA, AND ONLY THE SCHEMA. No Binding()/TextureBinding(): the sugar those options turn
+            // on declares a row of the shared `Materials[]` buffer addressed through a push constant, which
+            // is the mesh path's transport and does not exist in any of the four compute programs a medium
+            // is compiled into. What this block is FOR is being read back — by the material window, which
+            // draws a row per entry, and by Graphic::BuildCloudMediumValues, which packs the buffer from it.
+            if ( !mediumValues.empty() || !mediumTextures.empty() )
+            {
+                out << "    Properties\n    {\n";
+                // Timing(Immediate) ON EVERY ROW, and it is a fact rather than a decoration: a medium is
+                // GLSL the march runs per sample, so nothing declared here can be an input to the CPU bake
+                // — the one thing in this material that costs seconds. The material window draws that
+                // claim, and the Volume domain refuses a `Timing(Rebake)` property to a graph by name.
+                for ( const auto* n : mediumValues )
+                {
+                    if ( n->Kind == "Vec3Param" )
+                        out << std::format( "        Color3    {} (\"{}\", Category(\"{}\"), Timing(Immediate)) = "
+                                            "({}, {}, {})\n",
+                                            n->ParamName, n->ParamName, kMediumCategory,
+                                            Compiler::Lit( n->Value[0] ), Compiler::Lit( n->Value[1] ),
+                                            Compiler::Lit( n->Value[2] ) );
+                    else
+                        out << std::format(
+                             "        Float     {} (\"{}\", Category(\"{}\"), Timing(Immediate)) = {}\n",
+                             n->ParamName, n->ParamName, kMediumCategory, Compiler::Lit( n->Value[0] ) );
+                }
+                for ( const auto* n : mediumTextures )
+                    out << std::format( "        Texture2D {} (\"{}\", Category(\"{}\"), Timing(Immediate))\n",
+                                        n->ParamName, n->ParamName, kMediumCategory );
+                out << "    }\n\n";
+            }
+
+            out << "    Medium\n    {\n";
+            // The shipped bodies, so every fallback above and every Default node below resolves. It is an
+            // ordinary include of an ordinary header: this text is substituted for
+            // Generated/CloudMedium.glslh, and Common/CloudMediumDefault.glslh is never substituted.
+            out << "        #include <Common/CloudMediumDefault.glslh>\n\n";
+
+            // EVERY FIELD IS A vec4, INCLUDING THE FLOATS. std430 would pad a float to a 16-byte slot
+            // anyway, so nothing is spent — and what is bought is that the packing rule on the C++ side is
+            // "one vec4 per property, in schema order" with no padding arithmetic to mirror. A padding rule
+            // written on both sides of a seam is exactly the mirror this subsystem turned grey once.
+            if ( !mediumValues.empty() )
+            {
+                out << std::format( "        struct {}\n        {{\n", ::Desert::Core::kCloudMediumStructName );
+                for ( const auto* n : mediumValues )
+                    out << std::format( "            vec4 {};\n", n->ParamName );
+                out << "        };\n";
+                out << std::format( "        layout( std430, binding = {} ) readonly buffer {}\n"
+                                    "        {{\n            {} {};\n        }};\n\n",
+                                    ::Desert::Core::kCloudMediumParamsBinding,
+                                    ::Desert::Core::kCloudMediumBlockName, ::Desert::Core::kCloudMediumStructName,
+                                    ::Desert::Core::kCloudMediumInstanceName );
+            }
+            for ( std::size_t i = 0; i < mediumTextures.size(); ++i )
+                out << std::format( "        layout( binding = {} ) uniform sampler2D {};\n",
+                                    ::Desert::Core::kCloudMediumTextureFirst + static_cast<uint32_t>( i ),
+                                    mediumTextures[i]->ParamName );
+            if ( !mediumTextures.empty() )
+                out << "\n";
+
+            out << bodies.str();
             out << "    }\n}\n";
             return Common::MakeSuccess( out.str() );
         }

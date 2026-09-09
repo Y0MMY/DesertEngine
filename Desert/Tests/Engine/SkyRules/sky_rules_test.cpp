@@ -707,7 +707,7 @@ namespace
                                    const glm::vec2& regionOrigin, bool skyOcclusionValid = false,
                                    uint32_t                                    shapeGeneration = 0u,
                                    const Desert::Graphic::CloudMaterialValues& material        = {},
-                                   uint64_t                                    mediumVariant   = 0ull )
+                                   uint64_t mediumVariant = 0ull, uint64_t mediumValues = 0ull )
     {
         const CloudTypeShape shape      = CloudTestShape();
         const auto           atmosphere = CloudTestAtmosphere();
@@ -715,7 +715,7 @@ namespace
         const CloudGpuPayload payload = PackCloudParams( data, material, &shape, 1u, atmosphere, wind,
                                                          CloudRegionBinding{ regionOrigin, 30.0f } );
         return CloudEnvironmentFingerprint( payload, /*marched=*/true, skyOcclusionValid, shapeGeneration,
-                                            mediumVariant );
+                                            mediumVariant, mediumValues );
     }
 } // namespace
 
@@ -724,8 +724,8 @@ TEST( CloudEnvironmentCadence, NoCloudsIsZeroAndCloudsNeverAre )
     // The two states have to be tellable apart, or deleting the layer would leave its overcast baked into
     // the scene's ambient with nothing to trigger a rebake.
     const CloudGpuPayload empty{};
-    EXPECT_EQ( CloudEnvironmentFingerprint( empty, /*marched=*/false, false, 0u, 0ull ), 0ull );
-    EXPECT_EQ( CloudEnvironmentFingerprint( empty, /*marched=*/false, true, 7u, 0xABCDull ), 0ull );
+    EXPECT_EQ( CloudEnvironmentFingerprint( empty, /*marched=*/false, false, 0u, 0ull, 0ull ), 0ull );
+    EXPECT_EQ( CloudEnvironmentFingerprint( empty, /*marched=*/false, true, 7u, 0xABCDull, 0xBEEFull ), 0ull );
 
     Desert::ECS::VolumetricCloudData data;
     EXPECT_NE( CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ) ), 0ull );
@@ -757,6 +757,37 @@ TEST( CloudEnvironmentCadence, TheAuthoredMediumIsVisibleAndItIsInNOTHINGELSEHER
     EXPECT_EQ( shipped,
                CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ), false, 0u, material, 0ull ) )
          << "the fingerprint is a function of the medium's content, not of how many have been seen";
+}
+
+TEST( CloudEnvironmentCadence, TheAuthoredMediumsOWNVALUESAreVisibleAndAreASeparateAxisFromItsCode )
+{
+    // О1-G-2, and it is the SAME defect one link further along. A medium's code being in the fingerprint
+    // is not enough once that code reads values a `.demat` supplies: the same graph with a different tint
+    // is a different sky, and every byte of the packed block is identical for both, because those values
+    // belong to a schema the graph author wrote and travel in a buffer of their own.
+    Desert::ECS::VolumetricCloudData     data;
+    Desert::Graphic::CloudMaterialValues material;
+
+    const auto fp = [&]( uint64_t code, uint64_t values ) {
+        return CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ), false, 0u, material, code,
+                                     values );
+    };
+
+    EXPECT_NE( fp( 0x51A7ull, 0ull ), fp( 0x51A7ull, 0x1234ull ) )
+         << "authoring a medium's own parameter left the environment fingerprint where it was, so the "
+            "panorama the scene is LIT by would keep showing the value before it.";
+    EXPECT_NE( fp( 0x51A7ull, 0x1234ull ), fp( 0x51A7ull, 0x1235ull ) )
+         << "two different sets of medium values share one fingerprint";
+
+    // AND THEY ARE TWO INPUTS, NOT ONE. Folded together by the caller — an XOR, which is the obvious
+    // thing to reach for — two equal hashes would cancel to zero and a medium change would be invisible
+    // exactly when its code and its values happened to hash alike. The function takes both and mixes
+    // them in turn, so no pair can annihilate.
+    EXPECT_NE( fp( 0xABCDull, 0xABCDull ), fp( 0ull, 0ull ) )
+         << "the medium's code and its values cancelled each other out; they are not one input.";
+    EXPECT_NE( fp( 0xABCDull, 0ull ), fp( 0ull, 0xABCDull ) )
+         << "swapping the medium's code hash and its value hash gave the same answer, so the two axes are "
+            "not distinguishable.";
 }
 
 TEST( CloudEnvironmentCadence, WindAndTheRegionOriginAreDeliberatelyInvisible )

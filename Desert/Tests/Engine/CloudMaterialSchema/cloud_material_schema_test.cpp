@@ -19,6 +19,7 @@
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
 #include <Engine/Graphic/Clouds/CloudMaterialValues.hpp>
+#include <Engine/Graphic/Clouds/CloudMediumValues.hpp>
 
 #include <gtest/gtest.h>
 
@@ -473,6 +474,153 @@ TEST( CloudMaterialSchema, EveryParameterDeclaresWhenItsEditBecomesVisible )
     // itself. It is Immediate and CloudMaterialTiming MEASURES that it is: a medium is GPU code compiled
     // into the march, so no amount of authoring it can move an input of a bake that has already run.
     EXPECT_EQ( immediate, 15u );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+// THE SECOND SCHEMA — the authored medium's own properties, resolved out of the SAME `.demat`
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// О1-G-2. A cloud material now answers to two schemas: the shipped one above, mirrored field for field
+// onto CloudMaterialValues, and whatever Volume graph its Medium slot names, whose property names were
+// invented by the artist who drew it. Both are resolved out of one flat name -> value map.
+//
+// The load-bearing property is that the two CANNOT be read as each other, and the assertions below are
+// that relation rather than a check of either resolver on its own — which is the shape this project has
+// paid for repeatedly: both ends correct, the link between them dropping something.
+
+namespace
+{
+    ShaderParam MediumValue( const char* name, const glm::vec4& defaultValue )
+    {
+        ShaderParam p;
+        p.Name    = name;
+        p.Type    = ::Desert::Core::Formats::ShaderValueType::Float;
+        p.Default = defaultValue;
+        p.Timing  = ::Desert::Core::Formats::ShaderParamTiming::Immediate;
+        return p;
+    }
+
+    ShaderParam MediumImage( const char* name )
+    {
+        ShaderParam p;
+        p.Name      = name;
+        p.IsTexture = true;
+        p.Timing    = ::Desert::Core::Formats::ShaderParamTiming::Immediate;
+        return p;
+    }
+} // namespace
+
+TEST( CloudMediumValues, TheSchemaSuppliesDefaultsAndTheMaterialOverwritesByPrefixedName )
+{
+    const std::vector<ShaderParam> schema = { MediumValue( "Warmth", { 0.25f, 0, 0, 0 } ),
+                                              MediumValue( "Bite", { 0.5f, 0, 0, 0 } ), MediumImage( "Streaks" ) };
+
+    Desert::Graphic::MaterialOverrides overrides;
+    overrides.Params.push_back( { Desert::Core::CloudMediumOverrideKey( "Bite" ), { 0.75f, 0, 0, 0 } } );
+    overrides.Textures.push_back( { Desert::Core::CloudMediumOverrideKey( "Streaks" ), 4242ull } );
+
+    const auto values = Desert::Graphic::BuildCloudMediumValues( schema, overrides );
+
+    ASSERT_EQ( values.Params.size(), 2u );
+    EXPECT_FLOAT_EQ( values.Params[0].x, 0.25f ) << "an unauthored property must keep the value the graph "
+                                                    "author typed into the node";
+    EXPECT_FLOAT_EQ( values.Params[1].x, 0.75f );
+    ASSERT_EQ( values.Textures.size(), 1u );
+    EXPECT_EQ( static_cast<uint64_t>( values.Textures[0] ), 4242ull );
+}
+
+TEST( CloudMediumValues, TheOrderOfTheSchemaISTheLayout )
+{
+    // The packed vec4s are field 0..n of the medium's std430 block and the handles are
+    // Core::kCloudMediumTextureFirst + i. Nothing on either side counts or sorts, so a resolver that
+    // dropped a property or reordered one would rebind every slot after it with a perfectly valid
+    // descriptor set and no diagnostic anywhere.
+    const std::vector<ShaderParam> schema = { MediumValue( "A", { 1, 0, 0, 0 } ), MediumImage( "X" ),
+                                              MediumValue( "B", { 2, 0, 0, 0 } ), MediumImage( "Y" ),
+                                              MediumValue( "C", { 3, 0, 0, 0 } ) };
+
+    Desert::Graphic::MaterialOverrides overrides;
+    overrides.Textures.push_back( { Desert::Core::CloudMediumOverrideKey( "Y" ), 9ull } );
+
+    const auto values = Desert::Graphic::BuildCloudMediumValues( schema, overrides );
+
+    ASSERT_EQ( values.Params.size(), 3u );
+    EXPECT_FLOAT_EQ( values.Params[0].x, 1.0f );
+    EXPECT_FLOAT_EQ( values.Params[1].x, 2.0f );
+    EXPECT_FLOAT_EQ( values.Params[2].x, 3.0f );
+
+    ASSERT_EQ( values.Textures.size(), 2u );
+    EXPECT_EQ( static_cast<uint64_t>( values.Textures[0] ), 0ull )
+         << "an unassigned image slot is still a slot: dropping it would shift every one after it, and the "
+            "four consumers bind by index";
+    EXPECT_EQ( static_cast<uint64_t>( values.Textures[1] ), 9ull );
+}
+
+TEST( CloudMediumValues, NeitherResolverCanEverSeeTheOtherSchemasKeys )
+{
+    // THE RELATION, IN BOTH DIRECTIONS, OVER THE REAL SHIPPED SCHEMA.
+    //
+    // Left to right: a medium key handed to the shipped resolver must change nothing — including when the
+    // medium's property is spelled exactly like a shipped one, which is the case that would otherwise
+    // retune the layer's CPU bake from a graph node.
+    //
+    // Right to left: a shipped key handed to the medium resolver must change nothing.
+    Desert::Graphic::MaterialOverrides mediumOnly;
+    for ( const ShaderParam& p : Schema().Params )
+        if ( !p.IsAssetRef() && !p.IsTexture )
+            mediumOnly.Params.push_back(
+                 { Desert::Core::CloudMediumOverrideKey( p.Name ), { 12345.0f, 0, 0, 0 } } );
+    ASSERT_FALSE( mediumOnly.Params.empty() );
+
+    // SCANNED FOR THE SENTINEL RATHER THAN COMPARED, and that is not fussiness: CloudMaterialValues is a
+    // struct with padding, and a memcmp of two of them would compare bytes no member owns. A float that
+    // exists nowhere in the schema's own defaults is looked for at every offset instead, which is
+    // padding-immune and says exactly what it means.
+    const CloudMaterialValues attacked = BuildCloudMaterialValues( &Schema(), mediumOnly );
+    const auto*               bytes    = reinterpret_cast<const unsigned char*>( &attacked );
+    for ( std::size_t at = 0; at + sizeof( float ) <= sizeof( attacked ); ++at )
+    {
+        float probe = 0.0f;
+        std::memcpy( &probe, bytes + at, sizeof( probe ) );
+        EXPECT_NE( probe, 12345.0f )
+             << "a medium-keyed override reached Graphic::CloudMaterialValues at byte offset " << at
+             << ". Both schemas share one map in the `.demat`, and the prefix is the only thing keeping "
+                "them apart.";
+    }
+
+    const std::vector<ShaderParam>     mediumSchema = { MediumValue( "Coverage", { 0.5f, 0, 0, 0 } ) };
+    Desert::Graphic::MaterialOverrides shippedOnly;
+    shippedOnly.Params.push_back( { "Coverage", { 0.99f, 0, 0, 0 } } );
+    const auto values = Desert::Graphic::BuildCloudMediumValues( mediumSchema, shippedOnly );
+    ASSERT_EQ( values.Params.size(), 1u );
+    EXPECT_FLOAT_EQ( values.Params[0].x, 0.5f )
+         << "a SHIPPED property reached the medium's own block, which would make the artist's node follow "
+            "a slider that is not its own.";
+}
+
+TEST( CloudMediumValues, TheFingerprintIsZeroExactlyWhenTheMediumContributesNothing )
+{
+    // The environment bake is rebuilt on this number and costs three quarters of a second. Zero has to
+    // mean "nothing to see" and nothing else, or a medium whose values happen to hash to zero would stop
+    // the world's light following the sky — the exact shape the variant hash was added to close, one link
+    // further along.
+    EXPECT_EQ( Desert::Graphic::CloudMediumValuesFingerprint( {} ), 0ull );
+
+    Desert::Graphic::CloudMediumValues a;
+    a.Params.push_back( { 1.0f, 0.0f, 0.0f, 0.0f } );
+    Desert::Graphic::CloudMediumValues b;
+    b.Params.push_back( { 1.0f, 0.0f, 0.0f, 1e-6f } );
+
+    EXPECT_NE( Desert::Graphic::CloudMediumValuesFingerprint( a ), 0ull );
+    EXPECT_NE( Desert::Graphic::CloudMediumValuesFingerprint( a ),
+               Desert::Graphic::CloudMediumValuesFingerprint( b ) );
+
+    // An IMAGE moves it too. It is the half a byte-hash of the values alone would miss, and a swapped
+    // texture is as much a different sky as a swapped number.
+    Desert::Graphic::CloudMediumValues withImage = a;
+    withImage.Textures.push_back( Desert::Assets::AssetHandle( 7ull ) );
+    EXPECT_NE( Desert::Graphic::CloudMediumValuesFingerprint( a ),
+               Desert::Graphic::CloudMediumValuesFingerprint( withImage ) );
 }
 
 int main( int argc, char** argv )

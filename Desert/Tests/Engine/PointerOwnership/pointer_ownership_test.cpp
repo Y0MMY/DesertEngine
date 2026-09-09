@@ -205,11 +205,20 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   than a pair of names in an `if`: the suite that derives the set from the shader tree needs
     //   something to compare against. Nothing else of O1-F is a pointer — the flag itself is a float on a
     //   GLSL struct, which no C++ census can see.
-    EXPECT_EQ( CountOf( Form::Raw ), 339 );
-    EXPECT_EQ( CountOf( Form::Shared ), 320 );
+    //
+    //   807 -> 815 with O1-G-2, the authored medium's own parameters and images. FIVE RAW, and every one
+    //   of them is a borrowed image or buffer crossing a seam that already existed: the medium's images on
+    //   the cloud renderer (m_MediumImages) and on the bake payload, its parameter buffer and its images on
+    //   the bake's argument pack, and the Compiler's set of node addresses inside the graph emitter. THREE
+    //   SHARED, which are the parameter buffer itself in the three places a non-persistent storage buffer
+    //   has to exist separately — the march, the shadow map and the sky's own bake — for the reason the
+    //   layer's packed block is already tripled: one buffer holds one set of bytes per (frame x renderer
+    //   slot), not per pass.
+    EXPECT_EQ( CountOf( Form::Raw ), 344 );
+    EXPECT_EQ( CountOf( Form::Shared ), 323 );
     EXPECT_EQ( CountOf( Form::Unique ), 110 );
     EXPECT_EQ( CountOf( Form::Weak ), 38 );
-    EXPECT_EQ( (int)Members().size(), 807 )
+    EXPECT_EQ( (int)Members().size(), 815 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }
@@ -420,7 +429,7 @@ TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
     // `shared_ptr` here is a false impression of shared ownership, and the register's job is to make
     // the true owner findable instead of mass-replacing them for uniformity -- churn that would hide
     // the seven real findings in a diff of two hundred files.
-    EXPECT_EQ( CountOf( Form::Shared ), 320 );
+    EXPECT_EQ( CountOf( Form::Shared ), 323 );
     EXPECT_GT( CountOf( Form::Shared ), CountOf( Form::Unique ) + CountOf( Form::Weak ) );
 }
 

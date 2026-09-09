@@ -1,10 +1,14 @@
 #pragma once
 
+#include <Engine/Core/ShaderCompiler/ShaderGraphMedium.hpp>
 #include <Engine/Core/ShaderCompiler/ShaderVariant.hpp>
 #include <Engine/Graphic/Clouds/CloudAuthoredPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 
+#include <glm/glm.hpp>
+
 #include <cstdint>
+#include <vector>
 
 namespace Desert::ShaderResources
 {
@@ -106,6 +110,20 @@ namespace Desert::Graphic
         /// than the one on screen: the same defect shape as the grey clouds, arriving through the IBL.
         Core::ShaderVariant Medium;
 
+        /// The authored medium's OWN parameter block, already packed — one vec4 per property of ITS
+        /// schema, in that schema's order (Engine/Graphic/Clouds/CloudMediumValues.hpp). Empty for the
+        /// shipped medium and for any medium that exposes nothing, and the bake then binds no such
+        /// descriptor, because the medium it is compiled with declares none.
+        ///
+        /// COPIED WHERE THE IMAGES BELOW ARE BORROWED, and the asymmetry is the ownership: these bytes are
+        /// the cloud renderer's own per-frame resolve and would be overwritten before the bake ran.
+        std::vector<glm::vec4> MediumValues;
+
+        /// The authored medium's images, one per declared slot, null where the material assigned nothing.
+        /// Borrowed like every image here; the bake substitutes a fallback for a null so that a declared
+        /// sampler is never left unwritten.
+        std::vector<Image2D*> MediumImages;
+
         /// What the panorama on the device was baked from, on the cloud side. See
         /// CloudEnvironmentFingerprint.
         uint64_t Fingerprint = 0;
@@ -146,6 +164,16 @@ namespace Desert::Graphic
         /// CloudEnvironmentBake::Medium. Borrowed like every image here; null and default both mean the
         /// shipped medium, which is the same thing and needs no branch of its own.
         const Core::ShaderVariant* Medium = nullptr;
+
+        /// The medium's own parameter block, on the SKY renderer's buffer for the reason Params and
+        /// Authored are on it: the cloud renderer's copies are per-frame resources written by the passes
+        /// inside the frame, and the bake is issued before them. Null when the medium declares no values,
+        /// which is when its program declares no such block either — the two are the same fact.
+        ShaderResources::StorageBuffer* MediumParams = nullptr;
+
+        /// One entry per image slot the medium declares, null where the material assigned nothing. The
+        /// COUNT is what the bake binds: a declared sampler left unwritten invalidates the descriptor set.
+        std::vector<Image2D*> MediumImages;
     };
 
     // ---------------------------------------------------------------------------------------------------
@@ -202,12 +230,18 @@ namespace Desert::Graphic
      *                          leave the light in the world coming from the previous one, indefinitely —
      *                          the "middle link drops a property" shape, in the one link that costs
      *                          three quarters of a second to re-run.
+     * @param mediumValues      Graphic::CloudMediumValuesFingerprint of that medium's OWN parameters and
+     *                          images; 0 when it exposes none. A SEPARATE INPUT AND NOT MIXED INTO
+     *                          @p mediumVariant by the caller, because the two are independent axes of one
+     *                          sky — the same code with a different tint is a different picture, and two
+     *                          hashes folded together before they arrive can cancel each other exactly
+     *                          once, which is a rebake that never happens and no way to find out why.
      * @return 0 exactly when @p marched is false; never 0 otherwise, so "no clouds" and "these clouds"
      *         cannot collide.
      */
     inline uint64_t CloudEnvironmentFingerprint( const CloudGpuPayload& payload, bool marched,
                                                  bool skyOcclusionValid, uint32_t shapeGeneration,
-                                                 uint64_t mediumVariant )
+                                                 uint64_t mediumVariant, uint64_t mediumValues )
     {
         if ( !marched )
             return 0ull;
@@ -237,6 +271,9 @@ namespace Desert::Graphic
         hash *= 1099511628211ull;
 
         hash ^= mediumVariant;
+        hash *= 1099511628211ull;
+
+        hash ^= mediumValues;
         hash *= 1099511628211ull;
 
         // Never zero: zero is reserved for "this view has no clouds", and a collision between that and a

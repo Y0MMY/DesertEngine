@@ -215,6 +215,10 @@ namespace Desert::Graphic::System
         // preview's clouds.
         std::shared_ptr<ShaderResources::StorageBuffer> m_CloudBakeParams;
         std::shared_ptr<ShaderResources::StorageBuffer> m_CloudBakeAuthored;
+        /// The authored medium's own parameter block, here for exactly the two reasons above and no new
+        /// one. Bound only when the medium carries values, because only then does the program compiled
+        /// from it declare the block.
+        std::shared_ptr<ShaderResources::StorageBuffer> m_CloudBakeMediumParams;
 
         // Baked sky IBL (radiance/irradiance/prefiltered cubes) generated from the procedural atmosphere.
         Environment m_ProceduralEnv;

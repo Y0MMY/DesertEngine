@@ -21,6 +21,8 @@
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
+#include <Engine/Core/ShaderCompiler/ShaderGraphMedium.hpp>
+#include <Engine/Graphic/Clouds/CloudMaterialValues.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 #include <Engine/Graphic/Materials/MaterialFactory.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
@@ -2088,7 +2090,45 @@ namespace Desert::Editor
         auto  shader        = shaderService ? shaderService->GetByName( EffectiveShaderName() ) : nullptr;
         if ( !shader )
             return nullptr;
-        return &shader->GetProgramMeta();
+
+        const auto& own = shader->GetProgramMeta();
+
+        // ---- THE AUTHORED MEDIUM'S OWN PROPERTIES, AS ROWS OF THIS WINDOW -----------------------------
+        //
+        // A cloud material has TWO schemas and one file. The shipped one is CloudRaymarch's Properties
+        // block, mirrored field for field onto Graphic::CloudMaterialValues; the second belongs to
+        // whatever Volume graph the Medium slot names, and its names were invented by the artist who drew
+        // that graph. Merging them HERE — and only here, for the drawing — is what gets the second one a
+        // row, a reset, an instance override and a control-channel `set` without a second implementation
+        // of any of those.
+        //
+        // THE NAMES ARE PREFIXED (Core::kCloudMediumOverridePrefix) AND THAT IS THE WHOLE SAFETY. Every
+        // write below lands in MaterialData under ShaderParam::Name, and the renderer reads the shipped
+        // schema out of that same map by name — so an unprefixed medium property called `Coverage` would
+        // silently retune the layer's bake. A GLSL identifier cannot contain the prefix's dot, so the two
+        // key spaces are disjoint by construction and no check has to be maintained to keep them so.
+        const auto drawn = DrawnMaterial();
+        if ( !drawn || own.Domain != ::Desert::Core::Formats::ShaderDomain::Volume )
+            return &own;
+
+        const uint64_t mediumHandle = drawn->Data().GetTexture( Graphic::kCloudMediumSlotName );
+        const auto*    mediumSchema = mediumHandle != 0 && shaderService
+                                           ? shaderService->MediumSchemaOf( Assets::AssetHandle( mediumHandle ) )
+                                           : nullptr;
+        if ( !mediumSchema || mediumSchema->empty() )
+            return &own;
+
+        m_MergedSchema = own;
+        m_MergedSchema.Params.reserve( own.Params.size() + mediumSchema->size() );
+        for ( const ::Desert::Core::Formats::ShaderParam& p : *mediumSchema )
+        {
+            ::Desert::Core::Formats::ShaderParam row = p;
+            row.Name                                 = ::Desert::Core::CloudMediumOverrideKey( p.Name );
+            // The DISPLAY name stays the artist's own: the prefix is a key-space fact and putting it in
+            // front of every label would be twelve characters of noise on every row of the group.
+            m_MergedSchema.Params.push_back( std::move( row ) );
+        }
+        return &m_MergedSchema;
     }
 
     bool MaterialEditorPanel::WriteParam( const ::Desert::Core::Formats::ShaderParam& p, const glm::vec4& value )

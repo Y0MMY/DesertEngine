@@ -2,6 +2,7 @@
 
 #include <Engine/Core/Camera.hpp>
 #include <Engine/Graphic/Clouds/CloudMaterialBake.hpp>
+#include <Engine/Graphic/DefaultTextures.hpp>
 #include <Engine/Graphic/FallbackTextures.hpp>
 #include <Engine/Graphic/RenderGraphSort.hpp>
 #include <Engine/Graphic/RenderPhase.hpp>
@@ -152,6 +153,25 @@ namespace Desert::Graphic::System
         if ( !m_ShadowAuthoredBuffer )
             return Common::MakeError(
                  "VolumetricCloudRenderer: could not create the hero cloud instance buffer for the shadow map" );
+
+        // THE AUTHORED MEDIUM'S OWN PARAMETER BLOCK, on the same non-persistent terms and doubled for the
+        // same reason as the two above. 256 bytes each, allocated whether or not any material in the scene
+        // authors a medium: a buffer created on the frame the first medium arrives would be created inside
+        // the frame, and a failed device allocation there has nowhere to report itself but a dispatch that
+        // silently does not happen.
+        m_MediumParamsBuffer = ShaderResources::StorageBuffer::Create(
+             "CloudMediumParams", Core::kCloudMediumParamsBytes, Core::kCloudMediumParamsBinding,
+             /*persistent=*/false );
+        if ( !m_MediumParamsBuffer )
+            return Common::MakeError(
+                 "VolumetricCloudRenderer: could not create the authored medium's parameter buffer" );
+
+        m_ShadowMediumParamsBuffer = ShaderResources::StorageBuffer::Create(
+             "CloudShadowMediumParams", Core::kCloudMediumParamsBytes, Core::kCloudMediumParamsBinding,
+             /*persistent=*/false );
+        if ( !m_ShadowMediumParamsBuffer )
+            return Common::MakeError( "VolumetricCloudRenderer: could not create the authored medium's "
+                                      "parameter buffer for the shadow map" );
 
         m_CompositeMaterial = std::make_unique<MaterialCloudComposite>();
         return BOOLSUCCESS;
@@ -910,9 +930,17 @@ namespace Desert::Graphic::System
         // few kilobytes of text against three quarters of a second of device time.
         bake.Medium = m_MediumVariant;
 
-        bake.Marched     = true;
-        bake.Fingerprint = CloudEnvironmentFingerprint( bake.Params, true, bake.SkyOcclusionValid,
-                                                        m_ModellingShapeGeneration, m_MediumVariantHash );
+        // AND ITS VALUES, which are NOT in the packed block above and never will be: they belong to a
+        // schema the graph author wrote. Copied for the same reason the variant is — the bake outlives this
+        // call by a submit-and-wait — while the IMAGES are borrowed, exactly like the noise volumes beside
+        // them, because the texture service owns them and outlives the bake.
+        bake.MediumValues = m_MediumValues.Params;
+        bake.MediumImages = m_MediumImages;
+
+        bake.Marched = true;
+        bake.Fingerprint =
+             CloudEnvironmentFingerprint( bake.Params, true, bake.SkyOcclusionValid, m_ModellingShapeGeneration,
+                                          m_MediumVariantHash, m_MediumValuesFingerprint );
         return bake;
     }
 
@@ -1020,6 +1048,7 @@ namespace Desert::Graphic::System
              m_AuthoredAtlas
                   ? m_AuthoredAtlas.get()
                   : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
+        BindMedium( m_ShadowMapPipeline.get(), m_ShadowMediumParamsBuffer.get() );
         m_ShadowMapPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 
         renderer.DispatchComputeInFrame( m_ShadowMapPipeline.get(), GroupCount( resolution, kMarchWorkGroupSize ),
@@ -1112,6 +1141,13 @@ namespace Desert::Graphic::System
                 const uint64_t raw = static_cast<uint64_t>( m_Data.Material );
                 for ( const auto& texture : overrides.Textures )
                 {
+                    // A MEDIUM'S IMAGE IS NOT AN UNKNOWN SLOT, and without this line every medium that
+                    // declared one would report itself as a material somebody forgot to migrate. The two
+                    // schemas share this map and are told apart by the prefix, which is the whole reason
+                    // the prefix exists — see Core::kCloudMediumOverridePrefix.
+                    if ( Core::IsCloudMediumOverrideKey( texture.first ) )
+                        continue;
+
                     const bool declared = std::any_of( schema->Params.begin(), schema->Params.end(),
                                                        [&texture]( const Core::Formats::ShaderParam& p )
                                                        { return p.Name == texture.first; } );
@@ -1134,6 +1170,125 @@ namespace Desert::Graphic::System
         // code and therefore reaches the frame through the shader compiler rather than through the packed
         // parameter block. Costs one integer comparison per frame in the shipped case.
         ResolveMedium();
+
+        // AND THE MEDIUM'S OWN VALUES, out of the SAME overrides — after ResolveMedium, so a frame in which
+        // the medium changed resolves the values of the medium the pipelines were just rebuilt for rather
+        // than of the one they were rebuilt from.
+        ResolveMediumValues( overrides );
+    }
+
+    namespace
+    {
+        /// The DefaultTexture of the @p slot-th IMAGE property of @p schema. Counted over the schema in
+        /// its own order because that order IS the binding layout — the same walk BuildCloudMediumValues
+        /// makes, so slot i here and Textures[i] there are the same property.
+        Core::Formats::DefaultTextureKind
+        DefaultTextureOfSlot( const std::vector<Core::Formats::ShaderParam>& schema, std::size_t slot )
+        {
+            std::size_t seen = 0;
+            for ( const Core::Formats::ShaderParam& p : schema )
+            {
+                if ( !p.IsTexture )
+                    continue;
+                if ( seen++ == slot )
+                    return p.DefaultTexture;
+            }
+            return Core::Formats::DefaultTextureKind::White;
+        }
+    } // namespace
+
+    void VolumetricCloudRenderer::ResolveMediumValues( const MaterialOverrides& overrides )
+    {
+        const std::vector<Core::Formats::ShaderParam>* schema = nullptr;
+        if ( !m_Material.Medium.IsNull() )
+        {
+            if ( const auto shaderService = Runtime::ResourceRegistry::GetShaderService() )
+                schema = shaderService->MediumSchemaOf( m_Material.Medium );
+            // A null schema is not said here: MediumSourceOf was asked about the same handle a moment ago
+            // in ResolveMedium and latches the one message for it. Two lines for one mistake is how a log
+            // stops being read.
+        }
+
+        m_MediumValues            = schema ? BuildCloudMediumValues( *schema, overrides ) : CloudMediumValues{};
+        m_MediumValuesFingerprint = CloudMediumValuesFingerprint( m_MediumValues );
+
+        // THE IMAGES, RESOLVED EVERY FRAME AND BORROWED, one entry per DECLARED slot and NEVER NULL. The
+        // count is what all four consumers bind, and a short vector would leave a declared sampler
+        // unwritten — which invalidates the descriptor set and costs the whole dispatch, in silence.
+        //
+        // AN UNASSIGNED SLOT GETS THE SCHEMA'S OWN DEFAULT TEXTURE, not "some fallback". White is the
+        // multiplicative identity and is what a Texture2D property declares unless its author said
+        // otherwise, so a medium whose image the artist has not chosen yet draws the sky it drew before
+        // the slot existed. A generic backend fallback would be a different colour by accident.
+        m_MediumImages.assign( m_MediumValues.Textures.size(), nullptr );
+
+        auto* textures = Runtime::ResourceRegistry::GetTextureService();
+        auto* images   = Runtime::ResourceRegistry::GetImageService();
+        for ( std::size_t slot = 0; slot < m_MediumValues.Textures.size(); ++slot )
+        {
+            const Assets::AssetHandle handle = m_MediumValues.Textures[slot];
+            if ( !handle.IsNull() && textures && images )
+            {
+                auto* texture = textures->Get( handle );
+                if ( auto* image = texture ? static_cast<Image2D*>( images->Resolve( texture->GetImageHandle() ) )
+                                           : nullptr )
+                {
+                    m_MediumImages[slot] = image;
+                    continue;
+                }
+
+                // NAMED, ONCE PER HANDLE. The slot still gets the declared default below — a medium must
+                // keep drawing — but "the artist assigned a texture that is not there" and "the artist
+                // assigned nothing" are the same picture, and this is the only place they differ.
+                if ( m_WarnedMediumImages.insert( static_cast<uint64_t>( handle ) ).second )
+                    LOG_ERROR( "[Clouds] the authored medium's image slot {} names texture {}, which does "
+                               "not resolve to an image. That slot reads the schema's default texture in "
+                               "all four programs until it does.",
+                               slot, static_cast<uint64_t>( handle ) );
+            }
+
+            const Core::Formats::DefaultTextureKind kind = schema && slot < schema->size()
+                                                                ? DefaultTextureOfSlot( *schema, slot )
+                                                                : Core::Formats::DefaultTextureKind::White;
+            m_MediumImages[slot] = const_cast<Image2D*>( DefaultTextures::Get().Resolve( kind ) );
+        }
+    }
+
+    void VolumetricCloudRenderer::BindMedium( ComputePipeline*                pipeline,
+                                              ShaderResources::StorageBuffer* buffer ) const
+    {
+        if ( !pipeline )
+            return;
+
+        // NOTHING IS BOUND FOR A MEDIUM THAT DECLARES NOTHING, and that is not an optimisation. The emitter
+        // only declares a block for properties the five functions actually READ, so a medium with none
+        // declares none — and this backend writes a descriptor for every binding a caller names, whether
+        // the shader's layout has it or not. Binding into a layout that does not declare the slot is a
+        // validation error, not a no-op.
+        if ( !m_MediumValues.Params.empty() && buffer )
+        {
+            const auto uploaded =
+                 buffer->SetData( m_MediumValues.Params.data(),
+                                  static_cast<uint32_t>( m_MediumValues.Params.size() * sizeof( glm::vec4 ) ) );
+            if ( !uploaded )
+            {
+                LOG_ERROR( "[Clouds] the authored medium's {} value(s) were not uploaded: {}. This "
+                           "dispatch reads whatever the previous frame left in that buffer.",
+                           m_MediumValues.Params.size(), uploaded.GetError() );
+            }
+            pipeline->SetStorageBuffer( Core::kCloudMediumParamsBinding, buffer );
+        }
+
+        auto* fallback = FallbackTextures::Get().GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA32F ).get();
+        for ( std::size_t slot = 0; slot < m_MediumImages.size(); ++slot )
+        {
+            // ResolveMediumValues leaves no null here — an unassigned slot already carries the schema's
+            // own default image. The guard is for the one case it cannot cover, a default-texture service
+            // that has not come up, and it binds SOMETHING because an unwritten descriptor costs the whole
+            // dispatch rather than one sampler.
+            pipeline->SetInput( Core::kCloudMediumTextureFirst + static_cast<uint32_t>( slot ),
+                                m_MediumImages[slot] ? m_MediumImages[slot] : fallback );
+        }
     }
 
     void VolumetricCloudRenderer::BuildAuthoredPayload( const CloudGpuPayload& payload )
@@ -1536,6 +1691,10 @@ namespace Desert::Graphic::System
                 m_SkyOcclusionPipeline->SetInput( kCloudSkyOcclusionNoiseBindings[slot], m_NoiseVolume[slot] );
             m_SkyOcclusionPipeline->SetInput( kCloudSkyOcclusionModellingBinding, m_ModellingVolume.get() );
             m_SkyOcclusionPipeline->SetStorageBuffer( kCloudSkyOcclusionAuthoredBinding, m_AuthoredBuffer.get() );
+            // The same buffer the march binds, and legitimately so: this dispatch is issued inside
+            // ExecuteInFrame between the march's own upload and the march itself, which is exactly the
+            // window m_ParamsBuffer is already shared across.
+            BindMedium( m_SkyOcclusionPipeline.get(), m_MediumParamsBuffer.get() );
             // ALWAYS bound, fallback included — see the note at the march's own binding of it.
             m_SkyOcclusionPipeline->SetInput(
                  kCloudSkyOcclusionAuthoredAtlasBinding,
@@ -1636,6 +1795,7 @@ namespace Desert::Graphic::System
         // answers an invalid set by skipping the dispatch — every cloud in the frame would disappear with
         // nothing in the log, which is a rake this subsystem has already stood on.
         m_MarchPipeline->SetStorageBuffer( kCloudAuthoredBinding, m_AuthoredBuffer.get() );
+        BindMedium( m_MarchPipeline.get(), m_MediumParamsBuffer.get() );
         m_MarchPipeline->SetInput(
              kCloudAuthoredAtlasBinding,
              m_AuthoredAtlas
