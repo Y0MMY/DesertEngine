@@ -2148,6 +2148,48 @@ TEST_F( ShaderRootFixture, AMediumsWholeCapacityLandsAtTheNumbersTheRUNTIMEBinds
     }
 }
 
+TEST_F( ShaderRootFixture, AMediumMaySampleTheLayersOwnNoiseVolumeInEveryConsumer )
+{
+    // O1-H. THE Cloud Noise Volume NODE COSTS NO BINDING AND NO RUNTIME PLUMBING — it reaches the `.dcnv`
+    // volumes the scene has ALREADY bound, through the CLOUD_SAMPLE_NOISE macro — and that is a claim
+    // about SCOPE, which is what this domain has been wrong about twice: the medium is substituted into
+    // the middle of Common/CloudField.glslh, so what is in scope there is a fact about four programs'
+    // include order and not about the header the macro is documented in.
+    //
+    // Both halves of the emitter's output are compiled here: the unwired form, which passes the
+    // producer's own int straight to the macro, and the wired form, which goes through CloudNoiseSlotOf.
+    // A shipped program that stopped defining the macro before its include of the field would take this
+    // red instead of failing in front of the artist who applied the material.
+    const std::string sampling = MediumForwardingWith(
+         "", "CLOUD_SAMPLE_NOISE( field.NoiseSlot, CloudDefaultNoiseCoordinate( params, positionKm ) ).z * "
+             "CLOUD_SAMPLE_NOISE( CloudNoiseSlotOf( CloudGraphSampleAt( params, field, positionKm ).NoiseSlot ),"
+             " CloudDefaultNoiseCoordinate( params, positionKm ) ).w" );
+
+    for ( const char* consumer : kMediumConsumers )
+    {
+        ShaderResource::ReflectionData data;
+        const auto                     diagnostics = ReflectConsumerWithMedium( consumer, sampling, data );
+
+        EXPECT_TRUE( diagnostics.empty() )
+             << consumer << ": " << ( diagnostics.empty() ? std::string{} : diagnostics.front() );
+
+        // AND IT ADDED NOTHING TO THE LAYOUT. The whole argument for this node over a Medium Texture is
+        // that the volumes are already there; if sampling one grew the descriptor set, it would be a
+        // fifth declaration of textures the renderer binds itself, on numbers nobody reserved.
+        const auto setZero = data.ShaderDescriptorSets.find( 0 );
+        ASSERT_NE( setZero, data.ShaderDescriptorSets.end() ) << consumer;
+        const auto bindings = ShaderReflection::BuildLayoutBindings( setZero->second );
+        EXPECT_FALSE(
+             HasBinding( bindings, Desert::Core::kCloudMediumParamsBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) )
+             << consumer << " grew the medium's own parameter block for a graph that declares no property";
+        for ( uint32_t i = 0; i < Desert::Core::kCloudMediumMaxTextures; ++i )
+            EXPECT_FALSE( HasBinding( bindings, Desert::Core::kCloudMediumTextureFirst + i,
+                                      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) )
+                 << consumer << " gave a noise fetch a descriptor of its own at slot " << i
+                 << "; the volumes it reads are the ones the renderer already binds.";
+    }
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );
