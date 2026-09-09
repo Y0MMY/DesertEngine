@@ -79,6 +79,27 @@ namespace Desert::Assets
                     const Common::Filepath path = candidate;
                     auto asset = manager->CreateAsset<AssetType>( priority, path, std::forward<Args>( args )... );
 
+                    // NULL IS A REACHABLE ANSWER HERE, and this line used to go straight to
+                    // `asset->GetMetadata()`. `AssetManager::CreateAsset` returns nullptr when the eager
+                    // load fails (AssetManager.hpp — it logs the parse error and gives back nothing), so
+                    // ONE malformed content file under a scanned root crashed the editor before its first
+                    // frame, on a null dereference, for every kind this scanner loads eagerly: textures,
+                    // materials, skyboxes, shaders, clips, and all four cloud kinds. Found on 2026-09-09
+                    // with a deliberately broken `.anim`, which was the first malformed file the project
+                    // had ever had to survive — the repository shipped none, so nothing had reached it.
+                    //
+                    // Continue rather than abort: one unreadable file is not a reason to start with no
+                    // content at all, and the count above still includes it, which is what lets a caller
+                    // say "the scan found N and only M arrived" (see Animation::PopulateLibrary).
+                    if ( !asset )
+                    {
+                        LOG_ERROR( "'{}' was found by the asset scan and could not be loaded, so it is NOT "
+                                   "in the project; the parse error is logged above. Everything that "
+                                   "references it will resolve to nothing.",
+                                   path.string() );
+                        continue;
+                    }
+
                     if ( !asset->GetMetadata().IsValid() )
                     {
                         LOG_ERROR( "Asset metadata is invalid for: {}", path.string() );
