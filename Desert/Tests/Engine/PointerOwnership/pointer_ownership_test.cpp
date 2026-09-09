@@ -232,11 +232,16 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   now carries the storage it was built from (TracksData, never dereferenced) beside the pointers it
     //   guards (ByBone). The old m_TrackBinding row's argument for why the key was safe is retracted in
     //   place rather than deleted — it was wrong in exactly the direction that cost a segfault.
-    EXPECT_EQ( CountOf( Form::Raw ), 348 );
-    EXPECT_EQ( CountOf( Form::Shared ), 323 );
+    //
+    //   819 -> 823 with U10 (UI introspection). Three raw, and all three are IDENTITIES rather than
+    //   accesses: two copies of DrawCommand::Texture carried into the probe so the panel can print WHICH
+    //   texture broke a batch, and the editor's probe registry keyed on a Scene's address. The fourth is
+    //   the shared Scene the UI Debugger panel holds like every other scene-bound panel.
+    EXPECT_EQ( CountOf( Form::Raw ), 351 );
+    EXPECT_EQ( CountOf( Form::Shared ), 324 );
     EXPECT_EQ( CountOf( Form::Unique ), 110 );
     EXPECT_EQ( CountOf( Form::Weak ), 38 );
-    EXPECT_EQ( (int)Members().size(), 819 )
+    EXPECT_EQ( (int)Members().size(), 823 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }
@@ -447,7 +452,7 @@ TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
     // `shared_ptr` here is a false impression of shared ownership, and the register's job is to make
     // the true owner findable instead of mass-replacing them for uniformity -- churn that would hide
     // the seven real findings in a diff of two hundred files.
-    EXPECT_EQ( CountOf( Form::Shared ), 323 );
+    EXPECT_EQ( CountOf( Form::Shared ), 324 );
     EXPECT_GT( CountOf( Form::Shared ), CountOf( Form::Unique ) + CountOf( Form::Weak ) );
 }
 

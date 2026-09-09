@@ -1,13 +1,17 @@
 #pragma once
 
+#include <Engine/ECS/Components.hpp>
 #include <Engine/UI/UILayout.hpp>
 
 #include <Common/Core/Core.hpp>
 #include <Common/Core/ResultStr.hpp>
 
 #include <entt/entt.hpp>
+#include <glm/glm.hpp>
 
 #include <cstddef>
+#include <cstdint>
+#include <vector>
 
 // Layout QUERIES over a canvas tree: where does an element end up on screen, and what is under the cursor.
 //
@@ -72,6 +76,98 @@ namespace Desert::UI
     // Is @p e drawn at all — and therefore hit-testable at all? False for Hidden and Collapsed, both of
     // which take their whole sub-tree with them.
     [[nodiscard]] bool IsElementVisible( entt::registry& reg, entt::entity e );
+
+    // --- ONE WALK, AND EVERY QUERY BELOW IS A READ OF IT ---------------------------------------------
+    //
+    // This file used to hold TWO near-identical recursions (PickRecurse, RectRecurse) and a third lived in
+    // the renderer, all resolving the same rect from the same anchors. Two of the three had already drifted
+    // apart from the renderer by the time this was written, in exactly the direction the note at the top of
+    // this file warns about: neither applied a ScrollView's scroll offset to its children, and neither
+    // intersected the inherited clip, so a row scrolled out of a list was picked at the position it would
+    // have had unscrolled, and a row clipped away entirely was still pickable. Both are fixed by there
+    // being one walk instead of three.
+    //
+    // The renderer's own DrawElement is still a separate recursion — it draws, and it is not this file's to
+    // own — so exactly ONE relation is left to hold rather than three, and it is asserted rather than
+    // described: `Desert/Tests/Engine/UIIntrospection` hides each element the enumeration calls SKIPPED and
+    // requires the real walk's draw list to come out byte-identical.
+
+    // Why an element the walk reached was not drawn. `AncestorSkipped` means the walk never reached it at
+    // all — one of its ancestors stopped first — which is why it is a separate value from the self-causes:
+    // a count that folded them together could not tell "forty hidden elements" from "one hidden panel".
+    enum class UISkipCause : std::uint8_t
+    {
+        None,             // drawn
+        SelfHidden,       // UIVisibility::Hidden on this element (keeps its layout slot)
+        SelfCollapsed,    // UIVisibility::Collapsed on this element (drops its slot in a layout group)
+        BindingHidden,    // a UIBinding with target Visible resolved to false in the UI data store
+        ScreenNotCurrent, // a UIScreen sub-tree that is neither the current screen nor the one leaving
+        AncestorSkipped   // an ancestor stopped for one of the reasons above
+    };
+
+    [[nodiscard]] const char* UISkipCauseName( UISkipCause cause );
+
+    // One element of a canvas, as the walk sees it. Produced in DRAW ORDER (depth first, a parent before
+    // its children, siblings in RelationshipComponent order), which is also the order the hot element is
+    // elected in — so `Order` answers "what is on top of what" without anybody re-deriving it.
+    struct UIElementNode
+    {
+        entt::entity Entity = entt::null;
+        entt::entity Parent = entt::null;
+        int          Depth  = 0;  // 0 = a direct child of the canvas
+        int          Order  = -1; // index among the DRAWN elements; -1 when this one is not drawn
+
+        bool         Drawn   = false;
+        UISkipCause  Cause   = UISkipCause::None;
+        entt::entity CauseBy = entt::null; // who stopped it: itself, or the ancestor that did
+
+        // The element's own rect, BEFORE its render transform — the space its UILayout offsets are written
+        // in, the same rect GetElementRect reports. False when the element has no rect at all: a Collapsed
+        // child of an auto-layout group is given no slot, so there is no position to report for it.
+        bool RectValid = false;
+
+        // The rect above is this element's OWN — resolved from its anchors, or handed to it by a parent
+        // auto-layout group. False for an element with no UILayoutComponent, which simply inherits its
+        // parent's box and which the pointer therefore cannot land on: it occupies no area of its own.
+        bool      OwnRect = false;
+        Rect      RectPx{};
+        glm::mat3 Xform{ 1.0f }; // its own transform composed inside its ancestors'
+        Rect      ScreenPx{};    // the axis-aligned box RectPx occupies on screen after Xform
+        Rect      ClipPx{};      // the inherited scissor; W<=0 means unclipped
+        Rect      VisiblePx{};   // ScreenPx intersected with ClipPx and the viewport — the pixels it may own
+
+        // Drawn, but no pixel of it can land: scrolled out of its list, or off the viewport. The walk does
+        // NOT cull these — it records their geometry and the scissor throws it away — so this is the column
+        // that answers "why can I not see it" for an element that is neither hidden nor mispositioned.
+        bool Clipped = false;
+
+        bool           TakesSlot     = true; // counted by a parent auto-layout group (Collapsed drops out)
+        ECS::UIHitTest HitTest       = ECS::UIHitTest::All;
+        bool           ElectsSelf    = false; // may the pointer STOP here — own value narrowed by its ancestors'
+        bool           ClipsChildren = false;
+    };
+
+    // Walk @p canvas into @p out. The rect resolution is the renderer's: canvas scale mode, safe area,
+    // aspect fitter, content-size fitter, auto-layout group placement, render transform, scroll offset and
+    // the clip chain.
+    //
+    // @p ctx IS WHAT MAKES THIS A RUNTIME ANSWER RATHER THAN AN AUTHORING ONE, and passing nullptr is a
+    // deliberate second mode, not a degraded one. Two of the walk's skip reasons are properties of a VIEW
+    // and not of the scene — which screen a view has navigated to, and what a gameplay data binding
+    // currently says — so a host that has no view cannot be told about them. The editor's click-select is
+    // such a host: it must be able to pick an element of a screen the game is not on, because that is when
+    // an author is editing it. With a context, both reasons are honoured and the counts describe what was
+    // actually drawn.
+    //
+    // Refuses (and leaves @p out empty) when @p canvas is not a canvas of @p reg, or is not Visible — the
+    // same three distinguishable refusals the queries below already had.
+    NO_DISCARD Common::BoolResultStr EnumerateCanvas( entt::registry& reg, entt::entity canvas,
+                                                      const Rect& viewportPx, std::vector<UIElementNode>& out,
+                                                      const struct UICanvasContext* ctx = nullptr );
+
+    // Does a UIBinding with target Visible currently say NO for @p e? The runtime walk asks the UI data
+    // store this same question and skips the element's whole sub-tree when the answer is yes.
+    [[nodiscard]] bool BindingHidesElement( entt::registry& reg, entt::entity e );
 
     // In-scene UI editing (viewport WYSIWYG). Returns the topmost element of @p canvas whose resolved rect
     // contains `pointPx`, or entt::null. `viewportPx` must be the SAME rect the canvas was drawn into so

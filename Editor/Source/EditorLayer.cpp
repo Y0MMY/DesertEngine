@@ -70,6 +70,7 @@
 #include "Editor/Panels/SceneHierarchy/SceneHierarchyPanel.hpp"
 #include "Editor/Panels/SceneProperties/ScenePropertiesPanel.hpp"
 #include "Editor/Panels/Debug/ShaderLibraryPanel.hpp"
+#include "Editor/Panels/Debug/UIDebuggerPanel.hpp"
 #include "Editor/Panels/FileExplorer/FileExplorerPanel.hpp"
 #include "Editor/Panels/ViewportPanel/ViewportPanel.hpp"
 #include "Editor/Panels/SceneSettings/SceneSettingsPanel.hpp"
@@ -623,6 +624,7 @@ namespace Desert::Editor
         m_Panels.Add<Editor::CollectionsPanel>( m_AssetManager.get() );
         m_Panels.Add<Editor::HistoryPanel>();
         m_Panels.Add<Editor::SceneValidationPanel>( m_MainScene, m_AssetManager.get() );
+        m_Panels.Add<Editor::UIDebuggerPanel>( m_MainScene );
         // THE FOUR CLOUD PANELS ARE NOT CONSTRUCTED HERE ANY MORE. They were singletons in this list, each
         // reached from the View menu and bound to whatever file its own combo had last opened; they are now
         // asset DOCUMENTS, built on demand by the registry below. Dropping them from the list is what
