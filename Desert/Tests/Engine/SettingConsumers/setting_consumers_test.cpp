@@ -615,9 +615,19 @@ namespace
          { "OffsetMin", kCanvasLayout },
          { "OffsetMax", kCanvasLayout },
          { "CustomMinimumSize", kCanvasLayout },
-         // "Pivot" had a DEAD row here. Д26 deleted the field: the rect is resolved from anchors and
-         // offsets alone, and nothing in this UI rotates or scales an element about a point — the field
-         // returns with its consumer the day rotation does.
+         // THE DAY ARRIVED. "Pivot" had a DEAD row here, then no row at all: Д26 deleted the field
+         // because the rect was resolved from anchors and offsets alone and nothing in this UI rotated
+         // or scaled an element about a point, and the note left behind said the field returns with its
+         // consumer. Ю8 is that consumer, and all three rows below are WIRED to it.
+         //
+         // The renderer is named rather than the layout, and the split matters here exactly as it does
+         // for Visibility/HitTest: these three are read by UICanvasRenderer2D.cpp, which turns the
+         // element's geometry and undoes the pointer through the same matrix. UICanvasLayout.cpp reads
+         // them too (the editor's pick has to agree), but a row names the consumer whose absence would
+         // make the field do nothing, and that is the renderer.
+         { "Rotation", kCanvasRenderer },
+         { "Scale", kCanvasRenderer },
+         { "Pivot", kCanvasRenderer },
          { "ClipContents", kCanvasRenderer },
          { "Visibility", kCanvasLayout },
          { "HitTest", kCanvasRenderer },

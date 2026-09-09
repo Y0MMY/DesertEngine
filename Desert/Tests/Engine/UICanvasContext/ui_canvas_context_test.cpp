@@ -1246,6 +1246,387 @@ TEST( UICanvasSelection, CanvasOfWalksUpToTheCanvasTheElementIsActuallyIn )
     EXPECT_TRUE( Desert::UI::CanvasOf( t.Registry, a ) == entt::null );
 }
 
+// =========================================================================================================
+// Ю8 — THE RENDER TRANSFORM, AND THE ONE THING THAT HAD TO BE TESTED ABOUT IT
+//
+// A rotated element has two halves that can each be right on their own: the quad that reaches the screen,
+// and the region the pointer is accepted in. Testing them separately is exactly the mistake this project
+// keeps paying for — so what is asserted below is their AGREEMENT, and it is asserted against the geometry
+// the walk actually emitted rather than against a rect recomputed by the test.
+//
+// The drawn quad is read out of the draw list. The elected region is read out of the context. For a grid of
+// sample points the two must give the same answer at every point; a rotation applied to one and not the
+// other reddens this at roughly a quarter of the samples, and applying it in the WRONG DIRECTION to the
+// pointer reddens it too (an inverse-vs-forward slip is the likely defect here, and it is symmetric about
+// the pivot, so a centre-pivot test alone would pass — which is why the pivot below is a corner).
+// =========================================================================================================
+
+namespace
+{
+    // A canvas with ONE panel, sharp-cornered so it emits exactly one quad and the first four vertices of
+    // the list ARE its screen corners. Rotation / Scale / Pivot are the test's to set.
+    struct XformFixture
+    {
+        entt::registry Registry;
+        entt::entity   Canvas = entt::null;
+        entt::entity   Panel  = entt::null;
+
+        XformFixture()
+        {
+            Canvas                 = Registry.create();
+            auto& canvas           = Registry.emplace<ECS::UICanvasComponent>( Canvas ).Data;
+            canvas.ScaleMode       = ECS::UICanvasScaleMode::Stretch;
+            canvas.ReferenceWidth  = kSide;
+            canvas.ReferenceHeight = kSide;
+
+            Panel            = Registry.create();
+            auto& layout     = Registry.emplace<ECS::UILayoutComponent>( Panel ).Data;
+            layout.AnchorMin = { 0.0f, 0.0f };
+            layout.AnchorMax = { 0.0f, 0.0f };
+            layout.OffsetMin = { 200.0f, 300.0f };
+            layout.OffsetMax = { 500.0f, 420.0f };
+
+            auto& panel        = Registry.emplace<ECS::UIPanelComponent>( Panel ).Data;
+            panel.CornerRadius = 0.0f; // sharp => AddRectFilled takes the four-vertex path
+            panel.Opacity      = 1.0f;
+
+            Registry.emplace<ECS::RelationshipComponent>( Canvas ).Children.push_back( Panel );
+            Registry.emplace<ECS::RelationshipComponent>( Panel ).Parent = Canvas;
+        }
+
+        ECS::UILayoutData& Layout( entt::entity e )
+        {
+            return Registry.get<ECS::UILayoutComponent>( e ).Data;
+        }
+    };
+
+    // Where @p p sits relative to the convex quad @p q (given in order). All four cross products share a
+    // sign for a point inside, whichever way round the quad is wound — which matters because a negative
+    // scale flips the winding.
+    //
+    // ON_EDGE IS A THIRD ANSWER AND IT IS NOT A HEDGE. A sample within half a pixel of a rotated edge is
+    // a tie the two sides settle differently for reasons that are not this test's subject: the pointer
+    // test is closed on both bounds (`>=` and `<=`) while the sign of a cross product a few ulps from
+    // zero is whatever the rotation's rounding made it. The pivot is itself a CORNER of the quad, so
+    // there is always at least one such sample. Ties are skipped and counted; the assertion is about
+    // every point that is unambiguously in or out.
+    enum class Where
+    {
+        Inside,
+        Outside,
+        OnEdge
+    };
+
+    Where WhereInQuad( const std::array<glm::vec2, 4>& q, const glm::vec2& p )
+    {
+        int   positive = 0, negative = 0;
+        float nearest = 1e30f;
+        for ( int i = 0; i < 4; ++i )
+        {
+            const glm::vec2 a   = q[i];
+            const glm::vec2 b   = q[( i + 1 ) % 4];
+            const float     c   = ( b.x - a.x ) * ( p.y - a.y ) - ( b.y - a.y ) * ( p.x - a.x );
+            const float     len = glm::length( b - a );
+            if ( len > 0.0f )
+                nearest = std::min( nearest, std::fabs( c ) / len ); // px from the edge's line
+            if ( c > 0.0f )
+                ++positive;
+            if ( c < 0.0f )
+                ++negative;
+        }
+        if ( nearest < 0.5f )
+            return Where::OnEdge;
+        return ( positive == 0 || negative == 0 ) ? Where::Inside : Where::Outside;
+    }
+
+    // The first four vertices of the list, i.e. the panel's quad where it landed on screen.
+    std::array<glm::vec2, 4> DrawnQuad( const R2D::DrawList2D& dl )
+    {
+        std::array<glm::vec2, 4> q{};
+        EXPECT_GE( dl.GetVertices().size(), 4u ) << "the panel emitted no quad at all";
+        for ( std::size_t i = 0; i < 4 && i < dl.GetVertices().size(); ++i )
+            q[i] = dl.GetVertices()[i].Position;
+        return q;
+    }
+
+    // Walk once with the pointer at @p p and answer whether the walk elected @p e. One frame is enough:
+    // the election is finished by the time RenderCanvas2D returns (ctx.Hot = ctx.HotNext).
+    bool ElectsAt( XformFixture& f, entt::entity e, const glm::vec2& p )
+    {
+        UICanvasContext ctx;
+        R2D::DrawList2D dl;
+        const UIInput   in = At( p.x, p.y, /*down=*/false );
+        Draw( ctx, f.Registry, f.Canvas, dl, &in );
+        return ctx.Hot == e;
+    }
+} // namespace
+
+// The relation, over a grid dense enough to straddle every edge of a turned rectangle.
+TEST( UICanvasContext, WhereARotatedElementIsDrawnIsWhereItTakesThePointer )
+{
+    XformFixture f;
+    f.Layout( f.Panel ).Rotation = 30.0f;
+    f.Layout( f.Panel ).Pivot    = { 0.0f, 0.0f }; // a CORNER: an inverse/forward slip is not symmetric here
+
+    R2D::DrawList2D dl;
+    UICanvasContext ctx;
+    Draw( ctx, f.Registry, f.Canvas, dl, nullptr );
+    const std::array<glm::vec2, 4> quad = DrawnQuad( dl );
+
+    // The quad really did move — otherwise this test would be asserting agreement about nothing.
+    ASSERT_GT( std::fabs( quad[0].y - quad[1].y ), 1.0f ) << "the panel was drawn axis-aligned";
+
+    int inside = 0, disagreements = 0, ties = 0;
+    for ( float y = 20.0f; y < 900.0f; y += 20.0f )
+        for ( float x = 20.0f; x < 900.0f; x += 20.0f )
+        {
+            const glm::vec2 p     = { x, y };
+            const Where     where = WhereInQuad( quad, p );
+            if ( where == Where::OnEdge )
+            {
+                ++ties;
+                continue;
+            }
+            const bool drawn   = where == Where::Inside;
+            const bool elected = ElectsAt( f, f.Panel, p );
+            inside += drawn ? 1 : 0;
+            if ( drawn != elected )
+            {
+                ++disagreements;
+                if ( disagreements <= 5 )
+                    ADD_FAILURE() << "at (" << x << "," << y << ") the element is "
+                                  << ( drawn ? "DRAWN but not electable" : "electable but NOT DRAWN" );
+            }
+        }
+
+    EXPECT_EQ( disagreements, 0 );
+    EXPECT_GT( inside, 40 ) << "the sample grid never landed on the element, so it proved nothing";
+    // The half-pixel tolerance must stay a minority report, or it would be the tolerance being measured
+    // rather than the agreement. Expressed against the element's own sample count rather than as a
+    // number, because that is the quantity it has to be small compared to.
+    EXPECT_LT( ties * 4, inside ) << ties << " of the samples were within half a pixel of an edge, against "
+                                  << inside << " unambiguously inside";
+}
+
+// Propagation, and it is the relation again one level down: the child states no transform of its own, so
+// everything about where it is drawn AND where it is clickable comes from its parent.
+TEST( UICanvasContext, AChildOfARotatedParentIsDrawnAndPickedWhereTheParentCarriedIt )
+{
+    XformFixture       f;
+    const entt::entity child = f.Registry.create();
+    auto&              cl    = f.Registry.emplace<ECS::UILayoutComponent>( child ).Data;
+    cl.AnchorMin             = { 0.0f, 0.0f };
+    cl.AnchorMax             = { 0.0f, 0.0f };
+    cl.OffsetMin             = { 20.0f, 20.0f };
+    cl.OffsetMax             = { 120.0f, 70.0f };
+    auto& cp                 = f.Registry.emplace<ECS::UIPanelComponent>( child ).Data;
+    cp.CornerRadius          = 0.0f;
+    f.Registry.emplace<ECS::RelationshipComponent>( child ).Parent = f.Panel;
+    f.Registry.get<ECS::RelationshipComponent>( f.Panel ).Children.push_back( child );
+
+    // Where is the child's centre with the parent straight? Read it from the drawing, not computed here.
+    glm::vec2 straightCentre;
+    {
+        R2D::DrawList2D dl;
+        UICanvasContext ctx;
+        Draw( ctx, f.Registry, f.Canvas, dl, nullptr );
+        ASSERT_GE( dl.GetVertices().size(), 8u ); // parent quad, then the child's
+        straightCentre = ( dl.GetVertices()[4].Position + dl.GetVertices()[6].Position ) * 0.5f;
+    }
+
+    f.Layout( f.Panel ).Rotation = 90.0f; // the PARENT turns; the child says nothing about transforms
+    glm::vec2                turnedCentre;
+    std::array<glm::vec2, 4> childQuad{};
+    {
+        R2D::DrawList2D dl;
+        UICanvasContext ctx;
+        Draw( ctx, f.Registry, f.Canvas, dl, nullptr );
+        ASSERT_GE( dl.GetVertices().size(), 8u );
+        for ( int i = 0; i < 4; ++i )
+            childQuad[i] = dl.GetVertices()[4 + i].Position;
+        turnedCentre = ( childQuad[0] + childQuad[2] ) * 0.5f;
+    }
+
+    // A quarter turn about the parent's centre (350,360) sends the child's centre from (270,345) to
+    // (365,280) — written out rather than derived, so an error in the composition cannot cancel itself.
+    EXPECT_NEAR( straightCentre.x, 270.0f, 1e-2f );
+    EXPECT_NEAR( straightCentre.y, 345.0f, 1e-2f );
+    EXPECT_NEAR( turnedCentre.x, 365.0f, 1e-2f );
+    EXPECT_NEAR( turnedCentre.y, 280.0f, 1e-2f );
+
+    // And the pointer followed it: the child is electable where it now is and not where it used to be.
+    EXPECT_TRUE( ElectsAt( f, child, turnedCentre ) )
+         << "the child was drawn at its parent's rotation but does not take the pointer there";
+    EXPECT_FALSE( ElectsAt( f, child, straightCentre ) )
+         << "the child still takes the pointer at the place it was drawn BEFORE the parent turned";
+
+    // The child's own quad is a 100x50 rectangle whichever way it is turned — a parent transform must
+    // carry a child, not restretch it.
+    EXPECT_NEAR( glm::length( childQuad[1] - childQuad[0] ), 100.0f, 1e-2f );
+    EXPECT_NEAR( glm::length( childQuad[3] - childQuad[0] ), 50.0f, 1e-2f );
+}
+
+// PICKELEMENT IS A SECOND IMPLEMENTATION OF THE SAME QUESTION (the editor's WYSIWYG select), and the
+// header of UICanvasLayout.hpp says in as many words that the two must not drift. Under a transform they
+// have a new way to drift, so the agreement is pinned here too.
+TEST( UICanvasContext, TheEditorsPickAgreesWithTheWalkAboutARotatedElement )
+{
+    XformFixture f;
+    f.Layout( f.Panel ).Rotation = -40.0f;
+    f.Layout( f.Panel ).Scale    = { 1.3f, 0.7f };
+    f.Layout( f.Panel ).Pivot    = { 1.0f, 0.0f };
+
+    int disagreements = 0, hits = 0;
+    for ( float y = 20.0f; y < 900.0f; y += 25.0f )
+        for ( float x = 20.0f; x < 900.0f; x += 25.0f )
+        {
+            const bool picked  = Desert::UI::PickElement( f.Registry, f.Canvas, { x, y }, kViewport ) == f.Panel;
+            const bool elected = ElectsAt( f, f.Panel, { x, y } );
+            hits += picked ? 1 : 0;
+            if ( picked != elected )
+            {
+                ++disagreements;
+                if ( disagreements <= 5 )
+                    ADD_FAILURE() << "at (" << x << "," << y << ") the editor pick says " << picked
+                                  << " and the renderer's election says " << elected;
+            }
+        }
+    EXPECT_EQ( disagreements, 0 );
+    EXPECT_GT( hits, 40 ) << "the grid never hit the element, so the agreement was vacuous";
+}
+
+// PIVOT WITH ITS CONSUMER. Д26 deleted this field because nothing read it; the assertion that it is not
+// dead again is that the SAME rotation about two different pivots puts the element in two different
+// places — and that both places are hit-testable, so it moved the pointer with the picture.
+TEST( UICanvasContext, TheSameRotationAboutTwoPivotsLandsInTwoPlaces )
+{
+    const auto centreOfPanelWith = []( const glm::vec2& pivot )
+    {
+        XformFixture f;
+        f.Layout( f.Panel ).Rotation = 45.0f;
+        f.Layout( f.Panel ).Pivot    = pivot;
+        R2D::DrawList2D dl;
+        UICanvasContext ctx;
+        Draw( ctx, f.Registry, f.Canvas, dl, nullptr );
+        EXPECT_GE( dl.GetVertices().size(), 4u );
+        return ( dl.GetVertices()[0].Position + dl.GetVertices()[2].Position ) * 0.5f;
+    };
+
+    const glm::vec2 aboutCentre = centreOfPanelWith( { 0.5f, 0.5f } );
+    const glm::vec2 aboutCorner = centreOfPanelWith( { 0.0f, 0.0f } );
+
+    // About its own centre the element does not move at all; about its top-left corner it swings away.
+    EXPECT_NEAR( aboutCentre.x, 350.0f, 1e-2f );
+    EXPECT_NEAR( aboutCentre.y, 360.0f, 1e-2f );
+    EXPECT_GT( glm::length( aboutCorner - aboutCentre ), 50.0f )
+         << "Pivot did not move the picture, which is what got the field deleted in the first place";
+
+    // ...and the pointer went with it, at both pivots.
+    {
+        XformFixture f;
+        f.Layout( f.Panel ).Rotation = 45.0f;
+        f.Layout( f.Panel ).Pivot    = { 0.0f, 0.0f };
+        EXPECT_TRUE( ElectsAt( f, f.Panel, aboutCorner ) );
+        EXPECT_FALSE( ElectsAt( f, f.Panel, aboutCentre ) )
+             << "the corner-pivot element still takes the pointer where a centre-pivot one would be";
+    }
+}
+
+// A clip is a scissor and a scissor is a box, so a rotated clipper clips to the box around itself. That is
+// a deliberate limit (clipping to the quadrilateral needs a stencil) and it is pinned here so it is a
+// DECISION rather than something nobody noticed: what must hold is that the pointer is refused in exactly
+// the region the pixels were, which is that same box and not the unrotated rect.
+TEST( UICanvasContext, ARotatedClipperClipsThePointerToTheSameBoxItClippedThePixels )
+{
+    XformFixture f;
+    f.Layout( f.Panel ).ClipContents = true;
+    f.Layout( f.Panel ).Rotation     = 45.0f;
+
+    const entt::entity child = f.Registry.create();
+    auto&              cl    = f.Registry.emplace<ECS::UILayoutComponent>( child ).Data;
+    cl.AnchorMin             = { 0.0f, 0.0f };
+    cl.AnchorMax             = { 0.0f, 0.0f };
+    cl.OffsetMin             = { 0.0f, 0.0f };
+    cl.OffsetMax             = { 300.0f, 120.0f };
+    f.Registry.emplace<ECS::UIPanelComponent>( child ).Data.CornerRadius = 0.0f;
+    f.Registry.emplace<ECS::RelationshipComponent>( child ).Parent       = f.Panel;
+    f.Registry.get<ECS::RelationshipComponent>( f.Panel ).Children.push_back( child );
+
+    R2D::DrawList2D dl;
+    UICanvasContext ctx;
+    Draw( ctx, f.Registry, f.Canvas, dl, nullptr );
+
+    // The child's command carries the scissor the pixels were cut with.
+    glm::vec4 clip{ 0.0f };
+    for ( const auto& cmd : dl.GetCommands() )
+        if ( cmd.ClipRect.z > 0.0f )
+            clip = cmd.ClipRect;
+    ASSERT_GT( clip.z, 0.0f ) << "nothing was clipped at all";
+
+    // A point inside that box and inside the child's own rect is electable; one outside the box is not,
+    // and the two together are what makes this an assertion about the SAME region twice.
+    const glm::vec2 inBox( clip.x + clip.z * 0.5f, clip.y + clip.w * 0.5f );
+    EXPECT_TRUE( ElectsAt( f, child, inBox ) );
+    EXPECT_FALSE( ElectsAt( f, child, { clip.x - 5.0f, clip.y - 5.0f } ) )
+         << "the pointer was accepted outside the box the scissor cut";
+}
+
+// TWO LEVELS, BOTH TURNED — and this one exists because the single-level test above did NOT catch the
+// mutation it should have. Making DrawList2D::PushTransform REPLACE the current matrix instead of
+// composing with it left that test green, because its child stated no transform of its own and a stack
+// one deep cannot tell replacement from composition. The mutation was EQUIVALENT there, not survived;
+// what it needed was a case where the stack is two deep, which is this one.
+TEST( UICanvasContext, TwoTurnedLevelsComposeRatherThanReplace )
+{
+    XformFixture f;
+    f.Layout( f.Panel ).Rotation = 30.0f;
+    f.Layout( f.Panel ).Pivot    = { 0.5f, 0.5f };
+
+    const entt::entity child = f.Registry.create();
+    auto&              cl    = f.Registry.emplace<ECS::UILayoutComponent>( child ).Data;
+    cl.AnchorMin             = { 0.0f, 0.0f };
+    cl.AnchorMax             = { 0.0f, 0.0f };
+    cl.OffsetMin             = { 20.0f, 20.0f };
+    cl.OffsetMax             = { 120.0f, 70.0f };
+    cl.Rotation              = 60.0f; // 30 + 60 = 90 composed, which is the one angle written down exactly
+    cl.Pivot                 = { 0.5f, 0.5f };
+    f.Registry.emplace<ECS::UIPanelComponent>( child ).Data.CornerRadius = 0.0f;
+    f.Registry.emplace<ECS::RelationshipComponent>( child ).Parent       = f.Panel;
+    f.Registry.get<ECS::RelationshipComponent>( f.Panel ).Children.push_back( child );
+
+    R2D::DrawList2D dl;
+    UICanvasContext ctx;
+    Draw( ctx, f.Registry, f.Canvas, dl, nullptr );
+    ASSERT_GE( dl.GetVertices().size(), 8u );
+
+    std::array<glm::vec2, 4> quad{};
+    for ( int i = 0; i < 4; ++i )
+        quad[i] = dl.GetVertices()[4 + i].Position;
+
+    // The child's own top edge is 100 px long and, at 90 degrees composed, must be VERTICAL. Replacing
+    // instead of composing would leave it at the child's own 60 degrees, i.e. 50 px of run.
+    const glm::vec2 topEdge = quad[1] - quad[0];
+    EXPECT_NEAR( glm::length( topEdge ), 100.0f, 1e-2f );
+    EXPECT_NEAR( topEdge.x, 0.0f, 1e-2f ) << "the child was drawn at its own rotation, not at the "
+                                             "composition of its own with its parent's";
+    EXPECT_NEAR( std::fabs( topEdge.y ), 100.0f, 1e-2f );
+
+    // WHERE the child ends up, worked out by hand so the assertion is independent of the code under
+    // test. The child's own 60 degrees is about its OWN centre, which that rotation leaves at (270,345);
+    // the parent's 30 degrees is about (350,360), so the offset (-80,-15) becomes
+    //   ( 0.866*-80 - 0.5*-15, 0.5*-80 + 0.866*-15 ) = (-61.782, -52.990)
+    // and the centre lands at (288.218, 307.010). Composed the other way round it would not: the two
+    // rotations are about different points, so the order shows in the position as well as the angle.
+    const glm::vec2 centre = ( quad[0] + quad[2] ) * 0.5f;
+    EXPECT_NEAR( centre.x, 288.218f, 1e-2f );
+    EXPECT_NEAR( centre.y, 307.010f, 1e-2f );
+
+    // The pointer is at the composition too, which is the half a draw-list test cannot reach.
+    EXPECT_TRUE( ElectsAt( f, child, centre ) );
+    EXPECT_EQ( Desert::UI::PickElement( f.Registry, f.Canvas, centre, kViewport ), child )
+         << "the editor's pick disagrees with the walk about a doubly-rotated child";
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

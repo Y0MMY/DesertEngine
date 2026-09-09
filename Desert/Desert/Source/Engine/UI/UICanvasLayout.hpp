@@ -84,8 +84,15 @@ namespace Desert::UI
     // layout the renderer uses — for the selection marquee and the drag handles. false if @p target is not
     // in that canvas's tree, which is now a MEANINGFUL false: asking the wrong canvas is a caller error and
     // no longer silently answers about somebody else's element.
+    //
+    // `out` is the element's rect BEFORE its render transform, because that is the space its UILayout
+    // offsets are written in — a caller that resized a rotated element from a transformed rect would
+    // write back offsets that had been through the rotation twice. @p outXform (optional) is the
+    // accumulated transform — its own composed inside its ancestors' — that maps that rect onto the
+    // screen, so a caller that wants to DRAW something over the element (a marquee, handles) has both
+    // halves and neither has to guess. Identity when nothing in the chain is transformed.
     [[nodiscard]] bool GetElementRect( entt::registry& reg, entt::entity canvas, entt::entity target,
-                                       const Rect& viewportPx, Rect& out );
+                                       const Rect& viewportPx, Rect& out, glm::mat3* outXform = nullptr );
 
     // @p canvas's current uniform scale (design px -> screen px) for the given viewport, per its scale mode
     // (1 in Stretch). The editor divides on-screen sizes by this when writing UILayout offsets so a value it
