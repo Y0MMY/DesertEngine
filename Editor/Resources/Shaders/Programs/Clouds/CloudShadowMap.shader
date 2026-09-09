@@ -166,6 +166,12 @@ Shader "CloudShadowMap"
             g_ShadowLayer = CloudUnpackLayer();
             g_ShadowField = CloudUnpackFieldParams();
 
+            // THIS WHOLE PASS IS A SHADOW RAY. Every sample it takes is integrated into optical depth and
+            // never into radiance, so an authored medium may answer it cheaply — the same permission Epic
+            // gives through ShadowSampleDistance. Declared once, here, because the flag rides on the
+            // params the callback below already reads out of this global.
+            g_ShadowField.ShadowRay = CLOUD_RAY_SHADOW;
+
             // Planet-centre-relative kilometres, the frame both shells are centred on the origin in —
             // the same change of frame the view march makes, and the same one
             // Graphic::CloudBuildShadowMapView placed the map's anchor in.

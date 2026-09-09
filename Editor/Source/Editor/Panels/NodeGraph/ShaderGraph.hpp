@@ -160,6 +160,25 @@ namespace Desert::Editor
         };
         const std::vector<VolumeParamOutOfScope>& VolumeParamsOutOfScope();
 
+        /// A Volume Output pin in which the Cloud Sample node's `ShadowRay` output means something.
+        ///
+        /// The medium is five functions and only TWO of them are ever called by a march that integrates
+        /// optical depth — the sun quadrature, the cloud shadow map and the sky-occlusion volume all ask
+        /// for a density and an extinction and nothing else. In the other three `ShadowRay` is the
+        /// constant zero, so a graph branching on it there would be authoring a path that can never be
+        /// taken: a dead knob, which this project's contract refuses in the same breath as a stub.
+        ///
+        /// Desert/Tests/Editor/ShaderGraphCompiler DERIVES this set from the shader tree — it reads which
+        /// entry points the three shadow-ray marches actually call — and compares it with the rows below,
+        /// so the day a shadow march starts asking for an albedo this register goes red instead of the
+        /// author's branch quietly disappearing.
+        struct ShadowRayScope
+        {
+            const char* OutputPin;  // the Volume Output input the medium function is compiled from
+            const char* EntryPoint; // the GLSL function a shadow-ray march calls
+        };
+        const std::vector<ShadowRayScope>& ShadowRayScopes();
+
         // Node kind that terminates a graph in the given domain (SurfaceOutput / PostProcessOutput).
         const char* OutputKind( Domain domain );
 

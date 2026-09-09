@@ -118,7 +118,36 @@ struct CloudFieldParams
     float InvRegionSizeKm;
 
     vec3 WindOffsetKm; // accumulated wind displacement, subtracted from the sample position
+
+    // WHICH KIND OF RAY IS ASKING — CLOUD_RAY_VIEW or CLOUD_RAY_SHADOW, below.
+    //
+    // It rides here rather than being an argument of the five medium entry points because it is a
+    // property of the MARCH and not of the sample: a whole quadrature is either integrating radiance
+    // toward an eye or optical depth toward a light, and it never changes between two samples of one
+    // loop. Stating that once per march is four assignments in this tree; stating it per sample would
+    // have been the same fact repeated at eighteen call sites, and would have changed the signature of
+    // every medium function — including the ones a graph never sees a shadow ray in.
+    //
+    // THE DEFAULT IS THE EXPENSIVE ONE, and that is deliberate. A march that forgets to declare itself
+    // gets CLOUD_RAY_VIEW, so an authored medium runs its FULL body there: forgetting this costs the
+    // author the saving they asked for and can never cost the frame its correctness. The other polarity
+    // would have made a new consumer silently render a cheapened medium as if it were the real one.
+    float ShadowRay;
 };
+
+// THE TWO RAY KINDS, and the boundary between them is what the answer IS, not where it points.
+//
+// CLOUD_RAY_VIEW marks a march that accumulates RADIANCE: the camera's march and the sky panorama's.
+// CLOUD_RAY_SHADOW marks a march that accumulates OPTICAL DEPTH and hands back a transmittance — the sun
+// quadrature in CloudLightOpticalDepth below, the cloud shadow map, and the sky-occlusion volume. Epic
+// exposes the same axis as ShadowSampleDistance and for the same purpose: a medium may be authored
+// cheaply where its only job is to attenuate, and expensively where it is seen.
+//
+// It is a float rather than a bool because it is an OUTPUT PIN of the graph's Cloud Sample node
+// (O1_DESIGN §3.3) and the node graph's scalar type is float; a `mix( expensive, cheap, ShadowRay )` is
+// then the whole idiom, with no branch to author.
+#define CLOUD_RAY_VIEW 0.0f
+#define CLOUD_RAY_SHADOW 1.0f
 
 // There are deliberately NO SEEDS AND NO OCTAVE COUNTS here. Both are properties of the BAKE — they
 // decide what is in the volume, not how it is read — so carrying them into the march would be four
@@ -807,6 +836,15 @@ CloudFieldSample SampleCloudField( CloudFieldParams params, float heightFraction
 float CloudLightOpticalDepth( CloudLayer layer, CloudFieldParams params, vec3 positionKm, vec3 toSun,
                               float marchKm, int sampleCount, float extinctionPerKm )
 {
+    // THIS IS THE SHADOW RAY, and it is the only one of the four that is not a whole program.
+    //
+    // @p params arrives as a COPY (GLSL parameters are `in` by default), so flipping the flag here marks
+    // every medium sample this quadrature takes and nothing else — the view march that called it keeps
+    // its own params untouched on the next iteration. That is the whole reason the flag lives on the
+    // struct: the two marches of CloudRaymarch.shader and of BakeProceduralSky.shader are nested, so no
+    // per-program constant could have separated them.
+    params.ShadowRay = CLOUD_RAY_SHADOW;
+
     float accumulated = 0.0f;
     float previous    = 0.0f;
     float invCount    = 1.0f / float( sampleCount );

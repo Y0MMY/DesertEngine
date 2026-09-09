@@ -92,6 +92,15 @@ Shader "CloudSkyOcclusionVolume"
             CloudLayer       layer  = CloudUnpackLayer();
             CloudFieldParams params = CloudUnpackFieldParams();
 
+            // A SHADOW RAY, even though it points at the sky rather than at the sun. The axis the flag
+            // draws is what the march ACCUMULATES, not where it aims: this loop integrates optical depth
+            // and stores a transmittance, exactly as the sun quadrature and the shadow map do, so an
+            // author who cheapens the medium "where it is only attenuating" means this pass too. Calling
+            // it a view ray because it is not aimed at a light would have left the one consumer that
+            // touches nine tenths of every frame paying full price for a medium nobody looks at through
+            // it.
+            params.ShadowRay = CLOUD_RAY_SHADOW;
+
             float thicknessKm = max(u_CloudLayer.z, 1e-4f);
             float regionSideKm = 1.0f / max(u_CloudRegion.z, 1e-9f);
 
