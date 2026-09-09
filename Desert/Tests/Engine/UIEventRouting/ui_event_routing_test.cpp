@@ -12,9 +12,9 @@
 // behaviour that a naive "bubble everything" implementation gets wrong is the pointer moving between two
 // children of one parent, and a single leaf cannot show it.
 //
-// The seam is the public one: RenderCanvas2D takes a plain entt::registry, a DrawList2D and a UIInput, so
-// the pointer is synthesised rather than injected, and what the canvas fired is read back out of the
-// outMessages vector the runtime host already passes.
+// The seam is the public one: RenderCanvas2D takes a plain entt::registry, the canvas to draw, a DrawList2D
+// and a UIInput, so the pointer is synthesised rather than injected, and what the canvas fired is read back
+// out of the outMessages vector the runtime host already passes.
 
 #include <Engine/UI/UICanvasContext.hpp>
 #include <Engine/UI/UICanvasRenderer2D.hpp>
@@ -204,7 +204,9 @@ namespace
 
         R2D::DrawList2D          dl;
         std::vector<std::string> out;
-        Desert::UI::RenderCanvas2D( ctx, t.Registry, dl, kViewport, nullptr, &input, nullptr, nullptr, &out );
+        const auto drawn = Desert::UI::RenderCanvas2D( ctx, t.Registry, t.Canvas, dl, kViewport, nullptr, &input,
+                                                       nullptr, nullptr, &out );
+        EXPECT_TRUE( drawn.IsSuccess() ) << drawn.GetError();
         return out;
     }
 

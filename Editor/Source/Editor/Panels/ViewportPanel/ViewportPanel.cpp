@@ -116,11 +116,16 @@ namespace Desert::Editor
             // Element size in DESIGN space (the space UILayout offsets are stored in). GetElementRect returns
             // the on-screen rect, so divide by the canvas scale. Fall back to the element's authored size when
             // it isn't resolvable (e.g. not parented under a canvas yet) so Fill/presets never silently no-op.
-            const float scale = ::Desert::UI::CanvasScale( reg, viewRect );
-            const float inv   = scale > 0.0001f ? 1.0f / scale : 1.0f;
-            float       sizeX = std::max( 1.0f, L.OffsetMax.x - L.OffsetMin.x );
-            float       sizeY = std::max( 1.0f, L.OffsetMax.y - L.OffsetMin.y );
-            if ( ::Desert::UI::Rect er; ::Desert::UI::GetElementRect( reg, e, viewRect, er ) )
+            //
+            // The canvas is THIS ELEMENT's own — derived from the tree it is in, not from whichever canvas
+            // the scene lists first. An element in the second canvas used to get the first one's scale.
+            const entt::entity canvas = ::Desert::UI::CanvasOf( reg, e );
+            const auto         scaleR = ::Desert::UI::CanvasScale( reg, canvas, viewRect );
+            const float        scale  = scaleR ? scaleR.GetValue() : 1.0f;
+            const float        inv    = scale > 0.0001f ? 1.0f / scale : 1.0f;
+            float              sizeX  = std::max( 1.0f, L.OffsetMax.x - L.OffsetMin.x );
+            float              sizeY  = std::max( 1.0f, L.OffsetMax.y - L.OffsetMin.y );
+            if ( ::Desert::UI::Rect er; ::Desert::UI::GetElementRect( reg, canvas, e, viewRect, er ) )
             {
                 sizeX = er.W * inv;
                 sizeY = er.H * inv;
@@ -413,9 +418,27 @@ namespace Desert::Editor
                 ImGui::OpenPopup( "ui_create" );
             if ( ImGui::BeginPopup( "ui_create" ) )
             {
-                auto&              reg    = m_Scene->GetRegistry();
-                const entt::entity canvas = FindUICanvas( reg );
+                auto& reg = m_Scene->GetRegistry();
+
+                // WHICH CANVAS THE NEW ELEMENT GOES INTO. The selection answers it exactly when there is
+                // one — an element names its own canvas — and only a scene with a single canvas has an
+                // answer without it. With two canvases and nothing selected there is genuinely no answer,
+                // and the menu says so rather than dropping the element into the first canvas, which is
+                // what this did before and where it would then be invisible to the author who asked.
+                entt::entity canvas = entt::null;
+                std::string  canvasRefusal;
+                if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
+                    if ( auto ref = m_Scene->FindEntityByID( *sel ) )
+                        canvas = ::Desert::UI::CanvasOf( reg, ref->get().GetHandle() );
                 if ( canvas == entt::null )
+                {
+                    if ( const auto sole = ::Desert::UI::SoleCanvas( reg ) )
+                        canvas = sole.GetValue();
+                    else
+                        canvasRefusal = sole.GetError();
+                }
+
+                if ( canvas == entt::null && ::Desert::UI::CanvasCount( reg ) == 0 )
                 {
                     if ( ImGui::MenuItem( ICON_MDI_PLUS "  UI Canvas" ) )
                     {
@@ -424,6 +447,12 @@ namespace Desert::Editor
                         if ( const entt::entity h = CreateUICanvas( *m_Scene ); h != entt::null )
                             Core::SelectionManager::SetSelected( reg.get<ECS::UUIDComponent>( h ).UUID );
                     }
+                }
+                else if ( canvas == entt::null )
+                {
+                    ImGui::TextDisabled( "Select an element of the canvas you want to add to" );
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "%s", canvasRefusal.c_str() );
                 }
                 else
                 {
@@ -454,9 +483,11 @@ namespace Desert::Editor
         // --- In-scene UI: anchor presets (Unity/UE RectTransform) + 2D toggle. Shown only when relevant so
         // the toolbar stays clean for pure-3D scenes. ---
         {
-            auto&              reg    = m_Scene->GetRegistry();
-            const entt::entity canvas = FindUICanvas( reg );
-            entt::entity       selUI  = entt::null;
+            // The row is about whether this scene DOES UI at all, so it counts canvases instead of electing
+            // one — counting cannot pick a wrong winner, and two canvases must not read as one.
+            auto&        reg       = m_Scene->GetRegistry();
+            const bool   hasCanvas = ::Desert::UI::CanvasCount( reg ) > 0;
+            entt::entity selUI     = entt::null;
             if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
                 if ( auto ref = m_Scene->FindEntityByID( *sel ) )
                     if ( reg.has<ECS::UILayoutComponent>( ref->get().GetHandle() ) )
@@ -504,7 +535,7 @@ namespace Desert::Editor
             // already on, whatever the scene holds. The palette can turn the mode on from outside
             // (ToggleUIMode) and a canvas can be deleted while the mode is running; without the second
             // condition either leaves a viewport in a mode whose only OFF switch has disappeared.
-            if ( canvas != entt::null || m_Modes.UI2D )
+            if ( hasCanvas || m_Modes.UI2D )
             {
                 ImGui::SameLine();
                 // A MODE, AND IT TOUCHES NOTHING BUT ITSELF. What 2D mode hides is applied to a COPY of
@@ -1144,10 +1175,13 @@ namespace Desert::Editor
 
         // Canvas bounds outline so an EMPTY canvas (no Panel yet) is still visible + selectable — you can
         // see where it maps on screen. Dashed-ish subtle frame, drawn under the element handles.
-        if ( const entt::entity canvas = FindUICanvas( reg ); canvas != entt::null )
+        //
+        // EVERY canvas, not the first: this frame is how an author sees where a canvas maps, and a second
+        // canvas that is never outlined is a canvas the author cannot find. Enumerating is not electing.
+        for ( const entt::entity canvas : reg.view<ECS::UICanvasComponent>() )
         {
             ::Desert::UI::Rect cr;
-            if ( ::Desert::UI::GetElementRect( reg, canvas, viewRect, cr ) )
+            if ( ::Desert::UI::GetElementRect( reg, canvas, canvas, viewRect, cr ) )
                 dl->AddRect( ImVec2( cr.X, cr.Y ), ImVec2( cr.X + cr.W, cr.Y + cr.H ),
                              IM_COL32( 120, 135, 160, 170 ), 0.0f, 0, 1.5f );
         }
@@ -1163,8 +1197,12 @@ namespace Desert::Editor
         if ( !reg.has<ECS::UILayoutComponent>( e ) )
             return;
 
+        // Everything below is about the selected element, so the canvas below is ITS canvas — the one it
+        // actually lives in. Handles, anchors and snapping all resolve inside that tree.
+        const entt::entity selCanvas = ::Desert::UI::CanvasOf( reg, e );
+
         ::Desert::UI::Rect r;
-        if ( !::Desert::UI::GetElementRect( reg, e, viewRect, r ) )
+        if ( !::Desert::UI::GetElementRect( reg, selCanvas, e, viewRect, r ) )
             return;
 
         // Selection marquee.
@@ -1203,8 +1241,9 @@ namespace Desert::Editor
                              IM_COL32( 20, 20, 20, 255 ) );
             }
 
-        const ImVec2 mouse = ImGui::GetMousePos();
-        const float  scale = std::max( 0.0001f, ::Desert::UI::CanvasScale( reg, viewRect ) );
+        const ImVec2 mouse  = ImGui::GetMousePos();
+        const auto   scaleR = ::Desert::UI::CanvasScale( reg, selCanvas, viewRect );
+        const float  scale  = std::max( 0.0001f, scaleR ? scaleR.GetValue() : 1.0f );
 
         // Parent rect: anchors are fractions of it. Draggable anchor markers let you re-anchor the element
         // (change how it pins to the parent) WITHOUT moving it — same idea as Unity's RectTransform anchors.
@@ -1213,7 +1252,7 @@ namespace Desert::Editor
                                           : entt::null;
         ::Desert::UI::Rect pr;
         const bool         haveParent =
-             parentE != entt::null && ::Desert::UI::GetElementRect( reg, parentE, viewRect, pr );
+             parentE != entt::null && ::Desert::UI::GetElementRect( reg, selCanvas, parentE, viewRect, pr );
 
         const auto&  aL    = reg.get<ECS::UILayoutComponent>( e ).Data;
         const ImVec2 aMinP = haveParent ? ImVec2( pr.X + aL.AnchorMin.x * pr.W, pr.Y + aL.AnchorMin.y * pr.H )
@@ -1346,7 +1385,8 @@ namespace Desert::Editor
                                                      ? reg.get<ECS::RelationshipComponent>( e ).Parent
                                                      : entt::null;
                     ::Desert::UI::Rect pr;
-                    if ( parent != entt::null && ::Desert::UI::GetElementRect( reg, parent, viewRect, pr ) )
+                    if ( parent != entt::null &&
+                         ::Desert::UI::GetElementRect( reg, selCanvas, parent, viewRect, pr ) )
                     {
                         const auto& L0     = reg.get<ECS::UILayoutComponent>( e ).Data;
                         const float eLeft  = pr.X + L0.AnchorMin.x * pr.W + oMin.x * scale;
@@ -1597,10 +1637,19 @@ namespace Desert::Editor
             // skips the 3D raycast (unless a 3D gizmo handle is being grabbed). Edit anchors/colour in Details.
             if ( !m_Gizmo.IsHovered() )
             {
-                auto&        reg   = m_Scene->GetRegistry();
-                entt::entity uiHit = ::Desert::UI::PickElement(
-                     reg, glm::vec2( mp.x, mp.y ),
-                     ::Desert::UI::Rect{ vp.ViewportPos.x, vp.ViewportPos.y, vp.Size.x, vp.Size.y } );
+                auto&                    reg = m_Scene->GetRegistry();
+                const ::Desert::UI::Rect viewRect{ vp.ViewportPos.x, vp.ViewportPos.y, vp.Size.x, vp.Size.y };
+
+                // Ask EVERY canvas and keep the last hit. Canvases are drawn in registry order, so the last
+                // one to answer is the one on top — the same "last writer wins" rule the renderer's own hot
+                // election uses. Picking through only the first canvas is what made an overlay canvas
+                // unselectable in the viewport while it was plainly on screen.
+                entt::entity uiHit = entt::null;
+                for ( const entt::entity canvas : reg.view<ECS::UICanvasComponent>() )
+                    if ( const entt::entity hit =
+                              ::Desert::UI::PickElement( reg, canvas, glm::vec2( mp.x, mp.y ), viewRect );
+                         hit != entt::null )
+                        uiHit = hit;
 
                 // Clicking a control's content (e.g. a button's label / icon) selects the CONTROL, not the
                 // child — promote the hit to its nearest interactable ancestor. Alt-click drills down to the

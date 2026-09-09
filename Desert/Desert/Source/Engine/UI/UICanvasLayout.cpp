@@ -3,10 +3,59 @@
 #include <Engine/ECS/Components.hpp>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <vector>
 
 namespace Desert::UI
 {
+    entt::entity CanvasOf( entt::registry& reg, entt::entity e )
+    {
+        // Bounded by the entity count rather than trusting the tree to be acyclic: a Parent cycle is
+        // authorable (the hierarchy panel can reparent), and an unbounded walk here would hang the editor
+        // instead of returning "not under a canvas".
+        const std::size_t limit = reg.size() + 1;
+        std::size_t       steps = 0;
+        for ( entt::entity cur = e; cur != entt::null && reg.valid( cur ) && steps < limit; ++steps )
+        {
+            if ( reg.has<ECS::UICanvasComponent>( cur ) )
+                return cur;
+            cur = reg.has<ECS::RelationshipComponent>( cur ) ? reg.get<ECS::RelationshipComponent>( cur ).Parent
+                                                             : entt::null;
+        }
+        return entt::null;
+    }
+
+    std::size_t CanvasCount( entt::registry& reg )
+    {
+        std::size_t n = 0;
+        for ( [[maybe_unused]] const auto e : reg.view<ECS::UICanvasComponent>() )
+            ++n;
+        return n;
+    }
+
+    Common::ResultStr<entt::entity> SoleCanvas( entt::registry& reg )
+    {
+        entt::entity first = entt::null;
+        std::size_t  n     = 0;
+        for ( const auto e : reg.view<ECS::UICanvasComponent>() )
+        {
+            if ( n == 0 )
+                first = e;
+            ++n;
+        }
+        if ( n == 1 )
+            return Common::MakeSuccess( first );
+        if ( n == 0 )
+            return Common::MakeFormattedError<entt::entity>(
+                 "[UI] the scene has no UI canvas, so no host can be given one to draw or measure" );
+        return Common::MakeFormattedError<entt::entity>(
+             "[UI] the scene has {} UI canvases and this host did not name one; it is NOT the first one's "
+             "job to win by iteration order — name the canvas (UI::CanvasOf on an element of it, or the "
+             "host's own document/subject)",
+             n );
+    }
+
     bool TakesLayoutSpace( entt::registry& reg, entt::entity e )
     {
         if ( !reg.valid( e ) || !reg.has<ECS::UILayoutComponent>( e ) )
@@ -56,25 +105,31 @@ namespace Desert::UI
             }
         }
 
-        // Resolves the canvas root rect exactly like the renderer. false if the scene has no visible canvas.
-        // Shared by PickElement / GetElementRect so hit-testing matches drawing.
-        bool CanvasRootRect( entt::registry& reg, const Rect& viewportPx, entt::entity& canvasOut, Rect& rectOut,
-                             float& scaleOut )
+        // Resolves the root rect of the canvas the caller NAMED, exactly like the renderer. Shared by
+        // PickElement / GetElementRect / CanvasScale so hit-testing matches drawing.
+        //
+        // The three refusals are distinct on purpose. "You named something that is not a canvas" is a caller
+        // bug and reads nothing like "this canvas is switched off", and both used to arrive as the same
+        // `false` — on top of a canvas nobody had named in the first place.
+        Common::ResultStr<CanvasFit> ResolveNamedCanvas( entt::registry& reg, entt::entity canvas,
+                                                         const Rect& viewportPx )
         {
-            auto canvasView = reg.view<ECS::UICanvasComponent>();
-            if ( canvasView.begin() == canvasView.end() )
-                return false;
+            if ( canvas == entt::null || !reg.valid( canvas ) )
+                return Common::MakeFormattedError<CanvasFit>(
+                     "[UI] no canvas was named for this layout query (entity {})",
+                     static_cast<std::uint32_t>( canvas ) );
+            if ( !reg.has<ECS::UICanvasComponent>( canvas ) )
+                return Common::MakeFormattedError<CanvasFit>(
+                     "[UI] entity {} was named as a canvas but carries no UICanvasComponent",
+                     static_cast<std::uint32_t>( canvas ) );
 
-            const entt::entity canvasEntity = *canvasView.begin();
-            const auto&        canvasData   = reg.get<ECS::UICanvasComponent>( canvasEntity ).Data;
+            const auto& canvasData = reg.get<ECS::UICanvasComponent>( canvas ).Data;
             if ( !canvasData.Visible )
-                return false;
+                return Common::MakeFormattedError<CanvasFit>(
+                     "[UI] canvas {} is not Visible, so it has no on-screen layout to report",
+                     static_cast<std::uint32_t>( canvas ) );
 
-            const CanvasFit fit = ResolveCanvas( canvasData, viewportPx );
-            rectOut             = fit.Root;
-            scaleOut            = fit.Scale;
-            canvasOut           = canvasEntity;
-            return true;
+            return Common::MakeSuccess( ResolveCanvas( canvasData, viewportPx ) );
         }
 
         // Content size (px) a layout-group container needs to hug its children — mirrors the renderer's
@@ -254,16 +309,16 @@ namespace Desert::UI
         }
     } // namespace
 
-    entt::entity PickElement( entt::registry& reg, const glm::vec2& pointPx, const Rect& viewportPx )
+    entt::entity PickElement( entt::registry& reg, entt::entity canvas, const glm::vec2& pointPx,
+                              const Rect& viewportPx )
     {
-        entt::entity canvas;
-        Rect         canvasRect;
-        float        scale = 1.0f;
-        if ( !CanvasRootRect( reg, viewportPx, canvas, canvasRect, scale ) )
-            return entt::null;
+        const auto fit = ResolveNamedCanvas( reg, canvas, viewportPx );
+        if ( !fit )
+            return entt::null; // nothing on screen to hit; the refusal's text belongs to the caller's own log
 
+        const float scale     = fit.GetValue().Scale;
         const auto& cd        = reg.get<ECS::UICanvasComponent>( canvas ).Data;
-        const Rect  childRoot = InsetRect( canvasRect, cd.SafeArea.x * scale, cd.SafeArea.y * scale,
+        const Rect  childRoot = InsetRect( fit.GetValue().Root, cd.SafeArea.x * scale, cd.SafeArea.y * scale,
                                            cd.SafeArea.z * scale, cd.SafeArea.w * scale );
 
         entt::entity hit = entt::null;
@@ -274,21 +329,21 @@ namespace Desert::UI
         return hit;
     }
 
-    bool GetElementRect( entt::registry& reg, entt::entity target, const Rect& viewportPx, Rect& out )
+    bool GetElementRect( entt::registry& reg, entt::entity canvas, entt::entity target, const Rect& viewportPx,
+                         Rect& out )
     {
-        entt::entity canvas;
-        Rect         canvasRect;
-        float        scale = 1.0f;
-        if ( !CanvasRootRect( reg, viewportPx, canvas, canvasRect, scale ) )
+        const auto fit = ResolveNamedCanvas( reg, canvas, viewportPx );
+        if ( !fit )
             return false;
 
         if ( target == canvas )
         {
-            out = canvasRect;
+            out = fit.GetValue().Root;
             return true;
         }
+        const float scale     = fit.GetValue().Scale;
         const auto& cd        = reg.get<ECS::UICanvasComponent>( canvas ).Data;
-        const Rect  childRoot = InsetRect( canvasRect, cd.SafeArea.x * scale, cd.SafeArea.y * scale,
+        const Rect  childRoot = InsetRect( fit.GetValue().Root, cd.SafeArea.x * scale, cd.SafeArea.y * scale,
                                            cd.SafeArea.z * scale, cd.SafeArea.w * scale );
         bool        found     = false;
         if ( reg.has<ECS::RelationshipComponent>( canvas ) )
@@ -298,12 +353,11 @@ namespace Desert::UI
         return found;
     }
 
-    float CanvasScale( entt::registry& reg, const Rect& viewportPx )
+    Common::ResultStr<float> CanvasScale( entt::registry& reg, entt::entity canvas, const Rect& viewportPx )
     {
-        entt::entity canvas;
-        Rect         canvasRect;
-        float        scale = 1.0f;
-        CanvasRootRect( reg, viewportPx, canvas, canvasRect, scale );
-        return scale;
+        const auto fit = ResolveNamedCanvas( reg, canvas, viewportPx );
+        if ( !fit )
+            return Common::MakeError<float>( fit.GetError() );
+        return Common::MakeSuccess( fit.GetValue().Scale );
     }
 } // namespace Desert::UI
