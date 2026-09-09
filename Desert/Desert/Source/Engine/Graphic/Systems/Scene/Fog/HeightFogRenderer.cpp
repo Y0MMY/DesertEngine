@@ -66,10 +66,13 @@ namespace Desert::Graphic::System
                        kFogShaderName, kFogShaderName );
             return false;
         }
-        m_FogPipeline = ComputePipeline::Create( { .Shader = fogShader, .DebugName = kFogShaderName } );
-        if ( !m_FogPipeline )
+        const auto fog = ComputePipeline::Create( { .Shader = fogShader, .DebugName = kFogShaderName } );
+        if ( !fog )
+        {
+            LOG_ERROR( "[HeightFog] {}", fog.GetError() );
             return false;
-        m_FogPipeline->Invalidate();
+        }
+        m_FogPipeline = fog.GetValue();
 
         const auto target = m_TargetFramebuffer.lock();
         if ( !target )

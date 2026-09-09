@@ -265,6 +265,23 @@ namespace Desert::Graphic::API::Vulkan
                               ->GetVulkanLogicalDevice();
         const auto vulkanShader = sp_cast<VulkanShader>( m_Specification.Shader );
 
+        // THE STAGE IS FOUND BY WHAT IT IS, NOT BY WHERE IT SITS. This used to be
+        // `GetPipelineShaderStageCreateInfos()[0]` at the pipeline-info below, which reads a vector a
+        // failed compile leaves empty (SIGSEGV, after 23 validation errors about a descriptor pool of
+        // size zero) and, when the vector is full, happily hands vkCreateComputePipelines the VERTEX
+        // stage of a graphics program reached by name. Both are refusals, so both are refused here and
+        // nothing is built: the caller sees it because ComputePipeline::Create asks this object for the
+        // handle it produced.
+        const VkPipelineShaderStageCreateInfo* computeStage = vulkanShader->GetComputeStage();
+        if ( !computeStage )
+        {
+            LOG_ERROR( "ComputePipeline '{}': shader '{}' carries no compute stage ({} stage(s) in all) "
+                       "— nothing is built and the dispatches using it are skipped.",
+                       m_Specification.DebugName, vulkanShader->GetName(),
+                       vulkanShader->GetPipelineShaderStageCreateInfos().size() );
+            return;
+        }
+
         // Captured ONCE, here, and used for everything this pipeline binds: the pipeline layout below,
         // the in-frame ring, and the pool that ring is allocated from. Holding the references is what
         // keeps the layouts alive if the shader recompiles under us, and using only these is what keeps
@@ -323,9 +340,8 @@ namespace Desert::Graphic::API::Vulkan
         const VkPipelineCache pipelineCache =
              SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetPipelineCache();
 
-        const VkComputePipelineCreateInfo pipelineInfo{ .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-                                                        .stage =
-                                                             vulkanShader->GetPipelineShaderStageCreateInfos()[0],
+        const VkComputePipelineCreateInfo pipelineInfo{ .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+                                                        .stage  = *computeStage,
                                                         .layout = m_ComputePipelineLayout };
 
         VK_CHECK_RESULT(

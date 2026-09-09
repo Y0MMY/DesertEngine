@@ -79,8 +79,16 @@ namespace Desert::Graphic
         if ( !output )
             return nullptr;
 
-        auto pipeline = ComputePipeline::Create( { .Shader = shader, .DebugName = "BakeProceduralSky" } );
-        pipeline->Invalidate();
+        const auto built = ComputePipeline::Create( { .Shader = shader, .DebugName = "BakeProceduralSky" } );
+        if ( !built )
+        {
+            // The panorama that lights the scene is not baked, and the caller reads a null image as
+            // "no environment" — the same outcome the shader-missing branch above produces, said with
+            // the reason rather than by falling over.
+            LOG_ERROR( "[ComputeImages] the procedural sky panorama was not baked: {}", built.GetError() );
+            return nullptr;
+        }
+        const auto& pipeline = built.GetValue();
 
         pipeline->SetOutput( 0, output.get(), 0 );
         // The bake reads the sky through the same std430 block the screen pass does — no second hand-packed
@@ -229,8 +237,15 @@ namespace Desert::Graphic
         if ( !input || !output )
             return output;
 
-        auto pipeline = ComputePipeline::Create( { .Shader = shader, .DebugName = spec.Tag } );
-        pipeline->Invalidate();
+        const auto built = ComputePipeline::Create( { .Shader = shader, .DebugName = spec.Tag } );
+        if ( !built )
+        {
+            // The cube comes back allocated and never written, which is what every failure path in this
+            // function already hands back — named here so the black environment has a cause in the log.
+            LOG_ERROR( "[ComputeImages] '{}' was not convolved: {}", spec.Tag, built.GetError() );
+            return output;
+        }
+        const auto& pipeline = built.GetValue();
 
         pipeline->SetInput( 0, input );
         pipeline->SetOutput( 1, output.get(), 0 );
@@ -292,8 +307,13 @@ namespace Desert::Graphic
         if ( !radiance || !output )
             return output;
 
-        auto pipeline = ComputePipeline::Create( { .Shader = shader, .DebugName = spec.Tag } );
-        pipeline->Invalidate();
+        const auto built = ComputePipeline::Create( { .Shader = shader, .DebugName = spec.Tag } );
+        if ( !built )
+        {
+            LOG_ERROR( "[ComputeImages] '{}' mip chain was not prefiltered: {}", spec.Tag, built.GetError() );
+            return output;
+        }
+        const auto& pipeline = built.GetValue();
 
         // One dispatch per mip, each convolved with the matching GGX roughness.
         for ( uint32_t mip = 0; mip < mips; ++mip )

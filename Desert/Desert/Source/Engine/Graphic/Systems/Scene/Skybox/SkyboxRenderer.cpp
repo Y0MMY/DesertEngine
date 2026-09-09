@@ -119,13 +119,18 @@ namespace Desert::Graphic::System
                                name, name );
                     return nullptr;
                 }
-                auto pipeline = ComputePipeline::Create( { .Shader = shader, .DebugName = name } );
-                if ( !pipeline )
+                // Create() hands back a BUILT pipeline or the reason it refused. The two-line idiom this
+                // replaces — allocate here, `Invalidate()` on the next line — is what let a shader with
+                // no compiled stages reach vkCreateComputePipelines and take the editor down.
+                const auto built = ComputePipeline::Create( { .Shader = shader, .DebugName = name } );
+                if ( !built )
+                {
+                    LOG_ERROR( "[SkyAtmosphere] {} The physical atmosphere's LUTs will not be built for "
+                               "this view.",
+                               built.GetError() );
                     return nullptr;
-                // Create() allocates the object, Invalidate() builds the Vulkan pipeline — the same
-                // two-line idiom as every other compute call site in the engine.
-                pipeline->Invalidate();
-                return pipeline;
+                }
+                return built.GetValue();
             };
 
             m_TransmittanceLutPipeline  = makeCompute( "SkyTransmittanceLut" );

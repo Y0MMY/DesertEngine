@@ -8,6 +8,11 @@
 
 #include <Common/Core/Memory/Buffer.hpp>
 
+// For NO_DISCARD and BOOLSUCCESS on the compute-pipeline rule below. Not implicit: this header is
+// reached by translation units that never include Core.hpp on their own — the same reason
+// IndexBuffer.hpp and VertexBuffer.hpp include it explicitly.
+#include <Common/Core/Core.hpp>
+
 namespace Desert::ShaderResources
 {
     class StorageBuffer;
@@ -188,6 +193,47 @@ namespace Desert::Graphic
         std::string             DebugName;
     };
 
+    /**
+     * Whether a compute pipeline may be built from @p spec at all — the one rule, asked in one place,
+     * so that ComputePipeline::Create has a single thing to obey and a test has a single thing to run.
+     *
+     * THE REFUSAL THIS EXISTS FOR. A shader whose FIRST compile fails is still constructed, still kept
+     * under its name by ShaderService::Register (deliberately, so the material naming it is not silently
+     * swapped for the standard one), and still handed out by GetByName(). Building a compute pipeline
+     * from it read `VulkanShader::GetPipelineShaderStageCreateInfos()[0]` — of the vector a failed
+     * compile leaves EMPTY. Measured on the live editor: 23 validation errors about a descriptor pool
+     * with `descriptorSetCount == 0`, then SIGSEGV, i.e. the editor vanished because an artist mistyped
+     * a line of GLSL. The graphics side has refused this since its own crash (VulkanPipeline::Invalidate);
+     * the compute side had nothing.
+     *
+     * WHY IT IS A FREE FUNCTION IN THE HEADER AND NOT THREE LINES INSIDE Create(). Create() cannot be
+     * linked without the whole Vulkan backend, so a gate over it could never run on a machine with no
+     * device — and a refusal nobody can make fire is the kind of gate this project has already been
+     * burned by. Here the DECISION is device-free and Desert/Tests/Engine/ComputePipelineRefusal calls
+     * it directly; the same suite pins that Create obeys it.
+     *
+     * It answers only what can be answered without a device: is there a shader, and has it ever
+     * compiled. "Is that shader's stage a COMPUTE stage" is a different question, needs the backend's
+     * stage list, and is asked by VulkanPipelineCompute::Invalidate through VulkanShader::GetComputeStage.
+     */
+    NO_DISCARD inline Common::BoolResultStr
+    CheckComputePipelineSpecification( const ComputePipelineSpecification& spec )
+    {
+        if ( !spec.Shader )
+        {
+            return Common::MakeFormattedError( "ComputePipeline '{}': no shader was given.",
+                                               spec.DebugName.empty() ? "<unnamed>" : spec.DebugName );
+        }
+        if ( !spec.Shader->IsCompiled() )
+        {
+            return Common::MakeFormattedError(
+                 "ComputePipeline '{}': shader '{}' has no compiled stages (see the shader compilation "
+                 "error above). The dispatches using it are skipped.",
+                 spec.DebugName.empty() ? "<unnamed>" : spec.DebugName, spec.Shader->GetName() );
+        }
+        return BOOLSUCCESS;
+    }
+
     class ComputePipeline : public IPipeline
     {
     public:
@@ -212,7 +258,26 @@ namespace Desert::Graphic
 
         // GetInput/GetOutput were here and had no caller: a compute pipeline's bindings are SET and then
         // dispatched, never read back, and the backend keeps its own maps for the descriptor writes. Г12.
-        static std::shared_ptr<ComputePipeline> Create( const ComputePipelineSpecification& spec );
+
+        /**
+         * The ONLY way to obtain a compute pipeline, and it hands back one that is already BUILT.
+         *
+         * IT RETURNS A RESULT BECAUSE IT CAN REFUSE, AND IT COULD NOT BEFORE. It used to return a bare
+         * `shared_ptr` that `make_shared` can never leave null, so every one of the sixteen call sites
+         * in the engine was either unchecked or carried an `if ( !pipeline )` branch that COULD NOT RUN —
+         * and that is what hid the crash: the code looked like it handled a failure it was structurally
+         * unable to see. Two refusals are now reachable through it: a shader that has never compiled
+         * (CheckComputePipelineSpecification above) and one with no COMPUTE stage in it, e.g. a graphics
+         * program reached by name (VulkanPipelineCompute::Invalidate, observed here through the built
+         * handle rather than through a mirror flag).
+         *
+         * BUILT, NOT MERELY ALLOCATED. Every call site used to read `Create(...)` then `Invalidate()` on
+         * the next line — a two-step whose first half returns an object that cannot dispatch and whose
+         * second half could not report anything. Folding it here is what makes the returned pipeline's
+         * success a property of the OBJECT rather than of the caller having remembered the second line.
+         */
+        NO_DISCARD static Common::ResultStr<std::shared_ptr<ComputePipeline>>
+        Create( const ComputePipelineSpecification& spec );
     };
 
 } // namespace Desert::Graphic

@@ -275,9 +275,12 @@ namespace Desert::Graphic::System
                 if ( const auto cullShader =
                           Runtime::ResourceRegistry::GetShaderService()->GetByName( "GrassCull" ) )
                 {
-                    m_GrassCullPipeline = ComputePipeline::Create( { .Shader = cullShader, .DebugName = "GrassCull" } );
-                    if ( m_GrassCullPipeline )
-                        m_GrassCullPipeline->Invalidate();
+                    const auto cull =
+                         ComputePipeline::Create( { .Shader = cullShader, .DebugName = "GrassCull" } );
+                    if ( cull )
+                        m_GrassCullPipeline = cull.GetValue();
+                    else
+                        LOG_ERROR( "[Terrain] grass culling is off for this scene: {}", cull.GetError() );
                 }
             }
         }

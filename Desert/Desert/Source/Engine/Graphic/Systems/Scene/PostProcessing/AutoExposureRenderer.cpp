@@ -102,9 +102,13 @@ namespace Desert::Graphic::System
                 LOG_ERROR( "AutoExposureRenderer: missing compute shader '{}'", name );
                 return nullptr;
             }
-            auto pipeline = ComputePipeline::Create( { .Shader = shader, .DebugName = name } );
-            pipeline->Invalidate();
-            return pipeline;
+            const auto built = ComputePipeline::Create( { .Shader = shader, .DebugName = name } );
+            if ( !built )
+            {
+                LOG_ERROR( "AutoExposureRenderer: {}", built.GetError() );
+                return nullptr;
+            }
+            return built.GetValue();
         };
         m_ClearPipeline     = make( "AEHistogramClear" );
         m_HistogramPipeline = make( "AEHistogram" );
