@@ -6,6 +6,7 @@
 #include <Engine/UI/UIDataStore.hpp>
 
 #include <Editor/Core/Selection/UIPreview.hpp>
+#include <Editor/Core/UIProbeRegistry.hpp>
 
 #include <Common/Core/Logger.hpp>
 
@@ -14,7 +15,13 @@ namespace Desert::Editor::Render
     EditorUIPass::~EditorUIPass()
     {
         if ( const auto scene = m_Scene.lock() )
+        {
             scene->UnregisterExternalPass( "EditorUI2D" );
+            // The slot is keyed by the scene's ADDRESS, and a freed scene's address is reused by the next
+            // one — the same false-negative UICanvasContext::Registry warns about. Dropping it here is
+            // what stops a reopened document from inheriting the closed one's numbers.
+            Core::UIProbeRegistry::Get().Forget( scene.get() );
+        }
     }
 
     Common::BoolResultStr EditorUIPass::Install( const std::shared_ptr<::Desert::Core::Scene>& scene )
@@ -102,6 +109,15 @@ namespace Desert::Editor::Render
                           feed ? &pv.Focused : nullptr, feed ? &uiMessages : nullptr );
                      !drawn )
                     LOG_ERROR( "[UI Preview] {}", drawn.GetError() );
+
+                // BEFORE Flush and AFTER the walk: this is the one moment the frame's draw list is
+                // complete and still readable, and it is the same object Flush is about to turn into
+                // draw calls — so the panel's numbers cannot be a second tally that drifts from it.
+                // The sink does nothing at all unless the UI Debugger panel armed it.
+                Core::UIProbeRegistry::Get()
+                     .Slot( scene.get() )
+                     .Capture( m_UICanvas, scene->GetRegistry(), canvas.GetValue(), m_Render2D.GetDrawList(),
+                               UI::Rect{ 0.0f, 0.0f, w, h } );
             }
             m_Render2D.Flush();
 

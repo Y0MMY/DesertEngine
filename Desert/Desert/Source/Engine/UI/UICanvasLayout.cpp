@@ -2,6 +2,8 @@
 
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Graphic/Render2D/Transform2D.hpp>
+#include <Engine/UI/UICanvasContext.hpp>
+#include <Engine/UI/UIDataStore.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -233,27 +235,119 @@ namespace Desert::UI
                         : Graphic::Render2D::TransformPoint2D( Graphic::Render2D::InverseTransform2D( xform ), p );
         }
 
-        void PickRecurse( entt::registry& reg, entt::entity e, const Rect& parent, float scale, const glm::vec2& p,
-                          entt::entity& hit, const glm::mat3& parentXform, const Rect* forcedRect = nullptr )
+        // The scissor, as a rect. The clip a child inherits is the intersection of everything above it,
+        // which is what makes a nested list clip inside its own page.
+        Rect IntersectRectPx( const Rect& a, const Rect& b )
         {
-            // An element that is not drawn cannot be clicked in the viewport either — the same rule the
-            // renderer applies to the pointer, applied to the editor's WYSIWYG pick, because a marquee
-            // appearing around something invisible is a selection the author cannot explain. A hidden
-            // element is still selectable from the Scene Hierarchy, which is where it is visible.
-            if ( !IsElementVisible( reg, e ) )
-                return;
+            const float x0 = std::max( a.X, b.X );
+            const float y0 = std::max( a.Y, b.Y );
+            const float x1 = std::min( a.X + a.W, b.X + b.W );
+            const float y1 = std::min( a.Y + a.H, b.Y + b.H );
+            return Rect{ x0, y0, std::max( 0.0f, x1 - x0 ), std::max( 0.0f, y1 - y0 ) };
+        }
 
-            Rect       rect      = parent;
+        // The axis-aligned box @p r occupies on screen once @p xform has acted on it — the same box
+        // DrawList2D::PushClipRect stores for a rotated clipper, because a scissor is the only clip the
+        // hardware has.
+        Rect ScreenBoundsOf( const glm::mat3& xform, const Rect& r )
+        {
+            if ( Graphic::Render2D::IsIdentity2D( xform ) )
+                return r;
+            glm::vec2 mn, mx;
+            Graphic::Render2D::TransformedAABB2D( xform, { r.X, r.Y }, { r.X + r.W, r.Y + r.H }, mn, mx );
+            return Rect{ mn.x, mn.y, mx.x - mn.x, mx.y - mn.y };
+        }
+
+        // Everything one level of the walk inherits from the level above it.
+        struct EnumScope
+        {
+            Rect         Parent{};         // the box children lay out in (already scrolled, for a list)
+            Rect         Clip{};           // inherited scissor; W<=0 => unclipped
+            glm::mat3    Xform{ 1.0f };    // ancestors' composed render transform
+            int          Depth        = 0; // 0 for a direct child of the canvas
+            entt::entity ParentEntity = entt::null;
+            bool         Elect        = true;       // may the pointer stop anywhere in here
+            entt::entity SkippedBy    = entt::null; // the ancestor that stopped the walk, if one did
+        };
+
+        void EnumRecurse( entt::registry& reg, entt::entity e, const EnumScope& scope, float scale,
+                          const Rect& viewportPx, const UICanvasContext* ctx, std::vector<UIElementNode>& out,
+                          int& order, const Rect* forcedRect )
+        {
             const bool hasLayout = reg.has<ECS::UILayoutComponent>( e );
+
+            UIElementNode node;
+            node.Entity    = e;
+            node.Parent    = scope.ParentEntity;
+            node.Depth     = scope.Depth;
+            node.TakesSlot = TakesLayoutSpace( reg, e );
+            node.OwnRect   = ( forcedRect != nullptr ) || hasLayout;
+            node.RectValid = true;
+
+            // WHY THIS ELEMENT IS NOT DRAWN, in the order the walk asks it. An ancestor that already
+            // stopped wins over anything this element says about itself: the walk never reached it, so
+            // its own Visibility was never read and reporting it would invent a reason.
+            const ECS::UIHitTest hitTest =
+                 hasLayout ? reg.get<ECS::UILayoutComponent>( e ).Data.HitTest : ECS::UIHitTest::All;
+            node.HitTest = hitTest;
+            node.ElectsSelf =
+                 scope.Elect && ( hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::Blocking );
+
+            UISkipCause self = UISkipCause::None;
+            if ( hasLayout )
+            {
+                switch ( reg.get<ECS::UILayoutComponent>( e ).Data.Visibility )
+                {
+                    case ECS::UIVisibility::Hidden:
+                        self = UISkipCause::SelfHidden;
+                        break;
+                    case ECS::UIVisibility::Collapsed:
+                        self = UISkipCause::SelfCollapsed;
+                        break;
+                    default:
+                        break;
+                }
+            }
+            // The two view-dependent reasons. Without a context they are not asked at all — see the header:
+            // an author must be able to pick an element on a screen the game is not showing.
+            if ( self == UISkipCause::None && ctx != nullptr && reg.has<ECS::UIScreenComponent>( e ) )
+            {
+                const std::string& name      = reg.get<ECS::UIScreenComponent>( e ).Data.Name;
+                const bool         isCurrent = ( name == ctx->Screen );
+                const bool         isLeaving = ( name == ctx->ScreenFrom && ctx->ScreenT < 1.0f );
+                if ( !isCurrent && !isLeaving )
+                    self = UISkipCause::ScreenNotCurrent;
+            }
+            if ( self == UISkipCause::None && ctx != nullptr && BindingHidesElement( reg, e ) )
+                self = UISkipCause::BindingHidden;
+
+            if ( scope.SkippedBy != entt::null )
+            {
+                node.Cause   = UISkipCause::AncestorSkipped;
+                node.CauseBy = scope.SkippedBy;
+            }
+            else if ( self != UISkipCause::None )
+            {
+                node.Cause   = self;
+                node.CauseBy = e;
+            }
+            else
+            {
+                node.Drawn = true;
+                node.Order = order++;
+            }
+
+            // --- The rect, resolved exactly as the renderer resolves it --------------------------------
+            Rect rect = scope.Parent;
             if ( forcedRect )
-                rect = *forcedRect; // positioned by a parent auto-layout group
+                rect = *forcedRect; // positioned + sized by the parent's auto-layout group
             else if ( hasLayout )
             {
                 const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
                 rect          = ResolveRect( L.AnchorMin, L.AnchorMax, L.OffsetMin * scale, L.OffsetMax * scale,
-                                             L.CustomMinimumSize * scale, parent );
+                                             L.CustomMinimumSize * scale, scope.Parent );
             }
-            if ( hasLayout ) // match the renderer's fitters so hit-testing lines up
+            if ( hasLayout )
             {
                 const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
                 rect          = ApplyAspectFit( rect, L.AspectRatio, static_cast<int>( L.AspectMode ) );
@@ -266,100 +360,178 @@ namespace Desert::UI
                         rect.H = content.y;
                 }
             }
-            // The element's render transform, composed onto its ancestors' — so a child of a rotated
-            // panel is picked where the panel carried it, not where its own anchors put it.
-            const glm::mat3 xform = AccumulateTransform( reg, e, rect, parentXform );
-            const glm::vec2 local = UndoTransform( xform, p );
 
-            // Any element with a rect is selectable; later/deeper hits overwrite (matches draw order), so a
-            // small button on top of a full-screen panel wins the pick instead of the panel behind it.
-            if ( ( forcedRect || hasLayout ) && local.x >= rect.X && local.x <= rect.X + rect.W &&
-                 local.y >= rect.Y && local.y <= rect.Y + rect.H )
-                hit = e;
+            const glm::mat3 xform = AccumulateTransform( reg, e, rect, scope.Xform );
+            node.RectPx           = rect;
+            node.Xform            = xform;
+            node.ScreenPx         = ScreenBoundsOf( xform, rect );
+            node.ClipPx           = scope.Clip;
 
-            if ( reg.has<ECS::RelationshipComponent>( e ) )
-            {
-                std::vector<entt::entity> kids;
-                std::vector<Rect>         rects;
-                SolveGroupChildren( reg, e, rect, scale, kids, rects );
-                if ( !kids.empty() )
-                    for ( std::size_t i = 0; i < kids.size(); ++i )
-                        PickRecurse( reg, kids[i], rect, scale, p, hit, xform, &rects[i] );
-                else
-                    for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
-                        if ( reg.valid( c ) )
-                            PickRecurse( reg, c, rect, scale, p, hit, xform );
-            }
-        }
+            // The pixels this element may actually own: its screen box, cut by every clip above it and by
+            // the viewport. The walk does not cull, so a drawn element whose VisiblePx is empty still costs
+            // vertices and a draw call — which is a finding, and the reason this is a stored field rather
+            // than something the panel recomputes.
+            const Rect effectiveClip = scope.Clip.W > 0.0f && scope.Clip.H > 0.0f
+                                            ? IntersectRectPx( scope.Clip, viewportPx )
+                                            : viewportPx;
+            node.VisiblePx           = IntersectRectPx( node.ScreenPx, effectiveClip );
+            node.Clipped             = node.Drawn && ( node.VisiblePx.W <= 0.0f || node.VisiblePx.H <= 0.0f );
 
-        void RectRecurse( entt::registry& reg, entt::entity e, const Rect& parent, float scale,
-                          entt::entity target, Rect& out, bool& found, const glm::mat3& parentXform,
-                          glm::mat3* outXform, const Rect* forcedRect = nullptr )
-        {
-            Rect rect = parent;
-            if ( forcedRect )
-                rect = *forcedRect;
-            else if ( reg.has<ECS::UILayoutComponent>( e ) )
+            // --- Children ------------------------------------------------------------------------------
+            Rect childParent = rect;
+            bool clip        = hasLayout && reg.get<ECS::UILayoutComponent>( e ).Data.ClipContents;
+
+            if ( reg.has<ECS::UIScrollViewComponent>( e ) )
             {
-                const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
-                rect          = ResolveRect( L.AnchorMin, L.AnchorMax, L.OffsetMin * scale, L.OffsetMax * scale,
-                                             L.CustomMinimumSize * scale, parent );
+                // READ-ONLY where the renderer writes. The walk clamps ScrollY back into the component
+                // because it also consumes wheel input; a query must not, or opening a debug panel would
+                // silently edit the scene. Clamping the value locally gives the same number for any
+                // ScrollY the renderer could have left behind.
+                const auto& sv        = reg.get<ECS::UIScrollViewComponent>( e ).Data;
+                const float scrollMax = std::max( 0.0f, sv.ContentHeight * scale - rect.H );
+                const float maxDesign = scale > 0.0f ? scrollMax / scale : 0.0f;
+                childParent.Y -= std::clamp( sv.ScrollY, 0.0f, maxDesign ) * scale;
+                clip = true;
             }
-            if ( reg.has<ECS::UILayoutComponent>( e ) )
-            {
-                const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
-                rect          = ApplyAspectFit( rect, L.AspectRatio, static_cast<int>( L.AspectMode ) );
-                if ( ( L.FitWidth || L.FitHeight ) && reg.has<ECS::UILayoutGroupComponent>( e ) )
-                {
-                    const glm::vec2 content = GroupContentPx( reg, e, scale );
-                    if ( L.FitWidth )
-                        rect.W = content.x;
-                    if ( L.FitHeight )
-                        rect.H = content.y;
-                }
-            }
-            const glm::mat3 xform = AccumulateTransform( reg, e, rect, parentXform );
-            if ( e == target )
-            {
-                out   = rect;
-                found = true;
-                if ( outXform )
-                    *outXform = xform;
+            node.ClipsChildren = clip;
+
+            const Rect childClip =
+                 clip ? IntersectRectPx( scope.Clip.W > 0.0f ? scope.Clip : viewportPx, node.ScreenPx )
+                      : scope.Clip;
+
+            out.push_back( node );
+
+            if ( !reg.has<ECS::RelationshipComponent>( e ) )
                 return;
-            }
-            if ( reg.has<ECS::RelationshipComponent>( e ) )
+
+            EnumScope child;
+            child.Parent       = childParent;
+            child.Clip         = childClip;
+            child.Xform        = xform;
+            child.Depth        = scope.Depth + 1;
+            child.ParentEntity = e;
+            child.Elect =
+                 scope.Elect && ( hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::ChildrenOnly );
+            child.SkippedBy = scope.SkippedBy != entt::null ? scope.SkippedBy : node.Drawn ? entt::null : e;
+
+            const auto& children = reg.get<ECS::RelationshipComponent>( e ).Children;
+            if ( reg.has<ECS::UILayoutGroupComponent>( e ) )
             {
                 std::vector<entt::entity> kids;
                 std::vector<Rect>         rects;
-                SolveGroupChildren( reg, e, rect, scale, kids, rects );
-                if ( !kids.empty() )
-                    for ( std::size_t i = 0; i < kids.size() && !found; ++i )
-                        RectRecurse( reg, kids[i], rect, scale, target, out, found, xform, outXform, &rects[i] );
-                else
-                    for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
-                        if ( reg.valid( c ) && !found )
-                            RectRecurse( reg, c, rect, scale, target, out, found, xform, outXform );
+                SolveGroupChildren( reg, e, childParent, scale, kids, rects );
+                for ( std::size_t i = 0; i < kids.size(); ++i )
+                    EnumRecurse( reg, kids[i], child, scale, viewportPx, ctx, out, order, &rects[i] );
+
+                // A Collapsed child is given NO SLOT by the group, so it has no position to report — and
+                // reporting it at its anchored rect would be a lie about where it is not. It is still
+                // enumerated, because "this element exists and the group dropped it" is the answer
+                // somebody opened the panel to get.
+                for ( auto c : children )
+                {
+                    if ( !reg.valid( c ) || TakesLayoutSpace( reg, c ) )
+                        continue;
+                    UIElementNode slotless;
+                    slotless.Entity = c;
+                    slotless.Parent = e;
+                    slotless.Depth  = child.Depth;
+                    slotless.Cause =
+                         child.SkippedBy != entt::null ? UISkipCause::AncestorSkipped : UISkipCause::SelfCollapsed;
+                    slotless.CauseBy   = child.SkippedBy != entt::null ? child.SkippedBy : c;
+                    slotless.ClipPx    = childClip;
+                    slotless.TakesSlot = false;
+                    out.push_back( slotless );
+                }
+            }
+            else
+            {
+                for ( auto c : children )
+                    if ( reg.valid( c ) )
+                        EnumRecurse( reg, c, child, scale, viewportPx, ctx, out, order, nullptr );
             }
         }
     } // namespace
 
-    entt::entity PickElement( entt::registry& reg, entt::entity canvas, const glm::vec2& pointPx,
-                              const Rect& viewportPx )
+    const char* UISkipCauseName( UISkipCause cause )
     {
+        switch ( cause )
+        {
+            case UISkipCause::None:
+                return "drawn";
+            case UISkipCause::SelfHidden:
+                return "Hidden";
+            case UISkipCause::SelfCollapsed:
+                return "Collapsed";
+            case UISkipCause::BindingHidden:
+                return "binding says hidden";
+            case UISkipCause::ScreenNotCurrent:
+                return "screen not current";
+            case UISkipCause::AncestorSkipped:
+                return "ancestor not drawn";
+        }
+        return "?";
+    }
+
+    bool BindingHidesElement( entt::registry& reg, entt::entity e )
+    {
+        if ( !reg.valid( e ) || !reg.has<ECS::UIBindingComponent>( e ) )
+            return false;
+        const auto& b = reg.get<ECS::UIBindingComponent>( e ).Data;
+        if ( b.Target != ECS::UIBindTarget::Visible || b.Key.empty() )
+            return false;
+        const auto v = UIDataStore::Get().Bool( b.Key );
+        return v.has_value() && !*v;
+    }
+
+    Common::BoolResultStr EnumerateCanvas( entt::registry& reg, entt::entity canvas, const Rect& viewportPx,
+                                           std::vector<UIElementNode>& out, const UICanvasContext* ctx )
+    {
+        out.clear();
+
         const auto fit = ResolveNamedCanvas( reg, canvas, viewportPx );
         if ( !fit )
-            return entt::null; // nothing on screen to hit; the refusal's text belongs to the caller's own log
+            return Common::MakeError( fit.GetError() );
 
         const float scale     = fit.GetValue().Scale;
         const auto& cd        = reg.get<ECS::UICanvasComponent>( canvas ).Data;
         const Rect  childRoot = InsetRect( fit.GetValue().Root, cd.SafeArea.x * scale, cd.SafeArea.y * scale,
                                            cd.SafeArea.z * scale, cd.SafeArea.w * scale );
 
-        entt::entity hit = entt::null;
+        EnumScope root;
+        root.Parent = childRoot;
+        root.Clip   = Rect{}; // unclipped: the walk hands its own top level the viewport, and so does this
+        int order   = 0;
         if ( reg.has<ECS::RelationshipComponent>( canvas ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvas ).Children )
                 if ( reg.valid( c ) )
-                    PickRecurse( reg, c, childRoot, scale, pointPx, hit, glm::mat3( 1.0f ) );
+                    EnumRecurse( reg, c, root, scale, viewportPx, ctx, out, order, nullptr );
+        return BOOLSUCCESS;
+    }
+
+    entt::entity PickElement( entt::registry& reg, entt::entity canvas, const glm::vec2& pointPx,
+                              const Rect& viewportPx )
+    {
+        std::vector<UIElementNode> nodes;
+        if ( const auto walked = EnumerateCanvas( reg, canvas, viewportPx, nodes, nullptr ); !walked )
+            return entt::null; // nothing on screen to hit; the refusal's text belongs to the caller's own log
+
+        // Later in draw order = drawn on top, so the LAST match wins — a small button in front of a
+        // full-screen panel is picked instead of the panel. The clip is honoured here and was not before
+        // this walk was shared: a row scrolled out of its list is not drawn, so it must not be pickable.
+        entt::entity hit = entt::null;
+        for ( const UIElementNode& n : nodes )
+        {
+            if ( !n.Drawn || !n.OwnRect || !n.RectValid )
+                continue;
+            if ( n.ClipPx.W > 0.0f && n.ClipPx.H > 0.0f &&
+                 !( pointPx.x >= n.ClipPx.X && pointPx.x <= n.ClipPx.X + n.ClipPx.W && pointPx.y >= n.ClipPx.Y &&
+                    pointPx.y <= n.ClipPx.Y + n.ClipPx.H ) )
+                continue;
+            const glm::vec2 local = UndoTransform( n.Xform, pointPx );
+            if ( local.x >= n.RectPx.X && local.x <= n.RectPx.X + n.RectPx.W && local.y >= n.RectPx.Y &&
+                 local.y <= n.RectPx.Y + n.RectPx.H )
+                hit = n.Entity;
+        }
         return hit;
     }
 
@@ -380,16 +552,23 @@ namespace Desert::UI
             out = fit.GetValue().Root;
             return true;
         }
-        const float scale     = fit.GetValue().Scale;
-        const auto& cd        = reg.get<ECS::UICanvasComponent>( canvas ).Data;
-        const Rect  childRoot = InsetRect( fit.GetValue().Root, cd.SafeArea.x * scale, cd.SafeArea.y * scale,
-                                           cd.SafeArea.z * scale, cd.SafeArea.w * scale );
-        bool        found     = false;
-        if ( reg.has<ECS::RelationshipComponent>( canvas ) )
-            for ( auto c : reg.get<ECS::RelationshipComponent>( canvas ).Children )
-                if ( reg.valid( c ) && !found )
-                    RectRecurse( reg, c, childRoot, scale, target, out, found, glm::mat3( 1.0f ), outXform );
-        return found;
+
+        std::vector<UIElementNode> nodes;
+        if ( const auto walked = EnumerateCanvas( reg, canvas, viewportPx, nodes, nullptr ); !walked )
+            return false;
+
+        for ( const UIElementNode& n : nodes )
+        {
+            if ( n.Entity != target )
+                continue;
+            if ( !n.RectValid )
+                return false; // enumerated, but a layout group left it no slot: it has no position
+            out = n.RectPx;
+            if ( outXform )
+                *outXform = n.Xform;
+            return true;
+        }
+        return false;
     }
 
     Common::ResultStr<float> CanvasScale( entt::registry& reg, entt::entity canvas, const Rect& viewportPx )

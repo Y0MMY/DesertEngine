@@ -533,6 +533,23 @@ namespace Desert::Tests::PointerCensus
         { "Desert/Desert/Source/Engine/Graphic/Render2D/DrawList2D.hpp",
           "DrawCommand", "Texture", Guard::IdentityOnly,
           "a batch discriminator: consecutive primitives with the same value extend one draw. It is also the key of Render2D's executor caches, and THAT use is what makes address recycling matter -- see the Render2D rows" },
+        { "Desert/Desert/Source/Engine/UI/UIIntrospection.hpp",
+          "UIBatchInfo", "Texture", Guard::IdentityOnly,
+          "a COPY of DrawCommand::Texture taken for display: the probe prints it as an address so an "
+          "author can tell two batches apart, and nothing dereferences it. Address recycling cannot "
+          "mislead here the way it can in Render2D's executor caches, because the value never outlives "
+          "the frame it was copied from -- UIFrameProbe::Reset drops the whole batch list at the start "
+          "of every capture, and a capture only happens while the panel is open" },
+        { "Desert/Desert/Source/Engine/UI/UIIntrospection.hpp",
+          "UIElementCost", "Texture", Guard::IdentityOnly,
+          "the same value again, for the one batch a measured element landed in. Same argument, and the "
+          "same window: the measurement is taken inside one Capture and replaced by the next request" },
+        { "Editor/Source/Editor/Core/UIProbeRegistry.hpp",
+          "UIProbeRegistry", "m_Sinks", Guard::IdentityOnly,
+          "keyed on a Scene's address, compared and never dereferenced -- the routing question is only "
+          "'is this the same document'. Recycling is answered by EditorUIPass's destructor, which calls "
+          "Forget( scene.get() ) as it unregisters the pass, so a slot cannot outlive its scene and a "
+          "reopened document at the same address cannot inherit the closed one's numbers" },
         { "Desert/Desert/Source/Engine/Graphic/Render2D/Render2D.hpp",
           "Render2D", "m_WhiteImage", Guard::FrameScoped,
           "resolved from ImageService, whose only release path is Renderer::Shutdown -- terminal, and after the last Flush" },
