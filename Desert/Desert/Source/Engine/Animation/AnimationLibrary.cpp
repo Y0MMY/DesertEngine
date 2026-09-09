@@ -1,5 +1,7 @@
 #include "AnimationLibrary.hpp"
 
+#include <Engine/Animation/Skeleton.hpp>
+
 #include <Common/Core/Logger.hpp>
 
 #include <algorithm>
@@ -10,10 +12,10 @@ namespace Desert::Animation
     {
     }
 
-    // RELOAD BEFORE HANDING ONE OUT. Both lookups below resolve a handle the index recorded at Register
-    // time, and an evicted clip resolves to a perfectly valid asset holding an empty track list — so
-    // without this the caller gets a successful answer that animates nothing. AssetBase::EnsureLoaded is a
-    // no-op for a clip that is already resident, which is every clip in the common case.
+    // RELOAD BEFORE HANDING ONE OUT. The lookup resolves a handle the record kept at Register time, and an
+    // evicted clip resolves to a perfectly valid asset holding an empty track list — so without this the
+    // caller gets a successful answer that animates nothing. AssetBase::EnsureLoaded is a no-op for a clip
+    // that is already resident, which is every clip in the common case.
     //
     // A clip that CANNOT be reloaded is named and skipped rather than returned empty: a procedural clip
     // (SetInMemoryClip) is never evicted, so reaching this branch means the file is gone.
@@ -41,84 +43,70 @@ namespace Desert::Animation
             return;
         }
 
-        const uint64_t sig    = animation->GetSkeletonSignature();
-        const auto     handle = animation->GetMetadata().Handle;
-
-        m_Index[sig].push_back( handle );
-
-        // Record the animated-bone names for tolerant (subset) matching.
-        AnimBones entry;
-        entry.Handle = handle;
+        ClipRigIdentity identity;
+        identity.Handle            = animation->GetMetadata().Handle;
+        identity.ClipName          = animation->GetClip().AnimationName;
+        identity.SkeletonSignature = animation->GetSkeletonSignature();
         for ( const auto& track : animation->GetClip().Tracks )
             if ( !track.BoneName.empty() )
-                entry.Bones.push_back( track.BoneName );
-        m_Anims.push_back( std::move( entry ) );
+                identity.AnimatedBones.push_back( track.BoneName );
+
+        // A clip with neither a rig signature nor one named bone can never match anything — ClipDrivesRig
+        // has nothing to test it on. Registering it silently is how a clip becomes invisible with no way to
+        // tell that from "the project has no clips".
+        if ( identity.SkeletonSignature == 0 && identity.AnimatedBones.empty() )
+        {
+            LOG_ERROR( "[AnimationLibrary] clip '{}' ({}) claims no rig and animates no named bone, so no "
+                       "skeleton can ever match it. It is registered and will never be offered.",
+                       identity.ClipName, animation->GetMetadata().Filepath.string() );
+        }
+
+        m_Clips.push_back( std::move( identity ) );
     }
 
     void AnimationLibrary::Unregister( const Assets::AssetHandle& handle )
     {
-        for ( auto& [sig, list] : m_Index )
-        {
-            list.erase( std::remove( list.begin(), list.end(), handle ), list.end() );
-        }
-        m_Anims.erase( std::remove_if( m_Anims.begin(), m_Anims.end(),
-                                       [&]( const AnimBones& a ) { return a.Handle == handle; } ),
-                       m_Anims.end() );
+        m_Clips.erase( std::remove_if( m_Clips.begin(), m_Clips.end(),
+                                       [&]( const ClipRigIdentity& c ) { return c.Handle == handle; } ),
+                       m_Clips.end() );
     }
 
     std::vector<Assets::Asset<Assets::AnimationAsset>>
-    AnimationLibrary::GetForSkeletonBones( const std::unordered_set<std::string>& skeletonBones ) const
+    AnimationLibrary::GetForSkeleton( const Skeleton& skeleton ) const
     {
+        const RigIdentity rig = IdentifyRig( skeleton );
+
         std::vector<Assets::Asset<Assets::AnimationAsset>> result;
-
-        for ( const auto& anim : m_Anims )
+        for ( const size_t i : SelectClipsForRig( m_Clips, rig ) )
         {
-            if ( anim.Bones.empty() )
-                continue;
-
-            // Fraction of the animation's bones that exist in this skeleton. A real match for the rig is ~1.0
-            // (the anim bones are a subset of the character's); require a majority so an odd stray bone or a
-            // partial-body clip still matches, while unrelated rigs (different bone names) are rejected.
-            size_t present = 0;
-            for ( const auto& bone : anim.Bones )
-                if ( skeletonBones.count( bone ) )
-                    ++present;
-
-            if ( present * 2 >= anim.Bones.size() ) // >= 50%
-            {
-                if ( auto asset = Resolve( anim.Handle ) )
-                    result.push_back( asset );
-            }
+            if ( auto asset = Resolve( m_Clips[i].Handle ) )
+                result.push_back( asset );
         }
-
         return result;
     }
 
-    std::vector<Assets::Asset<Assets::AnimationAsset>>
-    AnimationLibrary::GetBySkeleton( uint64_t skeletonSignature ) const
+    Common::ResultStr<Assets::Asset<Assets::AnimationAsset>>
+    AnimationLibrary::FindForSkeleton( const Skeleton& skeleton, const std::string& clipName ) const
     {
-        std::vector<Assets::Asset<Assets::AnimationAsset>> result;
+        const RigIdentity rig = IdentifyRig( skeleton );
 
-        if ( auto it = m_Index.find( skeletonSignature ); it != m_Index.end() )
+        const auto index = FindClipForRig( m_Clips, rig, clipName );
+        if ( !index )
+            return Common::MakeError<Assets::Asset<Assets::AnimationAsset>>( index.GetError() );
+
+        auto asset = Resolve( m_Clips[index.GetValue()].Handle );
+        if ( !asset )
         {
-            for ( const auto& handle : it->second )
-            {
-                if ( auto asset = Resolve( handle ) )
-                {
-                    result.push_back( asset );
-                }
-            }
+            // Resolve already logged the reason; this turns it into a refusal the caller must handle rather
+            // than a null it can drop on the floor.
+            return Common::MakeFormattedError<Assets::Asset<Assets::AnimationAsset>>(
+                 "clip '{}' drives this rig but its asset could not be resolved or reloaded.", clipName );
         }
-
-        return result;
+        return Common::MakeSuccess( std::move( asset ) );
     }
 
     void AnimationLibrary::Clear()
     {
-        m_Index.clear();
-        // m_Anims WAS LEFT BEHIND. Clear() dropped the signature index and kept the bone-name index, so
-        // GetForSkeletonBones went on offering every clip of the previous project — resolved through an
-        // AssetManager that no longer holds them. Two indexes of one thing, one of which was cleared.
-        m_Anims.clear();
+        m_Clips.clear();
     }
 } // namespace Desert::Animation

@@ -227,7 +227,6 @@ namespace Desert::Geometry
                 const glm::vec3 parentWorld =
                      ( j.Parent >= 0 ) ? JointPos( static_cast<uint32_t>( j.Parent ) ) : glm::vec3( 0.0f );
 
-                bones[i].BoneIndex = i;
                 bones[i].Name      = j.Name;
                 // No rotation in the bind pose, so the local transform is just the offset from the parent.
                 bones[i].LocalBindTransform = glm::translate( glm::mat4( 1.0f ), world - parentWorld );

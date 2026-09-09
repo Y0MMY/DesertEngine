@@ -71,7 +71,6 @@ namespace
     Desert::Assets::Serialization::SkeletonAssetData ProbeSkeletonData()
     {
         Desert::Animation::BoneInfo root;
-        root.BoneIndex          = 0;
         root.Name               = kProbeBoneName;
         root.OffsetMatrix       = glm::mat4( 1.0f );
         root.LocalBindTransform = glm::mat4( 1.0f );

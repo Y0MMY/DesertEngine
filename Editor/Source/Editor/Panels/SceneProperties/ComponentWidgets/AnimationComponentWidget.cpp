@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <memory>
 #include <string>
-#include <unordered_set>
 
 #include <ImGui/imgui.h>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
@@ -81,12 +80,10 @@ namespace Desert::Editor
 
         if ( cachedSig != sig )
         {
-            // Match by bone NAME (tolerant): a Mixamo "without skin" animation has fewer bones than the skinned
-            // character (no leaf/end bones), so its signature differs — but it still drives this skeleton.
-            std::unordered_set<std::string> boneNames;
-            for ( const auto& bone : skeleton.GetBones() )
-                boneNames.insert( bone.Name );
-            cached    = m_AnimationLibrary->GetForSkeletonBones( boneNames );
+            // ONE rule, shared with AnimationECSSystem's resolution of the very name this combo writes into
+            // the component (see ClipSkeletonMatch.hpp). The picker asking one question and the runtime
+            // another is what made a chosen clip fail to play in silence.
+            cached    = m_AnimationLibrary->GetForSkeleton( skeleton );
             cachedSig = sig;
         }
 

@@ -187,7 +187,6 @@ namespace Desert::Editor
             const glm::vec3 parentHead = ( b.Parent >= 0 ) ? s_Bones[b.Parent].Head : glm::vec3( 0.0f );
 
             Animation::BoneInfo info;
-            info.BoneIndex          = static_cast<uint32_t>( i );
             info.Name               = b.Name;
             info.OffsetMatrix       = glm::mat4( 1.0f ); // filled by RecomputeOffsetMatrices()
             info.LocalBindTransform = glm::translate( glm::mat4( 1.0f ), b.Head - parentHead );

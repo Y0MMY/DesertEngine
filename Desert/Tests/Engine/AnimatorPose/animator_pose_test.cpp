@@ -25,13 +25,11 @@ namespace
     Skeleton MakeChain()
     {
         std::vector<BoneInfo> bones( 2 );
-        bones[0].BoneIndex          = 0;
         bones[0].Name               = "root";
         bones[0].ParentBoneID       = std::nullopt;
         bones[0].LocalBindTransform = glm::mat4( 1.0f );
         bones[0].OffsetMatrix       = glm::mat4( 1.0f );
 
-        bones[1].BoneIndex          = 1;
         bones[1].Name               = "child";
         bones[1].ParentBoneID       = 0u;
         bones[1].LocalBindTransform = glm::translate( glm::mat4( 1.0f ), glm::vec3( 0.0f, 1.0f, 0.0f ) );
@@ -60,8 +58,7 @@ namespace
         clip.TicksPerSecond = 1.0f;
 
         BoneTrack track;
-        track.BoneName  = "child";
-        track.BoneIndex = 1;
+        track.BoneName = "child";
         track.PositionKeys.push_back( { 0.0f, pos } );
         track.RotationKeys.push_back( { 0.0f, glm::quat( 1.0f, 0.0f, 0.0f, 0.0f ) } );
         track.ScaleKeys.push_back( { 0.0f, glm::vec3( 1.0f ) } );

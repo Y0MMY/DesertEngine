@@ -158,7 +158,7 @@ namespace Desert::Editor
             return {};
 
         // Unique name so repeated "New Clip" presses don't collide (scan this skeleton's registered clips).
-        const auto  existing = m_Library->GetBySkeleton( skeleton.GetSignature() );
+        const auto  existing = m_Library->GetForSkeleton( skeleton );
         std::string name     = "NewClip";
         for ( int n = 1;; ++n )
         {
@@ -208,8 +208,7 @@ namespace Desert::Editor
         for ( const auto& tr : clip.Tracks )
         {
             Ser::ChannelData ch;
-            ch.BoneName  = tr.BoneName;
-            ch.BoneIndex = tr.BoneIndex;
+            ch.BoneName = tr.BoneName;
             for ( const auto& k : tr.PositionKeys )
                 ch.Positions.push_back( { k.Time, k.Position } );
             for ( const auto& k : tr.RotationKeys )
@@ -278,9 +277,9 @@ namespace Desert::Editor
             ImGui::TextDisabled( "Skinned mesh not resolved yet." );
             return;
         }
-        const uint64_t sig = static_cast<SkinnedMesh*>( mesh )->GetSkeleton().GetSignature();
-        const auto     clips =
-             m_Library ? m_Library->GetBySkeleton( sig ) : std::vector<Assets::Asset<Assets::AnimationAsset>>{};
+        const Animation::Skeleton& skeleton = static_cast<SkinnedMesh*>( mesh )->GetSkeleton();
+        const auto                 clips    = m_Library ? m_Library->GetForSkeleton( skeleton )
+                                                        : std::vector<Assets::Asset<Assets::AnimationAsset>>{};
 
         // Names for the clip combos + the index of the currently-selected clip.
         std::vector<const char*> clipNames;
@@ -331,7 +330,7 @@ namespace Desert::Editor
                     anim.CurrentClip = created;
                     anim.Playing     = false;
                     // Rebind the picker's clip list next frame; play the new (empty) clip so its lanes show.
-                    for ( const auto& a : m_Library->GetBySkeleton( animator->GetSkeleton().GetSignature() ) )
+                    for ( const auto& a : m_Library->GetForSkeleton( animator->GetSkeleton() ) )
                         if ( a && a->GetClip().AnimationName == created )
                         {
                             animator->Play( a->GetClip(), false );
