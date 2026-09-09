@@ -516,6 +516,45 @@ TEST( UIIntrospectionWalk, AnElementScrolledOutOfItsListIsCountedAsClipped )
     EXPECT_EQ( UI::PickElement( scene.Registry, scene.Canvas, { 10.0f, 20.0f }, kViewport ), onScreenRow );
 }
 
+TEST( UIIntrospectionWalk, ARotatedClipperCountsWhatItCutEvenThoughTheBoxesOverlap )
+{
+    // THE COLUMN AND THE CLIP MUST BE ASKED THE SAME QUESTION. Since Ю9 a turned clipper cuts its own
+    // quadrilateral, so "fully clipped" stopped being answerable from bounding boxes: the row below sits in
+    // a CORNER of the clipper's box, where the two boxes plainly overlap and not one pixel survives. A
+    // Clipped computed from boxes alone reports it visible — the middle link dropping the oblique half of
+    // the very property this column is about — so the box answer is asserted here beside the real one, and
+    // it has to be the WRONG one.
+    Scene              scene( 1 );
+    const entt::entity clipper           = scene.AddPanel( scene.Canvas, 300.0f, 300.0f, 200.0f, 200.0f );
+    scene.Layout( clipper ).ClipContents = true;
+    scene.Layout( clipper ).Rotation     = 45.0f;
+    scene.Layout( clipper ).Pivot        = { 0.5f, 0.5f };
+    // 210..250 in the clipper's OWN x, so every corner of it is outside the clipper's left edge and the
+    // clip removes all of it. Turned onto the screen it lands near a corner of the clipper's bounding box,
+    // which is the whole point: the two BOXES still overlap by about 50x50 px there. The overlap is
+    // asserted below rather than assumed, so a change of rotation convention fails loudly instead of
+    // quietly making this test vacuous.
+    const entt::entity inTheCorner = scene.AddPanel( clipper, -90.0f, 80.0f, 40.0f, 40.0f );
+
+    R2D::DrawList2D dl;
+    UICanvasContext ctx;
+    ASSERT_TRUE( Walk( scene, dl, ctx ) );
+    UIFrameProbe probe;
+    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, scene.Canvas, dl, kViewport, probe ).IsSuccess() );
+
+    const UIElementNode* node = NodeFor( probe, inTheCorner );
+    ASSERT_NE( node, nullptr );
+    EXPECT_TRUE( node->Drawn ) << "the walk records its geometry; only the clip removes it";
+    EXPECT_GT( node->VisiblePx.W, 0.0f ) << "the BOXES overlap — without that this test proves nothing, "
+                                            "because a box-only answer would happen to be right";
+    EXPECT_GT( node->VisiblePx.H, 0.0f );
+    EXPECT_TRUE( node->Clipped ) << "every corner of it is outside one edge of the rotated clipper";
+    EXPECT_EQ( probe.Walk.Clipped, 1u );
+
+    // And the pointer agrees, which is what the column is worth: nothing is selectable where nothing drew.
+    EXPECT_NE( UI::PickElement( scene.Registry, scene.Canvas, { 300.0f, 300.0f }, kViewport ), inTheCorner );
+}
+
 TEST( UIIntrospectionWalk, DrawOrderIsTheOrderTheWalkEmitsIn )
 {
     Scene              scene( 2 );

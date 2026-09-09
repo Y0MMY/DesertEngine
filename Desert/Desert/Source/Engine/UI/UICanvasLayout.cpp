@@ -1,6 +1,7 @@
 #include "UICanvasLayout.hpp"
 
 #include <Engine/ECS/Components.hpp>
+#include <Engine/Graphic/Render2D/ClipRegion2D.hpp>
 #include <Engine/Graphic/Render2D/Transform2D.hpp>
 #include <Engine/UI/UICanvasContext.hpp>
 #include <Engine/UI/UIDataStore.hpp>
@@ -235,8 +236,9 @@ namespace Desert::UI
                         : Graphic::Render2D::TransformPoint2D( Graphic::Render2D::InverseTransform2D( xform ), p );
         }
 
-        // The scissor, as a rect. The clip a child inherits is the intersection of everything above it,
-        // which is what makes a nested list clip inside its own page.
+        // Two axis-aligned boxes, intersected. Used for the BOX half of a clip region — what the scissor
+        // cuts — and for nothing else: the oblique half is IntersectClipRegion's and there is no second
+        // implementation of it here.
         Rect IntersectRectPx( const Rect& a, const Rect& b )
         {
             const float x0 = std::max( a.X, b.X );
@@ -247,8 +249,8 @@ namespace Desert::UI
         }
 
         // The axis-aligned box @p r occupies on screen once @p xform has acted on it — the same box
-        // DrawList2D::PushClipRect stores for a rotated clipper, because a scissor is the only clip the
-        // hardware has.
+        // DrawList2D's clip region keeps for a rotated clipper, because that is the half of the clip the
+        // hardware scissor can express.
         Rect ScreenBoundsOf( const glm::mat3& xform, const Rect& r )
         {
             if ( Graphic::Render2D::IsIdentity2D( xform ) )
@@ -258,11 +260,27 @@ namespace Desert::UI
             return Rect{ mn.x, mn.y, mx.x - mn.x, mx.y - mn.y };
         }
 
+        // The four screen-space corners of @p r under @p xform, in order — the shape a rotated clipper
+        // actually has to be asked about, as opposed to the box around it.
+        void ScreenQuadOf( const glm::mat3& xform, const Rect& r, glm::vec2 ( &out )[4] )
+        {
+            out[0] = Graphic::Render2D::TransformPoint2D( xform, { r.X, r.Y } );
+            out[1] = Graphic::Render2D::TransformPoint2D( xform, { r.X + r.W, r.Y } );
+            out[2] = Graphic::Render2D::TransformPoint2D( xform, { r.X + r.W, r.Y + r.H } );
+            out[3] = Graphic::Render2D::TransformPoint2D( xform, { r.X, r.Y + r.H } );
+        }
+
         // Everything one level of the walk inherits from the level above it.
         struct EnumScope
         {
-            Rect         Parent{};         // the box children lay out in (already scrolled, for a list)
-            Rect         Clip{};           // inherited scissor; W<=0 => unclipped
+            Rect Parent{}; // the box children lay out in (already scrolled, for a list)
+
+            // The inherited clip, as the REGION the draw list cuts by — box plus the oblique half-planes a
+            // scissor cannot express. Narrowed only through IntersectClipRegion, which is the same call
+            // UICanvasRenderer2D makes beside DrawList2D::PushClipRect: one implementation of "where the
+            // clip is", read forward by the geometry and pointwise by the pointer.
+            Graphic::Render2D::ClipRegion2D Clip{};
+
             glm::mat3    Xform{ 1.0f };    // ancestors' composed render transform
             int          Depth        = 0; // 0 for a direct child of the canvas
             entt::entity ParentEntity = entt::null;
@@ -365,17 +383,27 @@ namespace Desert::UI
             node.RectPx           = rect;
             node.Xform            = xform;
             node.ScreenPx         = ScreenBoundsOf( xform, rect );
-            node.ClipPx           = scope.Clip;
+            node.ClipRegion       = scope.Clip;
 
             // The pixels this element may actually own: its screen box, cut by every clip above it and by
             // the viewport. The walk does not cull, so a drawn element whose VisiblePx is empty still costs
             // vertices and a draw call — which is a finding, and the reason this is a stored field rather
             // than something the panel recomputes.
-            const Rect effectiveClip = scope.Clip.W > 0.0f && scope.Clip.H > 0.0f
-                                            ? IntersectRectPx( scope.Clip, viewportPx )
-                                            : viewportPx;
-            node.VisiblePx           = IntersectRectPx( node.ScreenPx, effectiveClip );
-            node.Clipped             = node.Drawn && ( node.VisiblePx.W <= 0.0f || node.VisiblePx.H <= 0.0f );
+            const Rect clipBox = Rect{ scope.Clip.Box.x, scope.Clip.Box.y, scope.Clip.Box.z, scope.Clip.Box.w };
+            node.VisiblePx     = IntersectRectPx( node.ScreenPx, IntersectRectPx( clipBox, viewportPx ) );
+
+            // Fully cut is TWO questions once a clipper may be rotated, and asking only the first is how a
+            // box-shaped middle link would drop the oblique half: an element a turned clipper removed
+            // entirely still has a non-empty box intersection with that clipper's box. The quad is only
+            // built when there is an oblique plane to ask, so an unrotated canvas pays nothing.
+            bool cutByPlanes = false;
+            if ( node.Drawn && scope.Clip.PlaneCount > 0 )
+            {
+                glm::vec2 quad[4];
+                ScreenQuadOf( xform, rect, quad );
+                cutByPlanes = Graphic::Render2D::ClipPlanesRejectQuad( scope.Clip, quad );
+            }
+            node.Clipped = node.Drawn && ( node.VisiblePx.W <= 0.0f || node.VisiblePx.H <= 0.0f || cutByPlanes );
 
             // --- Children ------------------------------------------------------------------------------
             Rect childParent = rect;
@@ -395,9 +423,15 @@ namespace Desert::UI
             }
             node.ClipsChildren = clip;
 
-            const Rect childClip =
-                 clip ? IntersectRectPx( scope.Clip.W > 0.0f ? scope.Clip : viewportPx, node.ScreenPx )
-                      : scope.Clip;
+            // Narrowed by THE SAME FUNCTION UICanvasRenderer2D calls beside DrawList2D::PushClipRect, with
+            // the same matrix and the same rect — so the pointer is refused exactly where the geometry was
+            // cut, because there is one implementation of "where" and not two that agree. The return value
+            // is ignored on purpose: the draw list has already logged an inexact region, and both halves
+            // get the same superset either way.
+            Graphic::Render2D::ClipRegion2D childClip = scope.Clip;
+            if ( clip )
+                (void)Graphic::Render2D::IntersectClipRegion( childClip, xform, { rect.X, rect.Y },
+                                                              { rect.X + rect.W, rect.Y + rect.H } );
 
             out.push_back( node );
 
@@ -437,8 +471,8 @@ namespace Desert::UI
                     slotless.Depth  = child.Depth;
                     slotless.Cause =
                          child.SkippedBy != entt::null ? UISkipCause::AncestorSkipped : UISkipCause::SelfCollapsed;
-                    slotless.CauseBy   = child.SkippedBy != entt::null ? child.SkippedBy : c;
-                    slotless.ClipPx    = childClip;
+                    slotless.CauseBy    = child.SkippedBy != entt::null ? child.SkippedBy : c;
+                    slotless.ClipRegion = childClip;
                     slotless.TakesSlot = false;
                     out.push_back( slotless );
                 }
@@ -497,10 +531,17 @@ namespace Desert::UI
         const Rect  childRoot = InsetRect( fit.GetValue().Root, cd.SafeArea.x * scale, cd.SafeArea.y * scale,
                                            cd.SafeArea.z * scale, cd.SafeArea.w * scale );
 
+        // The canvas is drawn into the viewport and nowhere else, so that is the outermost clip — built as a
+        // region, at identity, exactly as RenderCanvas2D builds its own, so every level below narrows ONE
+        // type. It is BOUNDED from the start, which is what keeps "the clip is empty" a different statement
+        // from "there is no clip": reading an empty box as unclipped is how two disjoint nested clips came
+        // to draw over the whole viewport.
         EnumScope root;
         root.Parent = childRoot;
-        root.Clip   = Rect{}; // unclipped: the walk hands its own top level the viewport, and so does this
-        int order   = 0;
+        (void)Graphic::Render2D::IntersectClipRegion(
+             root.Clip, glm::mat3( 1.0f ), { viewportPx.X, viewportPx.Y },
+             { viewportPx.X + viewportPx.W, viewportPx.Y + viewportPx.H } );
+        int order = 0;
         if ( reg.has<ECS::RelationshipComponent>( canvas ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvas ).Children )
                 if ( reg.valid( c ) )
@@ -518,14 +559,17 @@ namespace Desert::UI
         // Later in draw order = drawn on top, so the LAST match wins — a small button in front of a
         // full-screen panel is picked instead of the panel. The clip is honoured here and was not before
         // this walk was shared: a row scrolled out of its list is not drawn, so it must not be pickable.
+        //
+        // Asked of the REGION and pointwise, which is the pointer's half of the same object the draw list
+        // cut the geometry with — so the corner of a rotated clipper's bounding box, where the pixels were
+        // removed, refuses the pick too. `n.RectPx` is tested against the UNDONE pointer and the region
+        // against the screen one, because they live in different spaces on purpose.
         entt::entity hit = entt::null;
         for ( const UIElementNode& n : nodes )
         {
             if ( !n.Drawn || !n.OwnRect || !n.RectValid )
                 continue;
-            if ( n.ClipPx.W > 0.0f && n.ClipPx.H > 0.0f &&
-                 !( pointPx.x >= n.ClipPx.X && pointPx.x <= n.ClipPx.X + n.ClipPx.W && pointPx.y >= n.ClipPx.Y &&
-                    pointPx.y <= n.ClipPx.Y + n.ClipPx.H ) )
+            if ( !Graphic::Render2D::ClipRegionContains( n.ClipRegion, pointPx ) )
                 continue;
             const glm::vec2 local = UndoTransform( n.Xform, pointPx );
             if ( local.x >= n.RectPx.X && local.x <= n.RectPx.X + n.RectPx.W && local.y >= n.RectPx.Y &&
