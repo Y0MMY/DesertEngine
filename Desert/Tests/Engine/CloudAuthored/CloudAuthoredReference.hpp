@@ -471,6 +471,12 @@ namespace Desert::Tests::CloudAuthoredRef
             params.SpeciesCount   = 1;
             params.WindOffsetKm   = vec3( 0.0f );
 
+            // The C++ mirror marches as the EYE does. A CloudFieldParams built member by member
+            // here bypasses CloudUnpackFieldParams, which is where the shader sets this, so leaving it
+            // out would hand the reference an indeterminate float -- the fixture-fills-three-of-five
+            // hazard this suite has already been bitten by once.
+            params.ShadowRay = CLOUD_RAY_VIEW;
+
             for ( int slot = 0; slot < CLOUD_SPECIES_SLOTS; ++slot )
             {
                 params.SpeciesEdge[slot] = vec4( 0.0f );

@@ -97,7 +97,12 @@ namespace Desert::Editor::ShaderGraph
                 { "DetailType", ValueType::Float },
                 { "DetailFactor", ValueType::Float },
                 { "DensityScale", ValueType::Float },
-                { "ExtinctionFactor", ValueType::Float } },
+                { "ExtinctionFactor", ValueType::Float },
+                // WHICH MARCH IS ASKING — 0 for the eye, 1 for a quadrature that only wants a
+                // transmittance. APPENDED, because a saved .dgraph stores pins positionally. It is legal
+                // in the two outputs a shadow march actually calls and refused in the other three, where
+                // it could only ever be the constant zero; ShadowRayScopes() below is that register.
+                { "ShadowRay", ValueType::Float } },
               false, false, false, VOLUME },
             // The layer's own two lighting values, each legal ONLY in the output it belongs to — see the
             // reachability rule in the compiler. They exist so a graph can MODIFY what the layer decided
@@ -245,7 +250,46 @@ namespace Desert::Editor::ShaderGraph
         };
         return s_OutOfScope;
     }
+
+    const std::vector<ShadowRayScope>& ShadowRayScopes()
+    {
+        // TWO, AND THE NUMBER IS A FACT ABOUT THE MARCHES rather than a policy. The three quadratures
+        // that integrate optical depth — CloudLightOpticalDepth in Common/CloudField.glslh, the cloud
+        // shadow map and the sky-occlusion volume — call exactly these two entry points and no others;
+        // an albedo, an emission and an occlusion are only ever asked for by a march that is producing
+        // radiance, where ShadowRay is the literal zero. The suite reads those three files and derives
+        // this set, so the row and the shader cannot drift apart in silence.
+        static const std::vector<ShadowRayScope> s_Scopes = {
+            { "Density",    "CloudSampleDensity" },
+            { "Extinction", "CloudSampleExtinctionFactor" },
+        };
+        return s_Scopes;
+    }
     // clang-format on
+
+    // Is the Volume Output pin currently being compiled one a shadow-ray march actually reaches?
+    // Empty means "not inside a Volume medium at all", which is every other domain and is never in scope.
+    static bool ShadowRayIsInScope( const std::string& outputPin )
+    {
+        for ( const auto& scope : ShadowRayScopes() )
+            if ( outputPin == scope.OutputPin )
+                return true;
+        return false;
+    }
+
+    // The scope register as prose, for the refusal message. Built from the register rather than typed
+    // beside it, so a row added there appears in what the artist is told without anybody remembering to.
+    static std::string ShadowRayScopeList()
+    {
+        std::string list;
+        for ( const auto& scope : ShadowRayScopes() )
+        {
+            if ( !list.empty() )
+                list += ", ";
+            list += scope.OutputPin;
+        }
+        return list;
+    }
 
     const char* OutputKind( Domain domain )
     {
@@ -379,8 +423,28 @@ namespace Desert::Editor::ShaderGraph
                     {
                         if ( src->Outputs[i].Id != it->second )
                             continue;
-                        return src->Kind == "SplitVec3" ? var + "." + std::string( 1, "xyz"[i] )
-                                                        : var + "." + src->Outputs[i].Name;
+                        if ( src->Kind == "SplitVec3" )
+                            return var + "." + std::string( 1, "xyz"[i] );
+
+                        // ONE PIN OF THIS NODE IS SCOPE-LIMITED, and by the same rule as Layer Albedo and
+                        // Layer Occlusion above: it is emitted into five functions and it only MEANS
+                        // anything in the two a shadow march calls. Elsewhere it is the literal zero, so
+                        // a `mix( expensive, cheap, ShadowRay )` there is a branch that can never be
+                        // taken — a knob that does nothing, delivered as a feature. Refused by name
+                        // instead, with the outputs that do work listed, because the artist cannot see
+                        // which functions their canvas is compiled into.
+                        if ( src->Outputs[i].Name == "ShadowRay" && !ShadowRayIsInScope( currentOutput ) )
+                        {
+                            error = std::format(
+                                 "the Cloud Sample node's 'ShadowRay' output is only meaningful in the {} "
+                                 "output(s) of the Volume Output node ({}); it is reachable from '{}', "
+                                 "where no shadow march ever asks the medium anything and the value is "
+                                 "always zero",
+                                 ShadowRayScopes().size(), ShadowRayScopeList(),
+                                 currentOutput.empty() ? std::string( "<none>" ) : currentOutput );
+                            return fallback;
+                        }
+                        return var + "." + src->Outputs[i].Name;
                     }
                 }
                 return var;

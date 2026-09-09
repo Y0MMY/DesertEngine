@@ -161,6 +161,12 @@ namespace
         params.DensityScale = 1.0f;
         params.WindOffsetKm = vec3( 0.0f, 0.0f, 0.0f );
 
+        // The C++ mirror marches as the EYE does. A CloudFieldParams built member by member
+        // here bypasses CloudUnpackFieldParams, which is where the shader sets this, so leaving it
+        // out would hand the reference an indeterminate float -- the fixture-fills-three-of-five
+        // hazard this suite has already been bitten by once.
+        params.ShadowRay = CLOUD_RAY_VIEW;
+
         // ONE SPECIES IN THE FIRST SLOT, volume and array together, which is what a layer with a single
         // type in it is. Every test below that does not say otherwise is testing that layer.
         CloudBindSpecies( params, &shape, 1u, vec3( 1.0f, 0.0f, 0.0f ), coverage, 1.0f );
@@ -328,6 +334,12 @@ TEST( CloudFieldVolume, TheLayersCeilingDoesNotWrapOntoItsFloor )
     params.DensityScale   = 1.0f;
     params.SpeciesCount   = 1;
     params.WindOffsetKm   = vec3( 0.0f );
+
+    // The C++ mirror marches as the EYE does. A CloudFieldParams built member by member
+    // here bypasses CloudUnpackFieldParams, which is where the shader sets this, so leaving it
+    // out would hand the reference an indeterminate float -- the fixture-fills-three-of-five
+    // hazard this suite has already been bitten by once.
+    params.ShadowRay = CLOUD_RAY_VIEW;
 
     for ( int slot = 0; slot < CLOUD_SPECIES_SLOTS; ++slot )
         params.SpeciesEdge[slot] = vec4( 0.0f );
@@ -1110,6 +1122,12 @@ namespace
         params.DensityScale   = 1.0f;
         params.WindOffsetKm   = vec3( 0.0f, 0.0f, 0.0f );
 
+        // The C++ mirror marches as the EYE does. A CloudFieldParams built member by member
+        // here bypasses CloudUnpackFieldParams, which is where the shader sets this, so leaving it
+        // out would hand the reference an indeterminate float -- the fixture-fills-three-of-five
+        // hazard this suite has already been bitten by once.
+        params.ShadowRay = CLOUD_RAY_VIEW;
+
         // Binding the species BAKES the volume for exactly this set, which is what makes the two channels
         // below the two channels the device would carry.
         CloudBindSpecies( params, pair, 2u, vec3( 1.0f, 0.0f, 0.0f ), coverage, 1.0f );
@@ -1257,6 +1275,12 @@ TEST( CloudFieldSpecies, AnEmptySetStillHasASkyAndAnUnfilledSlotCostsNothing )
     params.DetailStrength = 0.1f;
     params.DensityScale   = 1.0f;
     params.WindOffsetKm   = vec3( 0.0f, 0.0f, 0.0f );
+
+    // The C++ mirror marches as the EYE does. A CloudFieldParams built member by member
+    // here bypasses CloudUnpackFieldParams, which is where the shader sets this, so leaving it
+    // out would hand the reference an indeterminate float -- the fixture-fills-three-of-five
+    // hazard this suite has already been bitten by once.
+    params.ShadowRay = CLOUD_RAY_VIEW;
 
     // Deliberately hostile: the VOLUME is baked for ONE species, so channel 1 is zero everywhere, and
     // then the array is filled with a SECOND species carrying a large density. Only the count and that

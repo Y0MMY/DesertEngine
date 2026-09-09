@@ -781,3 +781,310 @@ TEST( ShaderGraphVolumeDomain, EveryRowExcusingAnUnreadableValueStillDescribesTh
                 "delete it.";
     }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+// SHADOW RAY — the one input that comes from the MARCH and not from the field
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// O1-F's whole subject (O1_DESIGN §3.3, remainder named in §12.7). The medium is compiled into four
+// programs and marched by five quadratures, and three of those five sum OPTICAL DEPTH rather than
+// radiance — the sun march inside CloudField.glslh, the cloud shadow map, the sky-occlusion volume. Epic
+// lets a material cheapen itself there through ShadowSampleDistance; this is the same permission with a
+// 0/1 pin, because our shadow marches are binary rather than distance-graded.
+//
+// AND IT IS A SCOPE QUESTION, not merely a value. The pin is emitted into all five medium functions, but
+// only two of them are ever CALLED by a shadow march — a shadow ray never asks for an albedo, an emission
+// or an occlusion. In the other three the value is the literal zero, so a graph branching on it there is
+// authoring a path that can never be taken: a knob that does nothing, which is what §1.3 of the contract
+// forbids in the same breath as a stub. So the compiler refuses it there, and the register saying where
+// it is legal is DERIVED below from the shader tree rather than believed.
+namespace
+{
+    // Comments removed. This file's subject is which entry points are CALLED, and every one of the three
+    // shadow marches discusses the others in prose right beside the call.
+    std::string StripComments( const std::string& source )
+    {
+        std::string out;
+        out.reserve( source.size() );
+        for ( std::size_t i = 0; i < source.size(); )
+        {
+            if ( source.compare( i, 2, "//" ) == 0 )
+            {
+                while ( i < source.size() && source[i] != '\n' )
+                    ++i;
+                continue;
+            }
+            if ( source.compare( i, 2, "/*" ) == 0 )
+            {
+                i += 2;
+                while ( i + 1 < source.size() && source.compare( i, 2, "*/" ) != 0 )
+                    ++i;
+                i = std::min( i + 2, source.size() );
+                continue;
+            }
+            out += source[i++];
+        }
+        return out;
+    }
+
+    // The text of the three marches that declare themselves shadow rays. Two of them are whole programs
+    // and contribute their whole file; the third is ONE function of a shared header — the sun quadrature
+    // runs inside the view march and inside the sky bake, so taking all of CloudField.glslh would sweep in
+    // the view march's own calls and make this derivation meaningless.
+    std::string ShadowMarchText()
+    {
+        const std::filesystem::path shaders = RepoRoot() / "Editor/Resources/Shaders";
+
+        const std::string field    = StripComments( ReadAll( shaders / "Common/CloudField.glslh" ) );
+        const std::size_t sunMarch = field.find( "float CloudLightOpticalDepth(" );
+        EXPECT_NE( sunMarch, std::string::npos ) << "the sun quadrature is not where this derivation looks";
+        const std::size_t sunEnd = field.find( "\n}", sunMarch );
+        EXPECT_NE( sunEnd, std::string::npos );
+
+        std::string text = field.substr( sunMarch, sunEnd - sunMarch );
+        EXPECT_NE( text.find( "ShadowRay = CLOUD_RAY_SHADOW" ), std::string::npos )
+             << "the sun quadrature no longer declares itself a shadow ray, so this derivation is reading a "
+                "march that is not one";
+
+        text += StripComments( ReadAll( shaders / "Programs/Clouds/CloudShadowMap.shader" ) );
+        text += StripComments( ReadAll( shaders / "Programs/Clouds/CloudSkyOcclusionVolume.shader" ) );
+        return text;
+    }
+} // namespace
+
+TEST( ShaderGraphVolumeDomain, ShadowRayIsOfferedInExactlyTheOutputsAShadowMarchAsksFor )
+{
+    // What the three shadow marches actually call, read out of them.
+    const std::string           marches = ShadowMarchText();
+    const std::set<std::string> called  = [&marches]
+    {
+        std::set<std::string> found;
+        for ( const char* entryPoint : { "CloudSampleDensity", "CloudSampleExtinctionFactor", "CloudSampleAlbedo",
+                                         "CloudSampleEmissive", "CloudSampleOcclusion" } )
+            if ( marches.find( std::string( entryPoint ) + "(" ) != std::string::npos )
+                found.insert( entryPoint );
+        return found;
+    }();
+    ASSERT_FALSE( called.empty() ) << "no medium entry point was found in the shadow marches at all, which "
+                                      "means this test measured nothing";
+
+    std::set<std::string> registered;
+    for ( const auto& scope : SG::ShadowRayScopes() )
+        registered.insert( scope.EntryPoint );
+
+    EXPECT_EQ( called, registered )
+         << "the medium functions a SHADOW march calls and the outputs where the graph offers ShadowRay "
+            "have parted company. Both directions are defects: an entry point called by a shadow march and "
+            "missing from the register is an output where an author cannot express the saving Epic's "
+            "ShadowSampleDistance exists for, and a row in the register that no shadow march reaches is a "
+            "pin whose value there is always zero — a branch that can never be taken, offered as a "
+            "feature. Fix the register, or fix the march.";
+
+    // And every row names a Volume Output pin that exists, so the two lists cannot drift by a rename.
+    const SG::Document doc    = EmptyVolumeDoc();
+    const SG::Node*    output = nullptr;
+    for ( const auto& node : doc.Nodes )
+        if ( node.Kind == "VolumeOutput" )
+            output = &node;
+    ASSERT_NE( output, nullptr );
+    for ( const auto& scope : SG::ShadowRayScopes() )
+    {
+        bool found = false;
+        for ( const auto& pin : output->Inputs )
+            found = found || pin.Name == scope.OutputPin;
+        EXPECT_TRUE( found ) << "the ShadowRay register names the Volume Output pin '" << scope.OutputPin
+                             << "', and the node has no such input";
+    }
+}
+
+TEST( ShaderGraphVolumeDomain, ShadowRayCompilesIntoTheOutputsItBelongsToAndIsRefusedInTheRest )
+{
+    std::set<std::string> legal;
+    for ( const auto& scope : SG::ShadowRayScopes() )
+        legal.insert( scope.OutputPin );
+
+    // Every output of the contract, tried in turn. The two vector pins need a float-to-vec3 step, so the
+    // flag reaches them through Scale (Vector 3 x Float) rather than directly — which is also the honest
+    // shape of an author's attempt, since tinting by ray kind is exactly what one would try.
+    for ( const char* pinName : { "Density", "Extinction", "Albedo", "Emissive", "AmbientOcclusion" } )
+    {
+        SG::Document doc = EmptyVolumeDoc();
+
+        SG::Node&    sample    = NodeOfKind( doc, "CloudSample" );
+        const size_t shadowPin = [&sample]
+        {
+            for ( size_t i = 0; i < sample.Outputs.size(); ++i )
+                if ( sample.Outputs[i].Name == "ShadowRay" )
+                    return i;
+            return sample.Outputs.size();
+        }();
+        ASSERT_LT( shadowPin, sample.Outputs.size() ) << "the Cloud Sample node has no ShadowRay output";
+        const uint64_t shadowOut = sample.Outputs[shadowPin].Id;
+
+        SG::Node&    output = NodeOfKind( doc, "VolumeOutput" );
+        const size_t pin    = IndexOfInput( output, pinName );
+        ASSERT_LT( pin, output.Inputs.size() );
+        const uint64_t target = output.Inputs[pin].Id;
+        const bool     isVec3 = std::string( pinName ) == "Albedo" || std::string( pinName ) == "Emissive";
+
+        if ( isVec3 )
+        {
+            auto white            = SG::MakeNode( doc, "Vec3Const" );
+            white.Value           = { 1.0f, 1.0f, 1.0f, 0.0f };
+            const uint64_t whiteO = white.Outputs[0].Id;
+            doc.Nodes.push_back( std::move( white ) );
+
+            auto           scale  = SG::MakeNode( doc, "ScaleVec3" );
+            const uint64_t scaleV = scale.Inputs[0].Id;
+            const uint64_t scaleF = scale.Inputs[1].Id;
+            const uint64_t scaleO = scale.Outputs[0].Id;
+            doc.Nodes.push_back( std::move( scale ) );
+
+            doc.Links.push_back( { doc.NextId++, whiteO, scaleV } );
+            doc.Links.push_back( { doc.NextId++, shadowOut, scaleF } );
+            doc.Links.push_back( { doc.NextId++, scaleO, target } );
+        }
+        else
+        {
+            doc.Links.push_back( { doc.NextId++, shadowOut, target } );
+        }
+
+        const auto compiled = SG::CompileToDShader( doc );
+        if ( legal.count( pinName ) != 0 )
+        {
+            ASSERT_TRUE( compiled.IsSuccess() )
+                 << "ShadowRay was refused in '" << pinName
+                 << "', which IS reached by a shadow march: " << compiled.GetError();
+            EXPECT_NE( compiled.GetValue().find( ".ShadowRay" ), std::string::npos )
+                 << "'" << pinName << "' compiled without ever reading the flag:\n"
+                 << compiled.GetValue();
+        }
+        else
+        {
+            ASSERT_FALSE( compiled.IsSuccess() )
+                 << "ShadowRay was accepted in '" << pinName
+                 << "', where no shadow march ever calls the medium and the value is therefore the "
+                    "constant zero. The artist would have authored a branch that can never be taken.";
+            EXPECT_NE( compiled.GetError().find( "ShadowRay" ), std::string::npos )
+                 << "the refusal does not name the pin the artist wired: " << compiled.GetError();
+            EXPECT_NE( compiled.GetError().find( pinName ), std::string::npos )
+                 << "the refusal does not name the output it came from: " << compiled.GetError();
+        }
+    }
+}
+
+// The two frame controls of O1-F, emitted by the EMITTER rather than hand-written, for the same reason
+// the neutral medium is: what has to be proven is that the artist's canvas produces this, not that this
+// text works.
+//
+//   ./ShaderGraphCompiler --gtest_also_run_disabled_tests --gtest_filter=*DumpShadowOnly*
+//   ./ShaderGraphCompiler --gtest_also_run_disabled_tests --gtest_filter=*DumpViewOnly*
+//
+// THEY ARE A PAIR AND ONLY THE PAIR PROVES ANYTHING. `mix( shipped, 0, ShadowRay )` empties the medium on
+// shadow rays alone: the clouds keep their exact silhouette and lose their self-shadowing and their shadow
+// on the ground. `mix( 0, shipped, ShadowRay )` is the mirror: nothing visible in the sky, and the shadow
+// on the ground still there. A flag stuck at either constant would make one of the two into "everything
+// changed" and the other into "nothing changed", so the pair separates "the shadow march reads the medium"
+// from "the medium changed at all".
+namespace
+{
+    SG::Document RayKindDoc( bool killOnShadowRay )
+    {
+        SG::Document doc = EmptyVolumeDoc();
+
+        SG::Node& sample    = NodeOfKind( doc, "CloudSample" );
+        uint64_t  shadowOut = 0;
+        for ( const auto& out : sample.Outputs )
+            if ( out.Name == "ShadowRay" )
+                shadowOut = out.Id;
+        EXPECT_NE( shadowOut, 0u ) << "the Cloud Sample node has no ShadowRay output";
+
+        auto           shipped = SG::MakeNode( doc, "DefaultDensity" );
+        const uint64_t defOut  = shipped.Outputs[0].Id;
+        doc.Nodes.push_back( std::move( shipped ) );
+
+        auto empty             = SG::MakeNode( doc, "FloatConst" );
+        empty.Value            = { 0.0f, 0.0f, 0.0f, 0.0f };
+        const uint64_t zeroOut = empty.Outputs[0].Id;
+        doc.Nodes.push_back( std::move( empty ) );
+
+        auto           lerp  = SG::MakeNode( doc, "LerpFloat" );
+        const uint64_t lerpA = lerp.Inputs[0].Id;
+        const uint64_t lerpB = lerp.Inputs[1].Id;
+        const uint64_t lerpT = lerp.Inputs[2].Id;
+        const uint64_t lerpO = lerp.Outputs[0].Id;
+        doc.Nodes.push_back( std::move( lerp ) );
+
+        SG::Node&    output = NodeOfKind( doc, "VolumeOutput" );
+        const size_t pin    = IndexOfInput( output, "Density" );
+        EXPECT_LT( pin, output.Inputs.size() );
+
+        // A is the view ray's answer, B the shadow ray's — mix() reads the flag as its t.
+        doc.Links.push_back( { doc.NextId++, killOnShadowRay ? defOut : zeroOut, lerpA } );
+        doc.Links.push_back( { doc.NextId++, killOnShadowRay ? zeroOut : defOut, lerpB } );
+        doc.Links.push_back( { doc.NextId++, shadowOut, lerpT } );
+        doc.Links.push_back( { doc.NextId++, lerpO, output.Inputs[pin].Id } );
+        return doc;
+    }
+} // namespace
+
+TEST( ShaderGraphVolumeDomain, DISABLED_DumpShadowOnlyMedium )
+{
+    const auto compiled = SG::CompileToDShader( RayKindDoc( /*killOnShadowRay=*/true ) );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    std::printf( "%s", compiled.GetValue().c_str() );
+}
+
+TEST( ShaderGraphVolumeDomain, DISABLED_DumpViewOnlyMedium )
+{
+    const auto compiled = SG::CompileToDShader( RayKindDoc( /*killOnShadowRay=*/false ) );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    std::printf( "%s", compiled.GetValue().c_str() );
+}
+
+// The medium O1-F's COST is measured on, and the one an author would actually write: the shipped chain
+// for the eye, and the bare profile — no erosion, no noise fetch — for anything that only wants a
+// transmittance. It is the exact use Epic documents for ShadowSampleDistance, and unlike the two controls
+// above it is meant to look almost the same while costing less.
+//   ./ShaderGraphCompiler --gtest_also_run_disabled_tests --gtest_filter=*DumpCheapShadow*
+TEST( ShaderGraphVolumeDomain, DISABLED_DumpCheapShadowMedium )
+{
+    SG::Document doc = EmptyVolumeDoc();
+
+    SG::Node& sample    = NodeOfKind( doc, "CloudSample" );
+    uint64_t  shadowOut = 0;
+    uint64_t  profile   = 0;
+    for ( const auto& out : sample.Outputs )
+    {
+        if ( out.Name == "ShadowRay" )
+            shadowOut = out.Id;
+        if ( out.Name == "Profile" )
+            profile = out.Id;
+    }
+    ASSERT_NE( shadowOut, 0u );
+    ASSERT_NE( profile, 0u );
+
+    auto           shipped = SG::MakeNode( doc, "DefaultDensity" );
+    const uint64_t defOut  = shipped.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( shipped ) );
+
+    auto           lerp  = SG::MakeNode( doc, "LerpFloat" );
+    const uint64_t lerpA = lerp.Inputs[0].Id;
+    const uint64_t lerpB = lerp.Inputs[1].Id;
+    const uint64_t lerpT = lerp.Inputs[2].Id;
+    const uint64_t lerpO = lerp.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( lerp ) );
+
+    SG::Node&    output = NodeOfKind( doc, "VolumeOutput" );
+    const size_t pin    = IndexOfInput( output, "Density" );
+    ASSERT_LT( pin, output.Inputs.size() );
+
+    doc.Links.push_back( { doc.NextId++, defOut, lerpA } );
+    doc.Links.push_back( { doc.NextId++, profile, lerpB } );
+    doc.Links.push_back( { doc.NextId++, shadowOut, lerpT } );
+    doc.Links.push_back( { doc.NextId++, lerpO, output.Inputs[pin].Id } );
+
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    std::printf( "%s", compiled.GetValue().c_str() );
+}

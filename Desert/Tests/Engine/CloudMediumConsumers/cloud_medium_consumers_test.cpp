@@ -498,6 +498,137 @@ TEST( CloudMediumConsumers, EverySlotOfTheParameterBlockIsReadOrHasARowSayingWhy
                  declaredFloats, declaredFloats - unread, unread );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+// WHICH MARCHES ARE SHADOW RAYS, AND THAT NOBODY CAN BUILD A MARCH WITHOUT SAYING
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// O1-F gave the medium the input the contract calls ShadowRay (O1_DESIGN §3.3): a march that only ever
+// wants a transmittance may be answered cheaply, which is the same permission Epic grants through
+// ShadowSampleDistance. The flag rides on CloudFieldParams rather than on the five entry points'
+// signatures — one fact per MARCH instead of the same fact restated at eighteen call sites — and that
+// choice buys a cheap change at the price of a question this census answers: what stops a march from
+// simply not setting it?
+//
+// Two things, and both are asserted here.
+//
+//   1. THERE IS ONE CONSTRUCTOR. CloudUnpackFieldParams in Common/CloudParams.glslh is the only place in
+//      the tree a CloudFieldParams is built, and it writes EVERY member. So "the flag is initialised" is
+//      a property of one function rather than a rule four programs must remember, and a member added to
+//      the struct and not packed there goes red below instead of arriving as an indeterminate float in a
+//      medium the artist wrote.
+//   2. THE DEFAULT IS THE EXPENSIVE ONE. That constructor writes CLOUD_RAY_VIEW, so a march that forgets
+//      to declare itself runs the author's FULL medium: forgetting costs the saving that was asked for
+//      and can never cost the frame its correctness. The opposite polarity would have made a new consumer
+//      silently render a cheapened medium as though it were the real thing, which is not a defect anyone
+//      would find by looking at a frame.
+//
+// The set of shadow contexts is then named, for the same reason the four consumers are: a FIFTH one is
+// red on purpose, because whoever adds a march has to decide which kind it is in the same change.
+
+TEST( CloudMediumConsumers, EveryFieldParameterIsWrittenByTheOnePlaceThatBuildsThem )
+{
+    const std::filesystem::path shaders = RepoRoot() / "Editor/Resources/Shaders";
+    const std::string           field   = CodeOnly( ReadAll( shaders / "Common/CloudField.glslh" ) );
+    const std::string           params  = CodeOnly( ReadAll( shaders / "Common/CloudParams.glslh" ) );
+    ASSERT_FALSE( field.empty() ) << "Common/CloudField.glslh was not found";
+    ASSERT_FALSE( params.empty() ) << "Common/CloudParams.glslh was not found";
+
+    // The members of `struct CloudFieldParams`, read out of the declaration itself. Each is the last
+    // identifier of its statement, before any array brackets — the struct holds scalars, vectors and two
+    // fixed-size arrays and nothing else.
+    const std::size_t open = field.find( "struct CloudFieldParams" );
+    ASSERT_NE( open, std::string::npos ) << "the field parameter struct is not declared where it was";
+    const std::size_t close = field.find( "\n};", open );
+    ASSERT_NE( close, std::string::npos ) << "the field parameter struct has no end";
+
+    std::vector<std::string> members;
+    std::istringstream       body( field.substr( open, close - open ) );
+    for ( std::string line; std::getline( body, line ); )
+    {
+        const std::size_t semicolon = line.find( ';' );
+        if ( semicolon == std::string::npos || line.find( "struct " ) != std::string::npos )
+            continue;
+        std::string statement = line.substr( 0, semicolon );
+        if ( const std::size_t bracket = statement.find( '[' ); bracket != std::string::npos )
+            statement = statement.substr( 0, bracket );
+        std::size_t end = statement.find_last_not_of( " \t" );
+        if ( end == std::string::npos )
+            continue;
+        const std::size_t begin = statement.find_last_of( " \t", end );
+        if ( begin == std::string::npos )
+            continue;
+        members.push_back( statement.substr( begin + 1, end - begin ) );
+    }
+    ASSERT_GE( members.size(), 8u ) << "the struct was parsed as " << members.size()
+                                    << " member(s), which means the scan above stopped meaning anything";
+
+    // The packer's own body, so an assignment in a NEIGHBOURING function cannot stand in for one here.
+    const std::size_t packer = params.find( "CloudFieldParams CloudUnpackFieldParams()" );
+    ASSERT_NE( packer, std::string::npos ) << "the one place a CloudFieldParams is built has moved";
+    const std::size_t packerEnd = params.find( "\n}", packer );
+    ASSERT_NE( packerEnd, std::string::npos );
+    const std::string packerBody = params.substr( packer, packerEnd - packer );
+
+    std::vector<std::string> unwritten;
+    for ( const std::string& member : members )
+        if ( packerBody.find( "p." + member ) == std::string::npos )
+            unwritten.push_back( member );
+
+    EXPECT_TRUE( unwritten.empty() )
+         << unwritten.size()
+         << " member(s) of CloudFieldParams are never written by "
+            "CloudUnpackFieldParams, so every march that calls it starts with an indeterminate value in "
+            "them — and the medium an artist wrote is what reads it. The first is '"
+         << ( unwritten.empty() ? std::string( "-" ) : unwritten.front() ) << "'.";
+
+    std::printf( "[CloudMediumConsumers] %zu field parameters, all written by one packer\n", members.size() );
+}
+
+TEST( CloudMediumConsumers, TheShadowRayContextsAreTheThreeMarchesThatIntegrateOpticalDepth )
+{
+    const std::filesystem::path shaders = RepoRoot() / "Editor/Resources/Shaders";
+
+    // The safe polarity, at the one place it is decided.
+    const std::string params = CodeOnly( ReadAll( shaders / "Common/CloudParams.glslh" ) );
+    EXPECT_NE( params.find( "p.ShadowRay = CLOUD_RAY_VIEW" ), std::string::npos )
+         << "the one constructor of CloudFieldParams no longer declares a view ray. A march that does not "
+            "say what it is must get the FULL medium: with the polarity the other way round, a consumer "
+            "added tomorrow would silently render whatever cheap approximation the artist wrote for "
+            "shadows, and no frame would show it.";
+
+    // Every file that declares itself a shadow ray, whether program or shared header.
+    std::set<std::string> contexts;
+    for ( const auto& [root, extension] : { std::pair<const char*, const char*>{ "Programs", ".shader" },
+                                            std::pair<const char*, const char*>{ "Common", ".glslh" } } )
+        for ( const std::string& relative : ShaderFiles( shaders / root, extension ) )
+        {
+            const std::string code = CodeOnly( ReadAll( shaders / root / relative ) );
+            if ( code.find( "ShadowRay = CLOUD_RAY_SHADOW" ) != std::string::npos )
+                contexts.insert( std::string( root ) + "/" + relative );
+        }
+
+    // THE THREE, NAMED, with what each of them integrates — the same form as the four consumers above and
+    // for the same reason: a count would pass on the wrong three the day one is renamed.
+    const std::set<std::string> expected = {
+         // The sun quadrature. It is the only one that is not a whole program: it runs INSIDE the view
+         // march and inside the sky bake, which is why the flag had to live on the params struct rather
+         // than being a compile-time constant of a program.
+         "Common/CloudField.glslh",
+         "Programs/Clouds/CloudShadowMap.shader",          // the clouds' shadow on the ground
+         "Programs/Clouds/CloudSkyOcclusionVolume.shader", // how much sky each column can see
+    };
+
+    EXPECT_EQ( contexts, expected )
+         << "the set of marches that declare themselves shadow rays is not the three this tree knows "
+            "about. A march ADDED here is one an authored medium may now answer cheaply, and it must be "
+            "one that accumulates optical depth rather than radiance — the axis is what the loop SUMS, not "
+            "where it points, which is why the sky-occlusion volume is on this list and the sky panorama "
+            "bake is not. A march REMOVED here means an author's shadow saving quietly stopped applying "
+            "to one of the three, and nothing in a frame says which.";
+
+    std::printf( "[CloudMediumConsumers] %zu shadow-ray marches\n", contexts.size() );
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );

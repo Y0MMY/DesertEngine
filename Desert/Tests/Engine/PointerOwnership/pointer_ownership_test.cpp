@@ -197,11 +197,19 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   TWO WEAK, which are the other half of that arrangement: ShaderService::m_ShaderAssets (the asset
     //   manager owns the assets; this service must not extend their life to compile a variant later) and
     //   VariantEntry::Program (the cache above).
-    EXPECT_EQ( CountOf( Form::Raw ), 337 );
+    //
+    //   805 -> 807 with O1-F, the authored medium's ShadowRay input, and both are RAW: the two string
+    //   literals of ShadowRayScope — the register saying in which of the medium's five outputs the flag
+    //   means anything, and which GLSL entry point a shadow march calls to get there. Same static-table
+    //   answer as the nine O1-E added beside them, and the same reason there is a register at all rather
+    //   than a pair of names in an `if`: the suite that derives the set from the shader tree needs
+    //   something to compare against. Nothing else of O1-F is a pointer — the flag itself is a float on a
+    //   GLSL struct, which no C++ census can see.
+    EXPECT_EQ( CountOf( Form::Raw ), 339 );
     EXPECT_EQ( CountOf( Form::Shared ), 320 );
     EXPECT_EQ( CountOf( Form::Unique ), 110 );
     EXPECT_EQ( CountOf( Form::Weak ), 38 );
-    EXPECT_EQ( (int)Members().size(), 805 )
+    EXPECT_EQ( (int)Members().size(), 807 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }

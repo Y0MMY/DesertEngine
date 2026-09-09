@@ -166,6 +166,12 @@ struct CloudGraphSample
     float DetailFactor;
     float DensityScale;
     float ExtinctionFactor;
+
+    // 0 on a march that accumulates radiance, 1 on one that accumulates optical depth. See CLOUD_RAY_VIEW
+    // in Common/CloudField.glslh for which of the four consumers is which. It is the author's lever for
+    // the thing Epic calls ShadowSampleDistance: `mix( expensive, cheap, ShadowRay )` in the Density or
+    // Extinction output buys back the ten-to-thirty samples a shadow quadrature spends per lit sample.
+    float ShadowRay;
 };
 
 CloudGraphSample CloudGraphSampleAt( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )
@@ -183,6 +189,10 @@ CloudGraphSample CloudGraphSampleAt( CloudFieldParams params, CloudFieldSample f
     s.DetailFactor     = field.DetailFactor;
     s.DensityScale     = field.DensityScale;
     s.ExtinctionFactor = field.ExtinctionFactor;
+    // THE ONE MEMBER THAT COMES FROM THE MARCH RATHER THAN FROM THE FIELD, and the only reason it is
+    // reachable at all: the caller's own params carry it, so a graph can tell a shadow quadrature from
+    // the eye without any of the five entry points growing an argument.
+    s.ShadowRay = params.ShadowRay;
     return s;
 }
 

@@ -166,6 +166,13 @@ CloudFieldParams CloudUnpackFieldParams()
     p.InvRegionSizeKm = u_CloudRegion.z;
 
     p.WindOffsetKm = vec3( u_CloudWind.x, u_CloudWind.y, u_CloudWind.z );
+
+    // THE UNPACKED PARAMETERS DESCRIBE A VIEW RAY, and a march that is not one says so itself right after
+    // this call. It is set HERE rather than left to each caller because an unset float is the one value a
+    // graph's `mix( expensive, cheap, ShadowRay )` cannot survive — and because this is the only place in
+    // the tree a CloudFieldParams is built, so "every field is written exactly once" stays a property of
+    // one function instead of a rule four programs have to remember.
+    p.ShadowRay = CLOUD_RAY_VIEW;
     return p;
 }
 
