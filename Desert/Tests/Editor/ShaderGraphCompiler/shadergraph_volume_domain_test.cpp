@@ -559,6 +559,89 @@ TEST( ShaderGraphVolumeDomain, EmissionIsAPinAndReachesTheEmissiveFunction )
          << "the Emissive pin was wired and the function still returns the default.";
 }
 
+TEST( ShaderGraphVolumeDomain, AnImagesRGBReachesTheAlbedoFunctionAsAVec3 )
+{
+    // THE PIN THIS TEST EXISTS FOR WAS A DEAD KNOB UNTIL О1-I. `Medium Texture` shipped its whole-sample
+    // output as Color (vec4) into a domain whose entire palette is float and vec3, and the canvas links
+    // by type EQUALITY — so there was no legal link out of it anywhere, in any graph, ever. Retyped to
+    // Vec3 (`RGB`) rather than deleted, because a .dgraph stores pins positionally and dropping output 0
+    // would have moved the `R` pin under every saved link.
+    //
+    // What is asserted here is that the retype made the pin LIVE and not merely differently typed: an
+    // image sampled at a coordinate the graph computes reaches CloudSampleAlbedo, as a vec3, and the
+    // shipped default for that output is gone. `ShaderGraphCompiler ::
+    // NoPinIsOfferedInADomainThatCannotConnectIt` is the other half — it refuses the type, this refuses
+    // the silence.
+    SG::Document doc = EmptyVolumeDoc();
+
+    auto           sample   = SG::MakeNode( doc, "CloudSample" );
+    const uint64_t position = sample.Outputs[0].Id; // PositionKm
+    doc.Nodes.push_back( std::move( sample ) );
+
+    auto           split   = SG::MakeNode( doc, "SplitVec3" );
+    const uint64_t splitIn = split.Inputs[0].Id;
+    const uint64_t splitX  = split.Outputs[0].Id;
+    const uint64_t splitZ  = split.Outputs[2].Id;
+    doc.Nodes.push_back( std::move( split ) );
+
+    auto image      = SG::MakeNode( doc, "MediumTexture" );
+    image.ParamName = "Streaks";
+    ASSERT_EQ( image.Outputs.size(), 2u );
+    EXPECT_EQ( image.Outputs[0].Name, "RGB" );
+    EXPECT_EQ( image.Outputs[0].Type, static_cast<int>( SG::ValueType::Vec3 ) );
+    const uint64_t imageU   = image.Inputs[0].Id;
+    const uint64_t imageV   = image.Inputs[1].Id;
+    const uint64_t imageRGB = image.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( image ) );
+
+    SG::Node&    output = NodeOfKind( doc, "VolumeOutput" );
+    const size_t pin    = IndexOfInput( output, "Albedo" );
+    ASSERT_LT( pin, output.Inputs.size() );
+    // The link the canvas can now make and could not before: the pin's type and the Albedo input's
+    // type are the same value, which is the whole rule.
+    ASSERT_EQ( output.Inputs[pin].Type, static_cast<int>( SG::ValueType::Vec3 ) );
+
+    doc.Links.push_back( { doc.NextId++, position, splitIn } );
+    doc.Links.push_back( { doc.NextId++, splitX, imageU } );
+    doc.Links.push_back( { doc.NextId++, splitZ, imageV } );
+    doc.Links.push_back( { doc.NextId++, imageRGB, output.Inputs[pin].Id } );
+
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    const std::string& text = compiled.GetValue();
+
+    // A vec3 declaration, not a vec4 one: the fourth channel is not silently carried into a domain
+    // that has nowhere to put it.
+    EXPECT_NE( text.find( "= textureLod( Streaks, vec2( n" ), std::string::npos ) << text;
+    EXPECT_NE( text.find( ", 0.0 ).rgb;" ), std::string::npos ) << text;
+    EXPECT_EQ( text.find( "vec4 n" ), std::string::npos )
+         << "the medium declared a vec4 local, which this domain cannot consume:\n"
+         << text;
+
+    // It reaches the ALBEDO function and the shipped default for that one output is replaced, while
+    // the other four keep theirs.
+    EXPECT_EQ( text.find( "return CloudDefaultAlbedo( params, field, positionKm, materialAlbedo );" ),
+               std::string::npos )
+         << "the Albedo pin was wired and the function still returns the default:\n"
+         << text;
+    for ( const char* untouched :
+          { "return CloudDefaultDensity( params, field, positionKm );",
+            "return CloudDefaultExtinctionFactor( params, field, positionKm );",
+            "return CloudDefaultEmissive( params, field, positionKm );",
+            "return CloudDefaultOcclusion( params, field, positionKm, ambientOcclusion );" } )
+        EXPECT_NE( text.find( untouched ), std::string::npos ) << untouched;
+
+    // And the whole thing is still a shader the ENGINE's own parser reads, carrying the image as a
+    // Texture2D property of the medium's own schema.
+    auto parsed = DShaderParser::Parse( text );
+    ASSERT_TRUE( parsed.IsSuccess() ) << parsed.GetError();
+    const auto& params = parsed.GetValue().Meta.Params;
+    EXPECT_NE( std::find_if( params.begin(), params.end(),
+                             []( const ShaderParam& p ) { return p.Name == "Streaks" && p.IsTexture; } ),
+               params.end() )
+         << "the image the graph sampled is not a property of the emitted medium";
+}
+
 TEST( ShaderGraphVolumeDomain, TheLayersOwnValuesAreRefusedOutsideTheOutputTheyBelongTo )
 {
     // Layer Albedo is the `materialAlbedo` ARGUMENT of one of the five functions. Reachable from the

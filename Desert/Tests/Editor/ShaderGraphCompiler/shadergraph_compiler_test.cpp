@@ -5,7 +5,10 @@
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp> // engine: the real parser
 
 #include <algorithm>
+#include <cstdio>
 #include <format>
+#include <set>
+#include <vector>
 
 namespace SG = Desert::Editor::ShaderGraph;
 using Desert::Core::Preprocess::DShaderParser;
@@ -206,6 +209,117 @@ TEST( ShaderGraphCompiler, PaletteIsFilteredByDomain )
     // Core math is available in both.
     EXPECT_TRUE( SG::SpecInDomain( *multiply, SG::Domain::Surface ) );
     EXPECT_TRUE( SG::SpecInDomain( *multiply, SG::Domain::PostProcess ) );
+}
+
+// ================================================ the palette's own reachability, per domain =====
+//
+// A PIN WHOSE TYPE HAS NO COUNTERPART IN ITS OWN DOMAIN IS A DEAD KNOB, and until this test existed
+// nothing said so. The canvas links by type EQUALITY (NodeGraphPanel: `fromPin->Type == toPin->Type`,
+// pinned by TypeRuleIsEqualityInBothDirections below), so an output pin of a type no node in that
+// domain accepts is a handle the artist can drag out of and drop nowhere — the contract's dead-knob
+// refusal, wearing a feature's clothes. It shipped once: `Medium Texture` was born in the Volume
+// domain with a Color (vec4) output, in a domain whose whole palette is float and vec3, one commit
+// after Vec3Param was introduced *because* a vec4 has no sink here.
+//
+// BOTH DIRECTIONS, because they fail differently. An unreachable OUTPUT is a knob that does nothing;
+// an input pin of a type no node in the domain PRODUCES is a socket that can only ever hold its
+// default, which is the same defect seen from the other end.
+//
+// NOTHING BELOW IS A HAND-WRITTEN LIST: the domains are derived from the palette, and the two type
+// sets are derived from the pins the palette offers in each of them. A census of names would have
+// gone stale on the first node anybody added — which is exactly how the dead pin got in.
+
+namespace
+{
+    // Exhaustive on purpose and with no `default`: a ValueType added tomorrow must not fall silently
+    // into a message that says "unknown".
+    const char* TypeName( SG::ValueType type )
+    {
+        switch ( type )
+        {
+            case SG::ValueType::Float:
+                return "Float (float)";
+            case SG::ValueType::Vec2:
+                return "Vec2 (vec2)";
+            case SG::ValueType::Color:
+                return "Color (vec4)";
+            case SG::ValueType::Vec3:
+                return "Vec3 (vec3)";
+        }
+        return "";
+    }
+
+    /// Every domain the palette ACTUALLY HAS, derived rather than listed: a domain exists exactly when
+    /// the node that terminates it is offered in it. That is the one property no domain can lack — a
+    /// graph with no output node does not compile at all (DomainWithNoOutputNodeAtAllNamesTheMissing-
+    /// Output) — and it cannot be read off the Domains masks instead, because `AllDomains` is ~0u and
+    /// would invent twenty-nine domains that do not exist.
+    std::vector<SG::Domain> DomainsOfThePalette()
+    {
+        std::vector<SG::Domain> domains;
+        for ( int bit = 0; bit < 32; ++bit ) // Domains is a 32-bit mask, so that is the whole space
+        {
+            const SG::Domain    domain = static_cast<SG::Domain>( bit );
+            const SG::NodeSpec* output = SG::FindSpec( SG::OutputKind( domain ) );
+            if ( output != nullptr && SG::SpecInDomain( *output, domain ) )
+                domains.push_back( domain );
+        }
+        return domains;
+    }
+} // namespace
+
+TEST( ShaderGraphCompiler, TheDerivedDomainListIsTheOneTheEnumDeclares )
+{
+    // The guard the gate below needs: if the derivation ever returns nothing, that test passes
+    // vacuously over an empty loop and certifies a palette it never looked at.
+    const std::vector<SG::Domain> domains = DomainsOfThePalette();
+    for ( const SG::Domain declared : { SG::Domain::Surface, SG::Domain::PostProcess, SG::Domain::Volume } )
+        EXPECT_NE( std::find( domains.begin(), domains.end(), declared ), domains.end() )
+             << "the domain terminated by '" << SG::OutputKind( declared ) << "' was not derived from the "
+             << "palette, so the reachability gate never examined it";
+    std::printf( "[ domains ] %zu derived from the palette\n", domains.size() );
+}
+
+TEST( ShaderGraphCompiler, NoPinIsOfferedInADomainThatCannotConnectIt )
+{
+    for ( const SG::Domain domain : DomainsOfThePalette() )
+    {
+        // What this domain can SINK and what it can SOURCE, taken from the pins themselves.
+        std::set<SG::ValueType> sinks;
+        std::set<SG::ValueType> sources;
+        for ( const auto& spec : SG::Specs() )
+        {
+            if ( !SG::SpecInDomain( spec, domain ) )
+                continue;
+            for ( const auto& pin : spec.Inputs )
+                sinks.insert( pin.Type );
+            for ( const auto& pin : spec.Outputs )
+                sources.insert( pin.Type );
+        }
+
+        for ( const auto& spec : SG::Specs() )
+        {
+            if ( !SG::SpecInDomain( spec, domain ) )
+                continue;
+
+            for ( const auto& pin : spec.Outputs )
+                EXPECT_NE( sinks.find( pin.Type ), sinks.end() )
+                     << "in the domain terminated by '" << SG::OutputKind( domain ) << "', the '" << spec.Title
+                     << "' node offers the OUTPUT pin '" << pin.Name << "' of type " << TypeName( pin.Type )
+                     << ", and no node offered in that domain has an input pin of that type. The canvas "
+                        "links by type equality, so every link out of this pin is refused: it is a dead "
+                        "knob. Retype it to a type the domain accepts (do not delete it — a .dgraph "
+                        "stores pins positionally), or give the domain a node that takes one.";
+
+            for ( const auto& pin : spec.Inputs )
+                EXPECT_NE( sources.find( pin.Type ), sources.end() )
+                     << "in the domain terminated by '" << SG::OutputKind( domain ) << "', the '" << spec.Title
+                     << "' node offers the INPUT pin '" << pin.Name << "' of type " << TypeName( pin.Type )
+                     << ", and no node offered in that domain has an output pin of that type. Nothing in "
+                        "this domain can ever feed it, so it can only hold its default: the dead knob "
+                        "seen from the other end.";
+        }
+    }
 }
 
 // ===================================================================== link type checking =====
