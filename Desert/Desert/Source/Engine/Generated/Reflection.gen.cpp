@@ -455,6 +455,8 @@ namespace
                     .Field( FieldInfo{ .Name = "OnExitMessage", .Type = FieldType::String, .Offset = offsetof( T, OnExitMessage ), .Size = sizeof( T::OnExitMessage ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "On Exit", .Category = "UI Pointer Events", } } )
                     .Field( FieldInfo{ .Name = "OnDownMessage", .Type = FieldType::String, .Offset = offsetof( T, OnDownMessage ), .Size = sizeof( T::OnDownMessage ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "On Press", .Category = "UI Pointer Events", } } )
                     .Field( FieldInfo{ .Name = "OnUpMessage", .Type = FieldType::String, .Offset = offsetof( T, OnUpMessage ), .Size = sizeof( T::OnUpMessage ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "On Release", .Category = "UI Pointer Events", } } )
+                    .Field( FieldInfo{ .Name = "Phase", .Type = FieldType::Enum, .Offset = offsetof( T, Phase ), .Size = sizeof( T::Phase ), .TypeName = "UIEventPhase", .Meta = PropertyMetadata{ .DisplayName = "Phase", .Category = "UI Pointer Events", }, .EnumValues = { EnumValue{ "Bubble", 0 }, EnumValue{ "Tunnel", 1 }, } } )
+                    .Field( FieldInfo{ .Name = "StopPropagation", .Type = FieldType::Bool, .Offset = offsetof( T, StopPropagation ), .Size = sizeof( T::StopPropagation ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Stop Propagation", .Category = "UI Pointer Events", } } )
                     .WithDefault<T>()
                     .Register();
             }

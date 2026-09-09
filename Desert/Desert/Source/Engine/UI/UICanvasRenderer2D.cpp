@@ -1752,19 +1752,104 @@ namespace Desert::UI
                             : nullptr;
             };
 
+            // The hit-test axis already says what the pointer does with an element, and the routing must
+            // read that answer rather than invent a second one. An element with no UILayout — the canvas
+            // itself is the only one — takes the default, so a canvas-level listener is reachable.
+            auto hitTestOf = [&]( entt::entity e )
+            {
+                return ( e != entt::null && reg.valid( e ) && reg.has<ECS::UILayoutComponent>( e ) )
+                            ? reg.get<ECS::UILayoutComponent>( e ).Data.HitTest
+                            : ECS::UIHitTest::All;
+            };
+
+            // May @p e hear a pointer event about ITSELF? Only All. ChildrenOnly is transparent to the
+            // pointer, so telling it about a press it cannot receive would contradict the field that says
+            // it cannot; Blocking responds to nothing by definition. Either may still sit on the route of a
+            // descendant that does respond — being silent is not the same as being absent.
+            auto respondsToPointer = [&]( entt::entity e )
+            { return e != entt::null && reg.valid( e ) && hitTestOf( e ) == ECS::UIHitTest::All; };
+
+            // The route of an event aimed at @p target: the chain from the canvas down to it, ANCESTORS
+            // FIRST. Built by walking Parent and reversing, because that is the only direction the
+            // relationship stores and a tree has exactly one path to its root.
+            auto chainOf = [&]( entt::entity target )
+            {
+                std::vector<entt::entity> chain;
+                for ( entt::entity t = target; t != entt::null && reg.valid( t ); )
+                {
+                    chain.push_back( t );
+                    t = reg.has<ECS::RelationshipComponent>( t ) ? reg.get<ECS::RelationshipComponent>( t ).Parent
+                                                                 : entt::null;
+                }
+                std::reverse( chain.begin(), chain.end() );
+                return chain;
+            };
+
+            // One step of a route. Returns true when the route must end here — which is a property of the
+            // listener and NOT of whether it had anything to say, so an element may swallow an event while
+            // emitting nothing.
+            auto step = [&]( entt::entity e, ECS::UIEventPhase phase, std::string ECS::UIPointerEventsData::*msg )
+            {
+                const auto* ev = events( e );
+                if ( ev == nullptr || ev->Phase != phase || !respondsToPointer( e ) )
+                    return false;
+                emit( ev->*msg );
+                return ev->StopPropagation;
+            };
+
+            // Tunnel down the chain, then bubble back up it. Two passes over one chain rather than two
+            // chains, so an element cannot be reached in one pass and missed in the other.
+            auto route = [&]( entt::entity target, std::string ECS::UIPointerEventsData::*msg )
+            {
+                // Blocking STOPS THE POINTER, and a routed press IS that pointer, so it stops here for the
+                // ancestors too: a greyed-out form or a modal scrim that let the canvas behind it hear the
+                // click would be blocking for the hit test and not blocking for the event the hit test
+                // produced, which is one word meaning two things. It can only ever be the TARGET — a
+                // Blocking element closes its sub-tree to election, so nothing under it is ever hot.
+                //
+                // Enter/Exit are deliberately NOT subject to this. They report where the pointer IS, which
+                // is a question about geometry, while a press asks who HANDLES it, which is what Blocking
+                // is a statement about. Silencing the whole chain on hover instead would fire Exit on every
+                // ancestor the moment the pointer crossed onto a blocked child and Enter again when it
+                // left — the very flicker the chain-difference rule exists to prevent.
+                if ( hitTestOf( target ) == ECS::UIHitTest::Blocking )
+                    return;
+
+                const std::vector<entt::entity> chain = chainOf( target );
+                for ( std::size_t i = 0; i < chain.size(); ++i )
+                    if ( step( chain[i], ECS::UIEventPhase::Tunnel, msg ) )
+                        return;
+                for ( std::size_t i = chain.size(); i-- > 0; )
+                    if ( step( chain[i], ECS::UIEventPhase::Bubble, msg ) )
+                        return;
+            };
+
             if ( ctx.HotNext != ctx.Hot ) // the pointer crossed a boundary this frame
             {
-                if ( const auto* ev = events( ctx.Hot ) )
-                    emit( ev->OnExitMessage );
-                if ( const auto* ev = events( ctx.HotNext ) )
-                    emit( ev->OnEnterMessage );
+                // Enter/Exit are the DIFFERENCE of the two chains, not a route (see UIPointerEventsData).
+                // The shared prefix is everything the pointer never left, so a move between two children of
+                // one panel reports nothing about the panel.
+                const std::vector<entt::entity> from = chainOf( ctx.Hot );
+                const std::vector<entt::entity> to   = chainOf( ctx.HotNext );
+
+                std::size_t common = 0;
+                while ( common < from.size() && common < to.size() && from[common] == to[common] )
+                    ++common;
+
+                // Leave innermost-first and enter outermost-first: the pointer crosses one boundary at a
+                // time, and it crosses them in that order.
+                for ( std::size_t i = from.size(); i-- > common; )
+                    if ( const auto* ev = events( from[i] ); ev != nullptr && respondsToPointer( from[i] ) )
+                        emit( ev->OnExitMessage );
+                for ( std::size_t i = common; i < to.size(); ++i )
+                    if ( const auto* ev = events( to[i] ); ev != nullptr && respondsToPointer( to[i] ) )
+                        emit( ev->OnEnterMessage );
             }
 
             const bool pressed = input->MouseDown && !ctx.PrevDown; // UIInput carries held + release only
             if ( pressed )
             {
-                if ( const auto* ev = events( ctx.HotNext ) )
-                    emit( ev->OnDownMessage );
+                route( ctx.HotNext, &ECS::UIPointerEventsData::OnDownMessage );
 
                 // Start a drag from a draggable element. The ghost is the source's own footprint, so the
                 // cursor carries something the size of what it picked up.
@@ -1791,8 +1876,7 @@ namespace Desert::UI
 
             if ( input->MouseReleased )
             {
-                if ( const auto* ev = events( ctx.HotNext ) )
-                    emit( ev->OnUpMessage );
+                route( ctx.HotNext, &ECS::UIPointerEventsData::OnUpMessage );
 
                 if ( ctx.Drag.Active )
                 {

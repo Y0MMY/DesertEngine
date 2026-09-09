@@ -750,10 +750,9 @@ namespace
     };
 
     constexpr Row kPointerEventsRows[] = {
-         { "OnEnterMessage", kCanvasRenderer },
-         { "OnExitMessage", kCanvasRenderer },
-         { "OnDownMessage", kCanvasRenderer },
-         { "OnUpMessage", kCanvasRenderer },
+         { "OnEnterMessage", kCanvasRenderer }, { "OnExitMessage", kCanvasRenderer },
+         { "OnDownMessage", kCanvasRenderer },  { "OnUpMessage", kCanvasRenderer },
+         { "Phase", kCanvasRenderer },          { "StopPropagation", kCanvasRenderer },
     };
 
     constexpr Row kDraggableRows[] = {
