@@ -5,6 +5,7 @@
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp> // engine: the real parser
 
 #include <algorithm>
+#include <format>
 
 namespace SG = Desert::Editor::ShaderGraph;
 using Desert::Core::Preprocess::DShaderParser;
@@ -470,13 +471,19 @@ TEST( ShaderGraphCompiler, TheSurfaceOutputCarriesTheAttributesTheSharedModelCon
 
 TEST( ShaderGraphCompiler, TheGraphsOwnTexturesCannotLandOnAnEngineBinding )
 {
-    // The generated shader declares engine blocks at fixed slots (LightsMetadata 4, the point and spot
-    // buffers 6 and 16, the IBL trio 8/9/10, DirectionLightsUB 14, TimeUB 15, the cloud pair 20/21 and,
-    // since Д20, the five cascade bindings 5/7/13/22/23) and the parser numbers a Properties block's
-    // textures upward from ONE base. While that base was 2, the third texture in a graph would have been
-    // declared at binding 4 on top of LightsMetadata — two GLSL declarations on one descriptor, which
-    // nothing reports. 23 is now the highest engine slot, so the base has to clear it and not 21.
-    EXPECT_GT( SG::kGraphTextureBinding, 23u );
+    // The generated shader declares engine blocks at fixed slots and the parser numbers a Properties
+    // block's textures upward from ONE base. While that base was 2, the third texture in a graph would
+    // have been declared at binding 4 on top of LightsMetadata — two GLSL declarations on one descriptor,
+    // which GLSL does not report.
+    //
+    // WHAT THIS TEST MAY AND MAY NOT CLAIM. It can say the emitter numbers from the reservation, which is
+    // below; it CANNOT say the reservation is free, because that is a property of compiled SPIR-V and
+    // this suite compiles nothing. It used to try, as `EXPECT_GT( kGraphTextureBinding, 23u )` — a gate
+    // pinning a NUMBER, satisfiable by editing the number, and stale the moment an engine layout grew a
+    // slot. The freedom of the window is measured over every shipped pass by
+    // Desert/Tests/Engine/ShaderCacheKey (NoShippedProgramDeclaresABindingInTheGraphsReservedWindow), and
+    // the two halves share one constant so they cannot drift apart.
+    EXPECT_EQ( SG::kGraphTextureBinding, Desert::Core::kGraphOwnedBindingFirst );
 
     SG::Document doc = LitSurfaceDoc();
     auto         tex = SG::MakeNode( doc, "TextureSample" );
@@ -485,7 +492,10 @@ TEST( ShaderGraphCompiler, TheGraphsOwnTexturesCannotLandOnAnEngineBinding )
 
     const auto compiled = SG::CompileToDShader( doc );
     ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
-    EXPECT_NE( compiled.GetValue().find( "TextureBinding(24)" ), std::string::npos ) << compiled.GetValue();
+    EXPECT_NE(
+         compiled.GetValue().find( std::format( "TextureBinding({})", Desert::Core::kGraphOwnedBindingFirst ) ),
+         std::string::npos )
+         << compiled.GetValue();
 }
 
 // ========================================================================== the migration =====

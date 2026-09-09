@@ -2,6 +2,8 @@
 
 #include <Common/Core/ResultStr.hpp>
 
+#include <Engine/Core/ShaderCompiler/ShaderGraphBindings.hpp>
+
 #include <array>
 #include <cstdint>
 #include <string>
@@ -43,12 +45,12 @@ namespace Desert::Editor
             Volume = 2,
         };
 
-        // Where the graph's OWN textures start in the descriptor set. Above every engine binding a
-        // generated shader can declare (the highest are the last two cascade shadow maps at 22 and 23),
-        // because the parser numbers a Properties block's textures upward from this base one at a time
-        // and a collision between two GLSL declarations at one binding is silent — see the note at the
-        // Properties emitter in ShaderGraph.cpp.
-        constexpr unsigned kGraphTextureBinding = 24;
+        // Where the graph's OWN textures start in the descriptor set: the first slot of the window
+        // reserved for graph-owned resources in EVERY domain, which the engine owns and a census keeps
+        // free (Engine/Core/ShaderCompiler/ShaderGraphBindings.hpp). Not a second number here — the
+        // runtime binds into the same window, and the two halves of one reservation cannot be two
+        // constants.
+        constexpr unsigned kGraphTextureBinding = ::Desert::Core::kGraphOwnedBindingFirst;
 
         // Bit for one domain; a NodeSpec lists the domains it belongs to as a mask.
         constexpr unsigned DomainBit( Domain d )

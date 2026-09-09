@@ -25,9 +25,11 @@
 #include <Engine/Core/Formats/MaterialParamRow.hpp>
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
 #include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
+#include <Engine/Core/ShaderCompiler/ShaderGraphBindings.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShaderReflection.hpp>
 #include <Engine/Graphic/Clouds/CloudAuthoredPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudEnvironmentBake.hpp>
+#include <Engine/Graphic/Clouds/CloudMaterialValues.hpp>
 #include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudSkyOcclusionPayload.hpp>
 #include <Engine/Graphic/SkyPayload.hpp>
@@ -36,6 +38,9 @@
 #include <Common/Core/Constants.hpp>
 
 #include <shaderc/shaderc.hpp>
+
+#include <format>
+#include <iostream>
 
 #include <algorithm>
 #include <array>
@@ -1794,6 +1799,336 @@ TEST_F( ShaderRootFixture, TheBrokenShaderFixtureStillDoesNotCompile )
     EXPECT_NE( std::string( result.GetErrorMessage() ).find( "cannot convert" ), std::string::npos )
          << "the fixture no longer fails on the vec2 -> vec4 assignment it is kept for:\n"
          << result.GetErrorMessage();
+}
+
+// ─── The window a shader graph's own resources live in is EMPTY in the shipped tree ──────────────
+//
+// О1-G. Core::kGraphOwnedBindingFirst reserves set-0 bindings from 24 upward for the resources a SHADER
+// GRAPH declares — the textures a Surface graph's Properties block takes today, and whatever an authored
+// cloud medium declares tomorrow. A reservation is worth exactly what enforces it, and nothing enforced
+// this one: the claim lived in a comment listing the engine's slots by hand, and the check beside it was
+// `EXPECT_GT( kGraphTextureBinding, 23u )` — a number that can be satisfied by editing the number.
+//
+// The claim asserted here is the one that matters and it names no engine binding: over the whole shipped
+// tree, compiled by shaderc and reflected by the engine's own reflection, NOTHING declares a set-0
+// binding inside the window. A slot added at 24 tomorrow reddens this whatever spelled it — a literal, a
+// macro, an included header or a second stage, the three blindnesses Г17 measured — because after
+// compilation a binding is a number.
+//
+// SET 0 ONLY, because that is the set a graph declares into: the DSL's `TextureBinding(n)` emits
+// `layout(binding = n)` with no set qualifier, which is set 0, and the runtime binds a material's
+// resources there. A shader that puts something at set 1, binding 24 has not touched the window.
+TEST_F( ShaderRootFixture, NoShippedProgramDeclaresABindingInTheGraphsReservedWindow )
+{
+    const auto files = ShippedShaderFiles();
+    ASSERT_GE( files.size(), 60u ) << "found " << files.size()
+                                   << " shipped shaders under Resources/Shaders — the walk found nothing"
+                                      " to examine, so a green result would mean nothing";
+
+    // Reported on success as well as on failure: the distance between the two is the headroom the next
+    // engine binding has, and it is currently ZERO. A number nobody prints is a number nobody notices
+    // closing.
+    uint32_t    highest = 0;
+    std::string highestWhere;
+    int         passesChecked = 0;
+
+    for ( const auto& file : files )
+    {
+        const auto parsed = Desert::Core::Preprocess::DShaderParser::Parse( ReadFile( file ) );
+        ASSERT_TRUE( parsed.IsSuccess() ) << file.string() << ": " << parsed.GetError();
+
+        // WHAT THIS FILE IS ENTITLED TO PUT IN THE WINDOW — ITS OWN TEXTURE PROPERTIES, BY NAME.
+        //
+        // The DSL numbers a Properties block's Texture2D/TextureCube properties upward from the block's
+        // base, one at a time, declaring each as `sampler2D <PropertyName>` — and a shader GENERATED from
+        // a graph asks for the reserved base. So a graph-generated shader with three textures legitimately
+        // occupies the first three slots of the window, and a census that simply forbade the window would
+        // go red on the next such file somebody commits. That false alarm's obvious "fix" is to edit the
+        // reservation, which is the failure this whole test replaces.
+        //
+        // BY NAME AND NOT BY COUNT, and the difference is a hole. A count says "N slots of the window are
+        // excused", which excuses them in a shader whose textures are at base 2 and never went near the
+        // window — Programs/Text/TextSDF.shader would have bought an engine binding at 24 a free pass.
+        // The name says WHICH resource is standing there, so the excuse only covers the declaration it
+        // was granted for.
+        std::set<std::string> ownTextureProperties;
+        for ( const auto& param : parsed.GetValue().Meta.Params )
+            if ( param.IsTexture && !param.IsAssetRef() )
+                ownTextureProperties.insert( param.Name );
+
+        const auto checkPass =
+             [&]( const std::string& passName, const std::unordered_map<ShaderStage, std::string>& stages )
+        {
+            ShaderResource::ReflectionData data;
+            for ( const auto& [stage, source] : stages )
+            {
+                const auto spirv = CompileStage( source, file, KindOf( stage ) );
+                if ( spirv.empty() )
+                    continue; // CompileStage already reported it
+
+                // Asserted here TOO, and not because the census above forgot to: the reflection's
+                // buckets are keyed by binding, so a collision DELETES one of the two resources from the
+                // layout this test then walks. A slot inside the reserved window could be the one that
+                // disappeared, and this test would report a clean tree over a layout that is short.
+                const auto diagnostics = ShaderReflection::ReflectStage( spirv, stage, data );
+                EXPECT_TRUE( diagnostics.empty() )
+                     << file.string() << " [pass '" << passName
+                     << "']: " << ( diagnostics.empty() ? std::string{} : diagnostics.front() );
+            }
+            ++passesChecked;
+
+            const auto setZero = data.ShaderDescriptorSets.find( 0 );
+            if ( setZero == data.ShaderDescriptorSets.end() )
+                return;
+
+            // What a Properties texture COULD have become: the parser emits `sampler2D` for Texture2D and
+            // `samplerCube` for TextureCube and nothing else, so those are the only two buckets an
+            // entitled declaration can be in. A uniform block, a storage buffer, a storage image or a
+            // sampler3D inside the window is an engine declaration whatever it is called.
+            std::map<uint32_t, std::string> entitledCandidates;
+            for ( const auto& [binding, resource] : setZero->second.Image2DSamplers )
+                entitledCandidates.emplace( binding, resource.Name );
+            for ( const auto& [binding, resource] : setZero->second.ImageCubeSamplers )
+                entitledCandidates.emplace( binding, resource.Name );
+
+            for ( const auto& binding : ShaderReflection::BuildLayoutBindings( setZero->second ) )
+            {
+                if ( binding.binding < Desert::Core::kGraphOwnedBindingFirst )
+                {
+                    // The headroom below is about the ENGINE's slots, so a graph's own texture must not be
+                    // counted into it — it lives in the window by right and would report a headroom of -1
+                    // for a tree in which nothing is wrong.
+                    if ( binding.binding > highest )
+                    {
+                        highest      = binding.binding;
+                        highestWhere = file.string() + " [" + passName + "]";
+                    }
+                    continue;
+                }
+
+                const auto        candidate = entitledCandidates.find( binding.binding );
+                const std::string name = candidate == entitledCandidates.end() ? std::string{} : candidate->second;
+
+                EXPECT_TRUE( !name.empty() && ownTextureProperties.count( name ) == 1 )
+                     << file.string() << " [pass '" << passName << "'] declares set 0, binding " << binding.binding
+                     << ( name.empty() ? "" : " ('" + name + "')" )
+                     << ", which is inside the window reserved for a shader graph's own resources"
+                        " (Core::kGraphOwnedBindingFirst = "
+                     << Desert::Core::kGraphOwnedBindingFirst
+                     << ") and is not one of this file's own Texture2D/TextureCube properties. A graph's"
+                        " texture would land on top of it, and GLSL says nothing about two declarations on"
+                        " one slot. Move this binding down, or raise the reservation and regenerate every"
+                        " .shader whose Properties block spells TextureBinding().";
+            }
+        };
+
+        if ( parsed.GetValue().Passes.empty() )
+            checkPass( "", parsed.GetValue().Stages );
+        else
+            for ( const auto& pass : parsed.GetValue().Passes )
+                checkPass( pass.Name, pass.Stages );
+    }
+
+    EXPECT_GE( passesChecked, (int)files.size() );
+
+    // Signed, because the difference is negative exactly when this test has already failed and an
+    // unsigned one prints 4294967295 instead of saying so — measured, on the mutation that proved the
+    // assertion above can go red.
+    const int headroom = (int)Desert::Core::kGraphOwnedBindingFirst - (int)highest - 1;
+    std::cout << "[ SHIPPED  ] highest set-0 binding is " << highest << " (" << highestWhere
+              << "); the graph's window opens at " << Desert::Core::kGraphOwnedBindingFirst
+              << ", so the headroom is " << headroom << " slot(s)\n";
+}
+
+// ─── The medium seam, both directions ─────────────────────────────────────────────────────────────
+//
+// О1-G. An authored cloud medium is BYTES SUBSTITUTED FOR A HEADER NAME inside four shipped programs
+// (Docs/Clouds/O1_DESIGN.md §12.2), so its declarations sit beside declarations it never sees. О1-E
+// declined to give the Volume domain its own parameters and textures for exactly that reason and said so
+// in §12.3: "their bindings would have to be free in all four programs, and a collision between two GLSL
+// declarations at one binding is silent".
+//
+// It is silent in GLSL and it is not silent here, and the two tests below are the two halves of that
+// sentence, asked of the REAL programs rather than of a synthetic one:
+//
+//   * a medium that takes an OCCUPIED slot is refused by name, in every one of the four consumers;
+//   * a medium that declares a buffer AND a texture in the reserved window compiles and reflects clean
+//     in every one of the four, and the two resources come back at the numbers it asked for.
+//
+// The second is the one that makes the first worth having. A guard that only ever says no leaves "is
+// there anywhere safe to put this?" unanswered — which is the question О1-E's remainder actually turned
+// on, and the answer is now a measurement instead of an assumption.
+namespace
+{
+    // The four programs a cloud material's medium is compiled into. Written out because they are a
+    // CONTRACT — Generated/CloudMedium.glslh names the same four in its own header, and O1_DESIGN §10.1
+    // measured that each of them moves the frame — not because they are hard to find.
+    const std::array<const char*, 4> kMediumConsumers = {
+         "Clouds/CloudRaymarch.shader", "Clouds/CloudShadowMap.shader", "Clouds/CloudSkyOcclusionVolume.shader",
+         "Compute/BakeProceduralSky.shader" };
+
+    // shaderc's includer, resolving one name from a variant and everything else from disk — the same
+    // arrangement Core::ShaderIncluder has, narrowed to what a test needs. The suite's own Includer reads
+    // only the file system, so a substituted medium would silently compile the shipped one.
+    class SubstitutingIncluder final : public shaderc::CompileOptions::IncluderInterface
+    {
+    public:
+        SubstitutingIncluder( std::string name, std::string body )
+             : m_Name( std::move( name ) ), m_Body( std::move( body ) )
+        {
+        }
+
+        shaderc_include_result* GetInclude( const char* requested, shaderc_include_type type,
+                                            const char* requesting, size_t ) override
+        {
+            const bool substituted = ( type == shaderc_include_type_standard && m_Name == requested );
+
+            const std::filesystem::path full =
+                 type == shaderc_include_type_relative
+                      ? ( std::filesystem::path( requesting ).parent_path() / requested ).lexically_normal()
+                      : ( Common::Constants::Path::SHADERDIR_PATH / requested ).lexically_normal();
+
+            auto* name = new std::string( full.string() );
+            auto* body = new std::string( Desert::Core::Preprocess::DShaderParser::TranslateSugar(
+                 substituted ? m_Body : ReadFile( full ) ) );
+
+            auto* result               = new shaderc_include_result;
+            result->source_name        = name->c_str();
+            result->source_name_length = name->size();
+            result->content            = body->c_str();
+            result->content_length     = body->size();
+            result->user_data          = new std::pair<std::string*, std::string*>( name, body );
+            return result;
+        }
+
+        void ReleaseInclude( shaderc_include_result* data ) override
+        {
+            auto* pair = static_cast<std::pair<std::string*, std::string*>*>( data->user_data );
+            delete pair->first;
+            delete pair->second;
+            delete pair;
+            delete data;
+        }
+
+    private:
+        std::string m_Name;
+        std::string m_Body;
+    };
+
+    // Compiles one consumer's compute stage with @p mediumBody standing in for the medium include, then
+    // reflects it. Returns the reflection's diagnostics and, through @p data, the layout it built.
+    //
+    // The compilation itself is EXPECTed to succeed: a medium that fails to compile would produce an
+    // empty diagnostic list, which reads exactly like a medium that collided with nothing.
+    std::vector<std::string> ReflectConsumerWithMedium( const char* consumer, const std::string& mediumBody,
+                                                        ShaderResource::ReflectionData& data )
+    {
+        const auto        path   = ShaderPath( consumer );
+        const std::string source = StageSource( path, ShaderStage::Compute );
+        EXPECT_FALSE( source.empty() ) << consumer;
+        if ( source.empty() )
+            return { "no compute stage" };
+
+        shaderc::Compiler       compiler;
+        shaderc::CompileOptions options;
+        options.SetIncluder(
+             std::make_unique<SubstitutingIncluder>( Desert::Graphic::kCloudMediumInclude, mediumBody ) );
+        options.SetTargetEnvironment( shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1 );
+        options.SetWarningsAsErrors();
+
+        const auto result =
+             compiler.CompileGlslToSpv( source, shaderc_compute_shader, path.string().c_str(), options );
+        EXPECT_EQ( result.GetCompilationStatus(), shaderc_compilation_status_success )
+             << consumer << ": " << result.GetErrorMessage();
+        if ( result.GetCompilationStatus() != shaderc_compilation_status_success )
+            return { result.GetErrorMessage() };
+
+        const std::vector<uint32_t> spirv( result.begin(), result.end() );
+        return ShaderReflection::ReflectStage( spirv, ShaderStage::Compute, data );
+    }
+
+    // A medium body that forwards every contract entry point to the default chain, plus whatever @p extra
+    // declares before them. Forwarding rather than inventing keeps the thing under test the DECLARATION:
+    // a body that computed something else would also change the picture, and a body that computed nothing
+    // would be dead-code-eliminated along with its resource.
+    std::string MediumForwardingWith( const std::string& extra, const std::string& densityExpression )
+    {
+        return "#include <Common/CloudMediumDefault.glslh>\n" + extra +
+               "float CloudSampleDensity( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )\n"
+               "{ return CloudDefaultDensity( params, field, positionKm ) * ( " +
+               densityExpression +
+               " ); }\n"
+               "float CloudSampleExtinctionFactor( CloudFieldParams params, CloudFieldSample field, vec3 p )\n"
+               "{ return CloudDefaultExtinctionFactor( params, field, p ); }\n"
+               "vec3 CloudSampleAlbedo( CloudFieldParams params, CloudFieldSample field, vec3 p, vec3 a )\n"
+               "{ return CloudDefaultAlbedo( params, field, p, a ); }\n"
+               "vec3 CloudSampleEmissive( CloudFieldParams params, CloudFieldSample field, vec3 p )\n"
+               "{ return CloudDefaultEmissive( params, field, p ); }\n"
+               "float CloudSampleOcclusion( CloudFieldParams params, CloudFieldSample field, vec3 p, float o )\n"
+               "{ return CloudDefaultOcclusion( params, field, p, o ); }\n";
+    }
+} // namespace
+
+TEST_F( ShaderRootFixture, AMediumThatTakesAnOccupiedBindingIsRefusedByNameInEveryConsumer )
+{
+    // Binding 1 is the cloud parameter block in three of the four consumers and the SKY payload in the
+    // fourth, which is why the collision is asserted per consumer rather than once: the four do not have
+    // one layout, and a medium is compiled into all four.
+    const std::string colliding = MediumForwardingWith(
+         "layout( std430, binding = 1 ) readonly buffer AuthoredMediumImpostor { vec4 u_Impostor[4]; };\n",
+         "u_Impostor[0].x" );
+
+    for ( const char* consumer : kMediumConsumers )
+    {
+        ShaderResource::ReflectionData data;
+        const auto                     diagnostics = ReflectConsumerWithMedium( consumer, colliding, data );
+
+        ASSERT_FALSE( diagnostics.empty() )
+             << consumer
+             << " accepted a medium that declares its own buffer on an occupied slot. That is the "
+                "silence О1-E's remainder was blocked on: glslang emits both Binding decorations, the "
+                "reflection buckets are keyed BY BINDING, and one of the two resources disappears into a "
+                "layout that is complete, plausible and wrong.";
+        EXPECT_NE( diagnostics.front().find( "AuthoredMediumImpostor" ), std::string::npos )
+             << consumer << ": " << diagnostics.front();
+        EXPECT_NE( diagnostics.front().find( "binding 1" ), std::string::npos )
+             << consumer << ": " << diagnostics.front();
+    }
+}
+
+TEST_F( ShaderRootFixture, AMediumMayDeclareABufferAndATextureInTheReservedWindow )
+{
+    const uint32_t bufferBinding  = Desert::Core::kGraphOwnedBindingFirst;
+    const uint32_t textureBinding = Desert::Core::kGraphOwnedBindingFirst + 1;
+
+    const std::string reserved =
+         MediumForwardingWith( std::format( "layout( std430, binding = {} ) readonly buffer AuthoredMediumParams"
+                                            " {{ vec4 u_MediumParams[4]; }};\n"
+                                            "layout( binding = {} ) uniform sampler2D u_MediumTexture;\n",
+                                            bufferBinding, textureBinding ),
+                               "u_MediumParams[0].x * textureLod( u_MediumTexture, positionKm.xz, 0.0f ).r" );
+
+    for ( const char* consumer : kMediumConsumers )
+    {
+        ShaderResource::ReflectionData data;
+        const auto                     diagnostics = ReflectConsumerWithMedium( consumer, reserved, data );
+
+        EXPECT_TRUE( diagnostics.empty() )
+             << consumer << ": " << ( diagnostics.empty() ? std::string{} : diagnostics.front() );
+
+        const auto setZero = data.ShaderDescriptorSets.find( 0 );
+        ASSERT_NE( setZero, data.ShaderDescriptorSets.end() ) << consumer;
+        const auto bindings = ShaderReflection::BuildLayoutBindings( setZero->second );
+
+        EXPECT_TRUE( HasBinding( bindings, bufferBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) )
+             << consumer << " lost the medium's own buffer: " << DescribeBindings( bindings );
+        EXPECT_TRUE( HasBinding( bindings, textureBinding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) )
+             << consumer << " lost the medium's own texture: " << DescribeBindings( bindings );
+
+        // The other half of "it landed where it asked": nothing else moved to make room. A layout that
+        // gained the two AND lost one of its own would satisfy both assertions above.
+        EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), bindings.size() ) << consumer;
+    }
 }
 
 int main( int argc, char** argv )

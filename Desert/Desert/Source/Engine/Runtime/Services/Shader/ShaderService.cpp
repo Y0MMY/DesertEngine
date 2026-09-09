@@ -173,11 +173,27 @@ namespace Desert::Runtime
         program->ClaimOwnership( Graphic::ResourceOwner::AssetService, handleIt->second );
         if ( !program->IsCompiled() )
         {
-            // Named out loud and still handed back: the caller decides whether to draw with the default
-            // instead, and a nullptr here would be indistinguishable from "the name is unknown".
+            // A REFUSAL, NOT A RESULT — and it used to be handed back with a comment saying "the caller
+            // decides whether to draw with the default instead". No caller decided. Both of them
+            // (VolumetricCloudRenderer::BuildMediumPipelines and ComputeImages::BakeProceduralPanorama)
+            // test the pointer and nothing else, so each already carries a fall-back-to-the-shipped-medium
+            // branch that could never run, and each handed this object to ComputePipeline::Create instead.
+            // VulkanPipelineCompute::Invalidate then reads GetPipelineShaderStageCreateInfos()[0] — of a
+            // vector a failed compile leaves EMPTY.
+            //
+            // That is reachable from a graph an artist can draw: the compile fails on any GLSL error the
+            // emitter can produce, and — the case О1-G is about — on a medium that declares its own
+            // resource at a binding one of the four consumers already holds, which glslang accepts in
+            // silence and ShaderReflection::ReflectStage refuses by name (Г17).
+            //
+            // Refusing here rather than at each call site is what makes those two branches true. It costs
+            // nothing the header did not already say: the doc lists the refusals and the log names which
+            // one this is, so "unknown name" and "did not compile" are still distinguishable to a reader —
+            // they were never distinguishable to the CODE, which is what mattered.
             LOG_ERROR( "[ShaderService] Variant {} of '{}' has no compiled stages — the substituted "
-                       "source did not compile.",
+                       "source did not compile. The caller falls back to the shipped program.",
                        key, name );
+            return nullptr;
         }
 
         m_Variants[key] = VariantEntry{ handleIt->second, program };
