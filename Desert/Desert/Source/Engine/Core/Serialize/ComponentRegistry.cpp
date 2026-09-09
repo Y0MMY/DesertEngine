@@ -1,5 +1,7 @@
 #include "ComponentRegistry.hpp"
 #include <Engine/Core/Serialize/AssetReferenceResolve.hpp>
+#include <Engine/Core/Serialize/AuthoredComponentIO.hpp>
+#include <Engine/Core/Serialize/GenericBlock.hpp>
 #include <Engine/Core/Serialize/TextureSlot.hpp>
 
 #include <Common/Core/AssetHandle.hpp>
@@ -71,23 +73,13 @@ namespace Desert::Core::Serialize
             return key.empty() ? std::string() : Common::AssetHandle::PathForStableKey( key ).generic_string();
         }
 
-        // Bridges a typed serialization struct to/from the generic JSON tree, reusing reflect-cpp's own
-        // (de)serialization for the verbose asset-bearing payloads (mesh vertices, material path lists).
-        template <class T>
-        rfl::Generic ToGeneric( const T& value )
-        {
-            auto g = rfl::json::read<rfl::Generic>( rfl::json::write( value ) );
-            return g.has_value() ? g.value() : rfl::Generic( rfl::Generic::Object{} );
-        }
-
-        template <class T>
-        std::optional<T> FromGeneric( const rfl::Generic& g )
-        {
-            auto r = rfl::json::read<T>( rfl::json::write( g ) );
-            if ( r.has_value() )
-                return r.value();
-            return std::nullopt;
-        }
+        // `ToGeneric`/`FromGeneric` STOOD HERE and are gone: they are `WriteBlock`/`ReadBlock` in
+        // Engine/Core/Serialize/GenericBlock.hpp now, which that header explains. Two things changed
+        // with the move and both are the point — the read takes `rfl::DefaultIfMissing`, so a block
+        // short of one field no longer costs the entity the WHOLE component, and both directions log
+        // their refusal with the component's key instead of returning an empty answer in silence. They
+        // moved to a header because nothing defined in this translation unit can be tested: it links
+        // the AssetManager and through it the renderer.
 
         // Builds a handler for a component whose serializable payload is a reflected data block. Adding a
         // PROPERTY field to that block automatically extends serialization — no code change here.
@@ -202,6 +194,38 @@ namespace Desert::Core::Serialize
             return s;
         }
 
+        // A component with no reflected `Data` block whose whole authored state is mapped by hand in
+        // Engine/Core/Serialize/AuthoredComponentIO.hpp. The mapping lives there and not here for one
+        // reason: this translation unit links the AssetManager and through it the renderer, so nothing
+        // in it can be round-tripped by a test, and a serializer nobody round-trips is how a field goes
+        // missing between two halves that each look right. `WriteComponent`/`ReadComponent` overload on
+        // the component type, so this template is the whole of the wiring.
+        //
+        // A payload that is not an object is REPORTED and the component is left as it was, rather than
+        // reset: the entity keeps whatever the editor already had, which is the state the user can see.
+        template <class TComponent>
+        ComponentSerializer MakeAuthored( std::string key )
+        {
+            ComponentSerializer s;
+            s.Key       = std::move( key );
+            s.Has       = []( ECS::Entity e ) { return e.HasComponent<TComponent>(); };
+            s.Serialize = []( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
+            { return rfl::Generic( WriteComponent( e.GetComponent<TComponent>() ) ); };
+            s.Deserialize = [key = s.Key]( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
+            {
+                const auto object = g.to_object();
+                if ( !object.has_value() )
+                {
+                    LOG_WARN( "[Scene] component '{0}' is not an object; it kept its current values.", key );
+                    return;
+                }
+                auto& comp =
+                     e.HasComponent<TComponent>() ? e.GetComponent<TComponent>() : e.AddComponent<TComponent>();
+                ReadComponent( object.value(), comp );
+            };
+            return s;
+        }
+
         // ScriptComponent has no reflected data block (reflection can't do std::string/variant lists), so it
         // gets a manual serializer via a reflect-cpp mirror: the .lua reference + the exposed-property values.
         struct ScriptPropSer
@@ -251,7 +275,7 @@ namespace Desert::Core::Serialize
             s.Key = "Script";
             s.Has = []( ECS::Entity e ) { return e.HasComponent<ECS::ScriptComponent>(); };
 
-            s.Serialize = []( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
+            s.Serialize = [key = s.Key]( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
             {
                 const auto&                sc = e.GetComponent<ECS::ScriptComponent>();
                 ScriptCompSer              ser;
@@ -265,12 +289,12 @@ namespace Desert::Core::Serialize
                     slots.push_back( std::move( ss ) );
                 }
                 ser.Scripts = std::move( slots );
-                return ToGeneric( ser );
+                return WriteBlock( ser, key );
             };
 
-            s.Deserialize = []( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
+            s.Deserialize = [key = s.Key]( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
             {
-                auto ser = FromGeneric<ScriptCompSer>( g );
+                auto ser = ReadBlock<ScriptCompSer>( g, key );
                 if ( !ser )
                     return;
                 auto& sc = e.HasComponent<ECS::ScriptComponent>() ? e.GetComponent<ECS::ScriptComponent>()
@@ -720,7 +744,8 @@ namespace Desert::Core::Serialize
             s.Key = "StaticMesh";
             s.Has = []( ECS::Entity e ) { return e.HasComponent<ECS::StaticMeshComponent>(); };
 
-            s.Serialize = []( ECS::Entity entity, const Assets::AssetManager& assetManager ) -> rfl::Generic
+            s.Serialize = [key = s.Key]( ECS::Entity                 entity,
+                                         const Assets::AssetManager& assetManager ) -> rfl::Generic
             {
                 const auto&                    smc = entity.GetComponent<ECS::StaticMeshComponent>();
                 Assets::StaticMeshComponentSer meshSer;
@@ -787,13 +812,13 @@ namespace Desert::Core::Serialize
                     meshSer.CustomIndices = flattenedIndices;
                 }
 
-                return ToGeneric( meshSer );
+                return WriteBlock( meshSer, key );
             };
 
-            s.Deserialize =
-                 []( ECS::Entity entity, const rfl::Generic& g, const Assets::AssetManager& assetManager )
+            s.Deserialize = [key = s.Key]( ECS::Entity entity, const rfl::Generic& g,
+                                           const Assets::AssetManager& assetManager )
             {
-                auto parsed = FromGeneric<Assets::StaticMeshComponentSer>( g );
+                auto parsed = ReadBlock<Assets::StaticMeshComponentSer>( g, key );
                 if ( !parsed.has_value() )
                     return;
                 const auto& meshData = parsed.value();
@@ -889,7 +914,8 @@ namespace Desert::Core::Serialize
             s.Key = "InstancedStaticMesh";
             s.Has = []( ECS::Entity e ) { return e.HasComponent<ECS::InstancedStaticMeshComponent>(); };
 
-            s.Serialize = []( ECS::Entity entity, const Assets::AssetManager& assetManager ) -> rfl::Generic
+            s.Serialize = [key = s.Key]( ECS::Entity                 entity,
+                                         const Assets::AssetManager& assetManager ) -> rfl::Generic
             {
                 const auto& ism = entity.GetComponent<ECS::InstancedStaticMeshComponent>();
                 Assets::InstancedStaticMeshComponentSer ser;
@@ -921,13 +947,13 @@ namespace Desert::Core::Serialize
                     ser.InstanceTransforms = std::move( flat );
                 }
 
-                return ToGeneric( ser );
+                return WriteBlock( ser, key );
             };
 
-            s.Deserialize =
-                 []( ECS::Entity entity, const rfl::Generic& g, const Assets::AssetManager& assetManager )
+            s.Deserialize = [key = s.Key]( ECS::Entity entity, const rfl::Generic& g,
+                                           const Assets::AssetManager& assetManager )
             {
-                auto parsed = FromGeneric<Assets::InstancedStaticMeshComponentSer>( g );
+                auto parsed = ReadBlock<Assets::InstancedStaticMeshComponentSer>( g, key );
                 if ( !parsed.has_value() )
                     return;
                 const auto& data = parsed.value();
@@ -966,7 +992,8 @@ namespace Desert::Core::Serialize
             s.Key = "Material";
             s.Has = []( ECS::Entity e ) { return e.HasComponent<ECS::MaterialComponent>(); };
 
-            s.Serialize = []( ECS::Entity entity, const Assets::AssetManager& /*assetManager*/ ) -> rfl::Generic
+            s.Serialize = [key = s.Key]( ECS::Entity entity,
+                                         const Assets::AssetManager& /*assetManager*/ ) -> rfl::Generic
             {
                 const auto&                  mc = entity.GetComponent<ECS::MaterialComponent>();
                 Assets::MaterialComponentSer ser;
@@ -990,13 +1017,13 @@ namespace Desert::Core::Serialize
                     ser.Textures = std::move( ts );
                 }
 
-                return ToGeneric( ser );
+                return WriteBlock( ser, key );
             };
 
-            s.Deserialize =
-                 []( ECS::Entity entity, const rfl::Generic& g, const Assets::AssetManager& assetManager )
+            s.Deserialize = [key = s.Key]( ECS::Entity entity, const rfl::Generic& g,
+                                           const Assets::AssetManager& assetManager )
             {
-                auto parsed = FromGeneric<Assets::MaterialComponentSer>( g );
+                auto parsed = ReadBlock<Assets::MaterialComponentSer>( g, key );
                 if ( !parsed.has_value() )
                     return;
                 const auto& data = parsed.value();
@@ -1034,7 +1061,8 @@ namespace Desert::Core::Serialize
             s.Key = "SkinnedMesh";
             s.Has = []( ECS::Entity e ) { return e.HasComponent<ECS::SkinnedMeshComponent>(); };
 
-            s.Serialize = []( ECS::Entity entity, const Assets::AssetManager& assetManager ) -> rfl::Generic
+            s.Serialize = [key = s.Key]( ECS::Entity                 entity,
+                                         const Assets::AssetManager& assetManager ) -> rfl::Generic
             {
                 const auto&                     smc = entity.GetComponent<ECS::SkinnedMeshComponent>();
                 Assets::SkinnedMeshComponentSer meshSer;
@@ -1065,13 +1093,13 @@ namespace Desert::Core::Serialize
                 if ( !smc.CastShadows )
                     meshSer.CastShadows = smc.CastShadows;
 
-                return ToGeneric( meshSer );
+                return WriteBlock( meshSer, key );
             };
 
-            s.Deserialize =
-                 []( ECS::Entity entity, const rfl::Generic& g, const Assets::AssetManager& assetManager )
+            s.Deserialize = [key = s.Key]( ECS::Entity entity, const rfl::Generic& g,
+                                           const Assets::AssetManager& assetManager )
             {
-                auto parsed = FromGeneric<Assets::SkinnedMeshComponentSer>( g );
+                auto parsed = ReadBlock<Assets::SkinnedMeshComponentSer>( g, key );
                 if ( !parsed.has_value() )
                     return;
                 const auto& meshData = parsed.value();
@@ -1116,7 +1144,7 @@ namespace Desert::Core::Serialize
             ComponentSerializer s;
             s.Key       = "UIAnim";
             s.Has       = []( ECS::Entity e ) { return e.HasComponent<ECS::UIAnimComponent>(); };
-            s.Serialize = []( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
+            s.Serialize = [key = s.Key]( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
             {
                 const auto&                d = e.GetComponent<ECS::UIAnimComponent>().Data;
                 Assets::UIAnimComponentSer ser;
@@ -1133,11 +1161,11 @@ namespace Desert::Core::Serialize
                         ts.Keys.push_back( { k.Time, k.Value, static_cast<int>( k.Easing ) } );
                     ser.Tracks.push_back( std::move( ts ) );
                 }
-                return ToGeneric( ser );
+                return WriteBlock( ser, key );
             };
-            s.Deserialize = []( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
+            s.Deserialize = [key = s.Key]( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
             {
-                auto parsed = FromGeneric<Assets::UIAnimComponentSer>( g );
+                auto parsed = ReadBlock<Assets::UIAnimComponentSer>( g, key );
                 if ( !parsed.has_value() )
                     return;
                 const auto& d    = parsed.value();
@@ -1170,7 +1198,7 @@ namespace Desert::Core::Serialize
             ComponentSerializer s;
             s.Key       = "Text";
             s.Has       = []( ECS::Entity e ) { return e.HasComponent<ECS::TextComponent>(); };
-            s.Serialize = []( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
+            s.Serialize = [key = s.Key]( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
             {
                 const auto& tc = e.GetComponent<ECS::TextComponent>();
                 // The font is an asset HANDLE in memory and persists as the ROOT-TAGGED KEY its handle is
@@ -1181,11 +1209,11 @@ namespace Desert::Core::Serialize
                           static_cast<uint64_t>( tc.Font ) ) );
                 Assets::TextComponentSer ser{ tc.Text,     fontKey, tc.Color, tc.Size, tc.EmissiveIntensity,
                                               tc.Billboard };
-                return ToGeneric( ser );
+                return WriteBlock( ser, key );
             };
-            s.Deserialize = []( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
+            s.Deserialize = [key = s.Key]( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
             {
-                auto parsed = FromGeneric<Assets::TextComponentSer>( g );
+                auto parsed = ReadBlock<Assets::TextComponentSer>( g, key );
                 if ( !parsed.has_value() )
                     return;
                 const auto& d        = parsed.value();
@@ -1209,7 +1237,7 @@ namespace Desert::Core::Serialize
             ComponentSerializer s;
             s.Key       = "Animation";
             s.Has       = []( ECS::Entity e ) { return e.HasComponent<ECS::AnimationComponent>(); };
-            s.Serialize = []( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
+            s.Serialize = [key = s.Key]( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
             {
                 const auto&                   ac = e.GetComponent<ECS::AnimationComponent>();
                 Assets::AnimationComponentSer ser;
@@ -1220,11 +1248,11 @@ namespace Desert::Core::Serialize
                 ser.EnableRootMotion = ac.EnableRootMotion;
                 if ( ac.Graph )
                     ser.GraphJson = Animation::Graph::Serialize( *ac.Graph );
-                return ToGeneric( ser );
+                return WriteBlock( ser, key );
             };
-            s.Deserialize = []( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
+            s.Deserialize = [key = s.Key]( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
             {
-                auto parsed = FromGeneric<Assets::AnimationComponentSer>( g );
+                auto parsed = ReadBlock<Assets::AnimationComponentSer>( g, key );
                 if ( !parsed.has_value() )
                     return;
                 const auto& d = parsed.value();
@@ -1326,6 +1354,20 @@ namespace Desert::Core::Serialize
         // in the same panel and one row up. No version bump: an added key is what ForeignKeys is for.
         Register(
              MakeFlag<ECS::VisibilityComponent>( "Visibility", "Visible", &ECS::VisibilityComponent::Visible ) );
+
+        // ---- Hand-mapped authored blocks (no reflected Data; see AuthoredComponentIO.hpp) ----
+        // U13. Five components with a full Details editor and no row in this table: everything the
+        // artist typed into them was discarded by the next load, and by every Ctrl+C, every delete-undo,
+        // every prefab instancing and every Play/Stop, because all of those are this same registry.
+        // Desert/Tests/Engine/ComponentPersistence now derives "is authored in Details" from the editor's
+        // own registration source and refuses to let a sixth one exist. No version bump: an added key is
+        // what ForeignKeys is for, and no scene in this repository carries these blocks yet — nothing
+        // ever wrote one.
+        Register( MakeAuthored<ECS::FoliageComponent>( "Foliage" ) );
+        Register( MakeAuthored<ECS::LocomotionComponent>( "Locomotion" ) );
+        Register( MakeAuthored<ECS::MorphComponent>( "Morph" ) );
+        Register( MakeAuthored<ECS::SocketAttachmentComponent>( "SocketAttachment" ) );
+        Register( MakeAuthored<ECS::ProjectileComponent>( "Projectile" ) );
 
         // ---- Skybox (now FULLY REFLECTED via RA3) ----
         // No more hand-written SkyboxComponentSer / field mapping: the whole component reflects, and its
