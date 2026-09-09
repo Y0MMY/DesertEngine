@@ -96,6 +96,15 @@ namespace
         return ss.str();
     }
 
+    constexpr const char* kFactory = "Editor/Source/Editor/Panels/UI/UIElementFactory.hpp";
+
+    // The two menus that create UI. Neither may build a UI entity of its own — see the creation-is-a-
+    // command test at the bottom of this file.
+    constexpr const char* kUIMenus[] = {
+         "Editor/Source/Editor/Panels/ViewportPanel/ViewportPanel.cpp",
+         "Editor/Source/Editor/Panels/UI/UIEditorPanel.cpp",
+    };
+
     // Every UI component type the renderer actually QUERIES: the `has<ECS::UIxxx>` / `view<ECS::UIxxx>` calls
     // in its source. This is the census, read from the dispatch itself rather than from any list.
     std::set<std::string> RendererDispatch( const std::string& source )
@@ -233,6 +242,50 @@ TEST( UIElementCensus, EveryUIComponentTheEngineDeclaresIsHandledAndPlaced )
         EXPECT_TRUE( accounted.count( name ) == 1 )
              << "ECS::" << name << " is declared in Components.hpp but is neither an entry in "
              << "UIElementCatalog.hpp nor an exclusion in this test.";
+    }
+}
+
+// --- CREATING A UI ELEMENT IS AN UNDOABLE ACTION -------------------------------------------------
+//
+// Every other creator in the editor — the outliner's Add menu, the prefab drop, the viewport mesh drop,
+// the file explorer's instantiate — calls Commands::NotifyCreated, so Ctrl+Z takes the entity back. The
+// two UI menus were the only ones that did not: an element added to a canvas could be removed only by
+// finding it in the outliner and deleting it by hand, and the canvas itself — the very first thing a
+// user creates when authoring UI — the same.
+//
+// Read as TEXT, and from the factory rather than from the menus, because that is the claim: the record
+// happens in the ONE place an element is made, so a third UI menu cannot be written without it. The
+// two menus already drifted apart once when each carried its own AddUIChild, which is why the factory
+// exists at all.
+TEST( UIElementCensus, EveryUICreationPathRecordsItselfOnTheUndoStack )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+    const std::string factory = ReadFile( root + kFactory );
+    ASSERT_FALSE( factory.empty() ) << "cannot read " << kFactory;
+
+    EXPECT_NE( factory.find( "Commands::NotifyCreated" ), std::string::npos )
+         << kFactory << " never records a creation, so a UI element cannot be undone";
+
+    // The element creator: the catalog macro must expand through the recording helper, not straight to
+    // AddUIChild. This is the line that would go back to being an unrecorded creation.
+    EXPECT_NE( factory.find( "RecordUICreation( scene, AddUIChild<ECS::Type>" ), std::string::npos )
+         << "CreateUIElement builds the entity without recording it";
+
+    // And the canvas, which is a different door and had the same gap.
+    EXPECT_NE( factory.find( "CreateUICanvas" ), std::string::npos )
+         << "there is no recorded way to create the canvas itself";
+
+    for ( const char* menu : kUIMenus )
+    {
+        const std::string source = ReadFile( root + menu );
+        ASSERT_FALSE( source.empty() ) << "cannot read " << menu;
+        EXPECT_EQ( source.find( "AddComponent<ECS::UICanvasComponent>" ), std::string::npos )
+             << menu
+             << " builds a UI canvas inline instead of calling CreateUICanvas, so that creation "
+                "is not on the undo stack";
+        EXPECT_EQ( source.find( "AddUIChild<" ), std::string::npos )
+             << menu << " builds a UI element inline instead of calling CreateUIElement";
     }
 }
 
