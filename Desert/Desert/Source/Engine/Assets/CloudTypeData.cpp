@@ -133,12 +133,18 @@ namespace Desert::Assets
             return r;
         if ( auto r = InRange( "AnvilThicknessKm", shape.AnvilThicknessKm, 0.0f, 10.0f ); !r )
             return r;
-        // A LOBE WITH NO THICKNESS IS NOT A LOBE. The generator answers this pair by drawing nothing, so a
-        // file in this state carries an anvil the artist can see in the numbers and never in the sky.
-        if ( shape.AnvilStrength > 0.0f && !( shape.AnvilThicknessKm > 0.0f ) )
+        // A LOBE WITH NO THICKNESS IS NOT A LOBE, AND NEITHER IS ONE UNDER THE GENERATOR'S OWN THRESHOLDS.
+        // Graphic::CloudTypeHasAnvil is what decides whether a canopy is drawn AND how tall the layer's
+        // shell has to be, so a file that sits between "above zero" and "above that predicate" declares a
+        // canopy the artist can see in the numbers and never in the sky. Refused here BY NAME rather than
+        // answered with silence, because the shell is the thing that pays for it: an anvil declared at
+        // 16 km takes a 0.40 km stratus layer to 15.85 km, and the vertical voxel from 12.5 m to 495 m.
+        if ( shape.AnvilStrength > 0.0f && !Graphic::CloudTypeHasAnvil( shape ) )
             return Common::MakeFormattedError<bool>(
-                 "AnvilStrength is {} but AnvilThicknessKm is {}: an anvil with no thickness never appears",
-                 shape.AnvilStrength, shape.AnvilThicknessKm );
+                 "AnvilStrength is {} and AnvilThicknessKm is {}: an anvil is drawn only above {} and {} km, "
+                 "so this one never appears",
+                 shape.AnvilStrength, shape.AnvilThicknessKm, Graphic::kCloudAnvilMinStrength,
+                 Graphic::kCloudAnvilMinThicknessKm );
 
         if ( auto r = InRange( "DetailCharacter", shape.DetailCharacter, 0.0f, 1.0f ); !r )
             return r;

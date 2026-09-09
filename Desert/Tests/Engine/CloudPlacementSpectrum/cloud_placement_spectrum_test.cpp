@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 using namespace Desert::Assets;
@@ -2944,6 +2945,86 @@ TEST( CloudPlacementSpectrum, ErasingReturnsThePatternToNothingAndTheMaskToNeutr
     EXPECT_EQ( surface.Mask[middle], kCloudLayoutMaskNeutral )
          << "erasing the mask left it at " << static_cast<int>( surface.Mask[middle] )
          << " rather than at neutral, so an erased mask still says something about the sky";
+}
+
+// THE SHELL A TYPE ASKS FOR AND THE BODY THE BAKE THEN PUTS IN IT ARE ONE STATEMENT, NOT TWO.
+//
+// `EveryLumpStandsInsideItsTypesOwnBand` above asserts one half of that relation — nothing pokes OUT of the
+// shell. This asserts the other half, which nothing did: nothing may be inside the shell that no lump can
+// reach. A shell taller than its own contents is not an error and draws no wrong pixel; it silently spends
+// two budgets that are divided by it —
+//
+//   * `kCloudProceduralVolumeHeight` rows over the shell's thickness, so the vertical voxel grows with it;
+//   * the march's step, which is `segment / MaxSteps` past CLOUD_DISTANCE_TO_MAX_STEPS_KM, so a taller
+//     shell is a longer segment and a coarser SEARCH.
+//
+// The way to get one is an ANVIL THAT IS DECLARED AND NEVER DRAWN, and it was reachable: the envelope asked
+// `AnvilStrength > 0` while the generator asked `> 1e-3` and `AnvilThicknessKm > 1e-4`, so a type could take
+// the shell to its canopy's altitude and put nothing there. Both sites call Graphic::CloudTypeHasAnvil now.
+//
+// IT IS DRIVEN THROUGH THE GENERATOR AND NOT THROUGH THE PREDICATE, deliberately: asserting the predicate
+// against itself would pass with the two sites still disagreeing, which is exactly the failure the fix is
+// about. The question asked here is the one that matters — does the layer's shell contain any altitude the
+// emitted lumps cannot occupy?
+TEST( CloudPlacementSpectrum, TheShellHoldsNoAltitudeTheBakeCannotFill )
+{
+    // The strengths bracket Graphic::kCloudAnvilMinStrength: one below it (never drawn) and the shipped
+    // cumulonimbus' own, which is drawn. A canopy declared at 16 km over a 0.90..9.00 km tower is what makes
+    // the two answers differ by kilometres rather than by a rounding.
+    const auto check = []( float anvilStrength, float anvilThicknessKm, const char* what )
+    {
+        CloudProceduralFieldParams params = ShippedParams();
+
+        Desert::Graphic::CloudTypeShape& shape = params.Species[0].Shape;
+        shape.BaseAltitudeKm                   = 0.90f;
+        shape.TopAltitudeKm                    = 9.00f;
+        shape.EdgeTopFraction                  = 0.12f;
+        shape.AnvilAltitudeKm                  = 16.0f;
+        shape.AnvilThicknessKm                 = anvilThicknessKm;
+        shape.AnvilStrength                    = anvilStrength;
+        params.Species[0].CellKm               = 6.0f;
+
+        const Desert::Graphic::CloudEnvelopeKm envelope = Desert::Graphic::CloudTypeSetEnvelopeKm( &shape, 1u );
+
+        params.LayerBottomKm    = envelope.BottomKm;
+        params.LayerThicknessKm = envelope.TopKm - envelope.BottomKm;
+
+        const glm::vec2                       origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+        const std::vector<CloudModellingBlob> blobs  = GenerateCloudProceduralBlobs( params, 0u, origin );
+
+        ASSERT_FALSE( blobs.empty() ) << what;
+
+        float highest = -std::numeric_limits<float>::max();
+        for ( const CloudModellingBlob& blob : blobs )
+            highest = std::max( highest, blob.CentreKm.y + blob.RadiiKm.y );
+
+        std::printf( "[CloudPlacementSpectrum] %s: shell %.2f..%.2f km, tallest lump reaches %.3f km\n", what,
+                     envelope.BottomKm, envelope.TopKm, highest );
+
+        // ONE VOXEL OF THE SHELL IS THE TOLERANCE, the same tolerance the containment test above uses and
+        // for the same reason: a row of the volume is the finest altitude the shell can distinguish, so a
+        // ceiling within one row of the tallest body is a ceiling that costs nothing.
+        const float toleranceKm = params.LayerThicknessKm / static_cast<float>( kCloudProceduralVolumeHeight );
+
+        EXPECT_LE( envelope.TopKm, highest + toleranceKm )
+             << what << ": the shell reaches " << envelope.TopKm << " km and the tallest lump only " << highest
+             << " km, so " << ( envelope.TopKm - highest )
+             << " km of shell holds nothing — the volume's rows and the march's step are divided by it "
+                "for no cloud at all";
+    };
+
+    // The case the fix is about. Below the generator's strength threshold the canopy is never emitted, so a
+    // shell taken to 16 km is 7 km of guaranteed-empty air. Before Graphic::CloudTypeHasAnvil existed the
+    // envelope answered 16.00 km here and the tallest lump 9.00 km.
+    check( 0.5f * Desert::Graphic::kCloudAnvilMinStrength, 1.80f, "an anvil under the generator's strength" );
+
+    // And the same for a canopy whose thickness is under the generator's floor.
+    check( 0.85f, 0.5f * Desert::Graphic::kCloudAnvilMinThicknessKm, "an anvil under the generator's thickness" );
+
+    // THE NEGATIVE CONTROL, and it is what stops the assertion above from being satisfied by a predicate
+    // that simply always says "no anvil": the shipped cumulonimbus' own numbers DO reach the canopy, so the
+    // shell must still be taken up to it.
+    check( 0.85f, 1.80f, "the shipped cumulonimbus' canopy" );
 }
 
 int main( int argc, char** argv )
