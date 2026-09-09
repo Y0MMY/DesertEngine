@@ -13,7 +13,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
-#include <unordered_set>
 
 namespace ed = ax::NodeEditor;
 
@@ -131,10 +130,10 @@ namespace Desert::Editor
         std::vector<std::string> clipNames;
         if ( anim->Animator && m_Library )
         {
-            std::unordered_set<std::string> bones;
-            for ( const auto& b : anim->Animator->GetSkeleton().GetBones() )
-                bones.insert( b.Name );
-            for ( const auto& a : m_Library->GetForSkeletonBones( bones ) )
+            // The SAME rule AnimationECSSystem resolves the chosen name with. This picker used to ask
+            // tolerantly while the state machine asked exactly, so a Mixamo clip offered here resolved to
+            // nothing at runtime and the state played nothing without a word.
+            for ( const auto& a : m_Library->GetForSkeleton( anim->Animator->GetSkeleton() ) )
                 clipNames.push_back( a->GetClip().AnimationName );
         }
 

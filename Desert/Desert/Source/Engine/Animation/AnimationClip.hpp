@@ -5,14 +5,18 @@
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/compatibility.hpp>
 
-#include <unordered_map>
+#include <algorithm>
+#include <string>
+#include <vector>
 
 namespace Desert::Animation
 {
+    // Initialised for the same reason as the serialization mirrors in Assets/Serialization/Animation.hpp:
+    // glm leaves its components indeterminate, and these are the values a clip is sampled from.
     struct PositionKeyFrame
     {
-        float     Time;
-        glm::vec3 Position;
+        float     Time     = 0.0f;
+        glm::vec3 Position = glm::vec3( 0.0f );
 
         bool operator<( const PositionKeyFrame& other ) const
         {
@@ -26,8 +30,8 @@ namespace Desert::Animation
 
     struct RotationKeyFrame
     {
-        float     Time;
-        glm::quat Rotation;
+        float     Time     = 0.0f;
+        glm::quat Rotation = glm::quat( 1.0f, 0.0f, 0.0f, 0.0f );
 
         bool operator<( const RotationKeyFrame& other ) const
         {
@@ -41,8 +45,8 @@ namespace Desert::Animation
 
     struct ScaleKeyFrame
     {
-        float     Time;
-        glm::vec3 Scale;
+        float     Time  = 0.0f;
+        glm::vec3 Scale = glm::vec3( 1.0f );
 
         bool operator<( const ScaleKeyFrame& other ) const
         {
@@ -54,10 +58,14 @@ namespace Desert::Animation
         }
     };
 
+    // THE BONE NAME IS THE ONLY BINDING KEY. A `uint32_t BoneIndex` used to sit beside it, uninitialised, and
+    // Animator::ResolveTrack has never once read it — it builds name -> track and binds by name, because a
+    // clip and the character it drives come from different files with different bone orders. The index was a
+    // second answer to a question only the name answers, and the Sequencer's "New Clip" left it unset all the
+    // way into the .anim file.
     struct BoneTrack
     {
         std::string BoneName;
-        uint32_t    BoneIndex;
 
         std::vector<PositionKeyFrame> PositionKeys;
         std::vector<RotationKeyFrame> RotationKeys;
@@ -166,8 +174,11 @@ namespace Desert::Animation
         // one; this field was the exception.
         uint64_t SkeletonSignature = 0;
 
-        std::vector<BoneTrack> Tracks; // it = bone index
-        // std::unordered_map<std::string, BoneTrack> Tracks;
+        // Named tracks, in the order the source file listed them. THIS IS NOT INDEXED BY BONE: it used to be
+        // scattered by a serialised bone index, which left unnamed holes wherever the source rig was sparse
+        // and made the vector's length a property of the exporter. Playback resolves by name
+        // (Animator::ResolveTrack), so position here means nothing and is not allowed to pretend otherwise.
+        std::vector<BoneTrack> Tracks;
 
         std::vector<AnimationNotify> Notifies; // sorted-by-time markers fired during playback
     };

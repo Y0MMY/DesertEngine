@@ -478,7 +478,6 @@ namespace Desert::Editor
 
                         Desert::Animation::BoneInfo bone;
                         bone.Name               = name;
-                        bone.BoneIndex          = boneIndex;
                         bone.OffsetMatrix       = ConvertMatrix( aiBone->mOffsetMatrix );
                         bone.LocalBindTransform = glm::mat4( 1.0f );
 
@@ -696,8 +695,7 @@ namespace Desert::Editor
                     boneMapping[name]  = idx;
 
                     Desert::Animation::BoneInfo bone;
-                    bone.Name               = name;
-                    bone.BoneIndex          = idx;
+                    bone.Name = name;
                     bone.OffsetMatrix       = glm::mat4( 1.0f ); // unused for playback (target skeleton's bind is used)
                     bone.LocalBindTransform = glm::mat4( 1.0f ); // filled by BuildSkeletonHierarchy
                     skeletonData.Bones.push_back( bone );
@@ -733,11 +731,10 @@ namespace Desert::Editor
 
                 ChannelData ch;
                 ch.BoneName = channel->mNodeName.C_Str();
-                auto it     = boneMapping.find( channel->mNodeName.C_Str() );
-                if ( it == boneMapping.end() )
+                // The bone must exist in the rig this file also produced, otherwise the channel names a bone
+                // no skeleton here has and its keys are unreachable — BuildClipFromAssetData refuses those.
+                if ( !boneMapping.contains( channel->mNodeName.C_Str() ) )
                     continue;
-
-                ch.BoneIndex = it->second;
 
                 for ( uint32_t p = 0; p < channel->mNumPositionKeys; ++p )
                 {

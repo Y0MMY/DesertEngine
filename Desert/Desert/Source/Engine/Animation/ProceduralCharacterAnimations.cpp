@@ -32,8 +32,8 @@ namespace Desert::Animation
             const auto&     bones = skel->GetBones();
 
             std::unordered_map<std::string, uint32_t> nameToIdx;
-            for ( const auto& b : bones )
-                nameToIdx[b.Name] = b.BoneIndex;
+            for ( uint32_t i = 0; i < bones.size(); ++i )
+                nameToIdx[bones[i].Name] = i; // the position IS the index; BoneInfo no longer repeats it
 
             AnimationClip clip;
             clip.AnimationName     = name;
@@ -52,7 +52,6 @@ namespace Desert::Animation
 
                 BoneTrack& t = clip.Tracks[idx];
                 t.BoneName   = boneName;
-                t.BoneIndex  = idx;
                 t.PositionKeys.push_back( { 0.0f, bindPos } ); // constant -> keeps the bone at its bind offset
                 for ( int i = 0; i <= kSamples; ++i )
                 {

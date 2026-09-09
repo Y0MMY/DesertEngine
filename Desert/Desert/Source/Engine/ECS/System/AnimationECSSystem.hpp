@@ -4,9 +4,14 @@
 
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Animation/Graph/AnimGraph.hpp>
+#include <Engine/Animation/Skeleton.hpp>
 
-#include <chrono>
+#include <Common/Core/Logger.hpp>
+
 #include <algorithm>
+#include <chrono>
+#include <string>
+#include <unordered_set>
 
 namespace Desert::ECS
 {
@@ -58,7 +63,7 @@ namespace Desert::ECS
                     anim.Animator = std::make_unique<Animation::Animator>( skinnedMeshPtr->GetSkeleton() );
                 }
 
-                const uint64_t sig = skinnedMeshPtr->GetSkeleton().GetSignature();
+                const Animation::Skeleton& skeleton = skinnedMeshPtr->GetSkeleton();
 
                 // AnimGraph path: the state machine PICKS the clip; the Animator just plays it. Falls back to
                 // the CurrentClip path below when no graph is attached.
@@ -87,16 +92,23 @@ namespace Desert::ECS
                         const auto res = anim.GraphEvaluator->Update( norm );
                         if ( res.Current )
                         {
-                            if ( const auto* clip = FindClip( sig, res.Current->Clip ) )
+                            const auto found = m_AnimationLibrary->FindForSkeleton( skeleton, res.Current->Clip );
+                            if ( found )
                             {
-                                const auto* cur = anim.Animator->GetCurrentClip();
-                                if ( !cur || cur->AnimationName != clip->AnimationName )
+                                const auto& clip = found.GetValue()->GetClip();
+                                const auto* cur  = anim.Animator->GetCurrentClip();
+                                if ( !cur || cur->AnimationName != clip.AnimationName )
                                 {
                                     if ( res.Changed && res.Blend > 0.0f )
-                                        anim.Animator->CrossFade( *clip, res.Blend, res.Current->Loop );
+                                        anim.Animator->CrossFade( clip, res.Blend, res.Current->Loop );
                                     else
-                                        anim.Animator->Play( *clip, res.Current->Loop );
+                                        anim.Animator->Play( clip, res.Current->Loop );
                                 }
+                            }
+                            else
+                            {
+                                ReportUnplayableState( skeleton, res.Current->Name, res.Current->Clip,
+                                                       found.GetError() );
                             }
                             anim.Animator->SetPlaybackSpeed( anim.PlaybackSpeed * res.Current->Speed );
                         }
@@ -109,31 +121,32 @@ namespace Desert::ECS
 
                 if ( !anim.CurrentClip.empty() )
                 {
-                    const auto animations = m_AnimationLibrary->GetBySkeleton( sig );
-
-                    for ( const auto& animAsset : animations )
+                    // SAME RULE AS THE PICKER that wrote this name into the component. It used to be an
+                    // exact-signature scan here against a tolerant one in the Details panel, so a clip an
+                    // artist had just chosen could fail to play with nothing said.
+                    const auto found = m_AnimationLibrary->FindForSkeleton( skeleton, anim.CurrentClip );
+                    if ( found )
                     {
-                        const auto& clip = animAsset->GetClip();
+                        const auto& clip    = found.GetValue()->GetClip();
+                        const auto* current = anim.Animator->GetCurrentClip();
 
-                        if ( clip.AnimationName == anim.CurrentClip )
-                        {
-                            const auto* current = anim.Animator->GetCurrentClip();
-
-                            // Cross-fade on change (smooth idle<->walk<->run) — LocomotionSystem used to do this
-                            // itself; now clip selection is data-driven there, so the blend lives here.
-                            if ( !current )
-                                anim.Animator->Play( clip, anim.Loop );
-                            else if ( current->AnimationName != clip.AnimationName )
-                                anim.Animator->CrossFade( clip, 0.15f, anim.Loop );
-
-                            break;
-                        }
+                        // Cross-fade on change (smooth idle<->walk<->run) — LocomotionSystem used to do this
+                        // itself; now clip selection is data-driven there, so the blend lives here.
+                        if ( !current )
+                            anim.Animator->Play( clip, anim.Loop );
+                        else if ( current->AnimationName != clip.AnimationName )
+                            anim.Animator->CrossFade( clip, 0.15f, anim.Loop );
+                    }
+                    else
+                    {
+                        ReportUnplayableState( skeleton, "AnimationComponent.CurrentClip", anim.CurrentClip,
+                                               found.GetError() );
                     }
                 }
 
                 else
                 {
-                    const auto animations = m_AnimationLibrary->GetBySkeleton( sig );
+                    const auto animations = m_AnimationLibrary->GetForSkeleton( skeleton );
 
                     if ( !animations.empty() )
                     {
@@ -164,21 +177,36 @@ namespace Desert::ECS
         }
 
     private:
-        // Resolves a clip by name for the given skeleton signature (AnimGraph state -> clip). Returns a stable
-        // pointer into the owning AnimationAsset, or null if the library has no such clip.
-        const Animation::AnimationClip* FindClip( uint64_t skeletonSignature, const std::string& name ) const
+        /**
+         * @brief SAYS SO WHEN A STATE CANNOT PLAY. A state whose clip does not resolve used to be a `nullptr`
+         *        that the caller stepped over: the character stood still, no log line, nothing for an artist
+         *        to search for. That silence is the half of the defect a name-matching fix alone would leave.
+         *
+         * ONCE PER DISTINCT COMPLAINT, not once per frame — this runs at 60 Hz over every animated entity,
+         * and an error repeated 60 times a second is a log nobody reads, which is the same silence wearing a
+         * different hat. The key is (rig, state, clip), so a second rig with the same broken state still
+         * reports, and a state that starts resolving and breaks again reports again only if the reason
+         * changes rigs.
+         */
+        void ReportUnplayableState( const Animation::Skeleton& skeleton, const std::string& stateName,
+                                    const std::string& clipName, const std::string& reason ) const
         {
-            if ( name.empty() )
-                return nullptr;
-            for ( const auto& animAsset : m_AnimationLibrary->GetBySkeleton( skeletonSignature ) )
-                if ( animAsset->GetClip().AnimationName == name )
-                    return &animAsset->GetClip();
-            return nullptr;
+            const std::string key = std::to_string( skeleton.GetSignature() ) + '|' + stateName + '|' + clipName;
+            if ( !m_ReportedUnplayable.insert( key ).second )
+                return;
+
+            LOG_ERROR( "[Animation] state '{}' asks for clip '{}' and nothing will play: {} The rig has {} "
+                       "bone(s), signature {}.",
+                       stateName, clipName, reason, skeleton.GetBones().size(), skeleton.GetSignature() );
         }
 
     private:
         Animation::AnimationLibrary*          m_AnimationLibrary;
         std::chrono::steady_clock::time_point m_LastTime;
         bool                                  m_HasLast = false;
+
+        // Mutable because reporting is a property of the log, not of the world being simulated; Update is
+        // non-const anyway, but the reporter is called from a const context in the state-machine branch.
+        mutable std::unordered_set<std::string> m_ReportedUnplayable;
     };
 } // namespace Desert::ECS
