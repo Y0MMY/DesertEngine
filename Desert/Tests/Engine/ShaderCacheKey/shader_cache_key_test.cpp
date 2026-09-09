@@ -26,6 +26,7 @@
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
 #include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
 #include <Engine/Core/ShaderCompiler/ShaderGraphBindings.hpp>
+#include <Engine/Core/ShaderCompiler/ShaderGraphMedium.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShaderReflection.hpp>
 #include <Engine/Graphic/Clouds/CloudAuthoredPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudEnvironmentBake.hpp>
@@ -2096,17 +2097,30 @@ TEST_F( ShaderRootFixture, AMediumThatTakesAnOccupiedBindingIsRefusedByNameInEve
     }
 }
 
-TEST_F( ShaderRootFixture, AMediumMayDeclareABufferAndATextureInTheReservedWindow )
+TEST_F( ShaderRootFixture, AMediumsWholeCapacityLandsAtTheNumbersTheRUNTIMEBinds )
 {
-    const uint32_t bufferBinding  = Desert::Core::kGraphOwnedBindingFirst;
-    const uint32_t textureBinding = Desert::Core::kGraphOwnedBindingFirst + 1;
+    // О1-G ASKED "IS THERE A SAFE PLACE"; THIS ASKS "IS IT THE PLACE THE C++ WRITES TO". The renderer and
+    // the sky bake call SetStorageBuffer/SetInput with an explicit number and never consult reflection —
+    // a mismatch lands a resource on a different descriptor rather than on an error — so the numbers here
+    // are Core::kCloudMediumParamsBinding and Core::kCloudMediumTextureFirst themselves, not a second
+    // arithmetic on kGraphOwnedBindingFirst that could agree today and drift tomorrow.
+    //
+    // AND IT IS THE WHOLE CAPACITY, not one slot of it. Every image a medium may declare is a descriptor
+    // that all four programs carry on every frame of every scene; if the last of them collided with
+    // something, only a medium that used all four would find out, in front of the artist who applied it.
+    std::string declarations =
+         std::format( "layout( std430, binding = {} ) readonly buffer {} {{ vec4 u_MediumParams[{}]; }};\n",
+                      Desert::Core::kCloudMediumParamsBinding, Desert::Core::kCloudMediumBlockName,
+                      Desert::Core::kCloudMediumMaxValues );
+    std::string density = "u_MediumParams[0].x";
+    for ( uint32_t i = 0; i < Desert::Core::kCloudMediumMaxTextures; ++i )
+    {
+        declarations += std::format( "layout( binding = {} ) uniform sampler2D u_MediumTexture{};\n",
+                                     Desert::Core::kCloudMediumTextureFirst + i, i );
+        density += std::format( " * textureLod( u_MediumTexture{}, positionKm.xz, 0.0f ).r", i );
+    }
 
-    const std::string reserved =
-         MediumForwardingWith( std::format( "layout( std430, binding = {} ) readonly buffer AuthoredMediumParams"
-                                            " {{ vec4 u_MediumParams[4]; }};\n"
-                                            "layout( binding = {} ) uniform sampler2D u_MediumTexture;\n",
-                                            bufferBinding, textureBinding ),
-                               "u_MediumParams[0].x * textureLod( u_MediumTexture, positionKm.xz, 0.0f ).r" );
+    const std::string reserved = MediumForwardingWith( declarations, density );
 
     for ( const char* consumer : kMediumConsumers )
     {
@@ -2120,13 +2134,16 @@ TEST_F( ShaderRootFixture, AMediumMayDeclareABufferAndATextureInTheReservedWindo
         ASSERT_NE( setZero, data.ShaderDescriptorSets.end() ) << consumer;
         const auto bindings = ShaderReflection::BuildLayoutBindings( setZero->second );
 
-        EXPECT_TRUE( HasBinding( bindings, bufferBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) )
+        EXPECT_TRUE(
+             HasBinding( bindings, Desert::Core::kCloudMediumParamsBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) )
              << consumer << " lost the medium's own buffer: " << DescribeBindings( bindings );
-        EXPECT_TRUE( HasBinding( bindings, textureBinding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) )
-             << consumer << " lost the medium's own texture: " << DescribeBindings( bindings );
+        for ( uint32_t i = 0; i < Desert::Core::kCloudMediumMaxTextures; ++i )
+            EXPECT_TRUE( HasBinding( bindings, Desert::Core::kCloudMediumTextureFirst + i,
+                                     VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) )
+                 << consumer << " lost the medium's image " << i << ": " << DescribeBindings( bindings );
 
         // The other half of "it landed where it asked": nothing else moved to make room. A layout that
-        // gained the two AND lost one of its own would satisfy both assertions above.
+        // gained them all AND lost one of its own would satisfy every assertion above.
         EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), bindings.size() ) << consumer;
     }
 }

@@ -58,6 +58,26 @@ namespace Desert::Runtime
          */
         std::string MediumSourceOf( const Assets::AssetHandle& handle );
 
+        /**
+         * @brief The medium's own Properties, in declaration order — the schema its authored values are
+         *        resolved against (Engine/Graphic/Clouds/CloudMediumValues.hpp).
+         *
+         * IT IS SERVED FROM HERE AND NOT FROM A Shader, because a medium HAS no Shader: it declares no
+         * stages, so Register deliberately builds no program object for it. The Properties block is
+         * therefore the only part of that file anything can ask about, and asking would otherwise mean
+         * re-parsing a `.shader` once per frame.
+         *
+         * ORDER IS LOAD-BEARING and is the file's own: index i of the numeric properties is field i of the
+         * medium's std430 block, and the i-th Texture2D is Core::kCloudMediumTextureFirst + i. Sorting or
+         * de-duplicating here would silently rebind every slot after the first change.
+         *
+         * @return nullptr when @p handle is not a registered medium — the same refusal MediumSourceOf
+         *         makes, and distinguishable from a medium that exposes nothing, which answers an EMPTY
+         *         vector. The caller needs both: one means "the shipped medium", the other means "this
+         *         medium, which has no parameters".
+         */
+        const std::vector<Core::Formats::ShaderParam>* MediumSchemaOf( const Assets::AssetHandle& handle ) const;
+
         /// Re-read a medium's body after its file changed on disk. Called by the hot-reload poll, which
         /// is the only thing that knows a shader asset was re-read.
         /// @return true when @p content IS a medium, i.e. when the poll has nothing else to do for it.
@@ -97,12 +117,22 @@ namespace Desert::Runtime
         // Keyed "<name>#<16 hex digits of the variant hash>". Weak, for the reason in AcquireVariant.
         std::unordered_map<std::string, VariantEntry> m_Variants;
 
-        // THE BODY OF EVERY REGISTERED Volume MEDIUM, held as TEXT rather than as the asset it came from.
+        // EVERY REGISTERED Volume MEDIUM, held as TEXT AND SCHEMA rather than as the asset it came from.
         // A medium's source is needed continuously — the cloud renderer asks for it every frame — and the
         // asset eviction sweep unloads a shader asset nothing holds strongly, which emptied it three
         // seconds into a scene the first time this was written the other way. A few kilobytes per medium
         // is the whole cost, and it makes the answer independent of when the sweep last ran.
-        std::unordered_map<Assets::AssetHandle, std::string> m_MediumSources;
+        //
+        // THE SCHEMA IS KEPT BESIDE THE BODY AND NOT DERIVED FROM IT ON DEMAND, for the same reason and one
+        // more: the two come out of ONE parse of one file, so they cannot describe different revisions of
+        // it. Re-parsing for the schema every frame would also be the third instance of the crash the body
+        // is cached to avoid.
+        struct MediumEntry
+        {
+            std::string                             Source;
+            std::vector<Core::Formats::ShaderParam> Properties;
+        };
+        std::unordered_map<Assets::AssetHandle, MediumEntry> m_Media;
 
         /// Handles already reported as naming something that is not a medium, so the refusal is said once
         /// per handle rather than once per frame.

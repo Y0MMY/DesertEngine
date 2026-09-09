@@ -7,6 +7,7 @@
 #include <Engine/Graphic/Clouds/CloudAuthoredPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudEnvironmentBake.hpp>
 #include <Engine/Graphic/Clouds/CloudMaterialValues.hpp>
+#include <Engine/Graphic/Clouds/CloudMediumValues.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 #include <Engine/Graphic/Clouds/CloudQuality.hpp>
@@ -356,6 +357,29 @@ namespace Desert::Graphic::System
          */
         void ResolveMedium();
 
+        /**
+         * @brief Resolves the medium's OWN properties out of the same `.demat` — its values into
+         *        m_MediumValues and its image handles into m_MediumImages.
+         *
+         * SEPARATE FROM ResolveMaterial's typed resolve, because the two schemas are separate: the shipped
+         * one is mirrored field for field onto CloudMaterialValues, and this one is a list whose names the
+         * graph author invented. They cannot be read as each other — a medium key carries
+         * Core::kCloudMediumOverridePrefix, which no GLSL identifier can — so nothing here can retune a
+         * shipped value and nothing there can silently absorb a medium one.
+         *
+         * @param overrides the flattened material chain ResolveMaterial already asked for; passed rather
+         *                  than fetched again so both resolves are certainly of the SAME material.
+         */
+        void ResolveMediumValues( const MaterialOverrides& overrides );
+
+        /// Writes m_MediumValues into @p buffer and binds it plus every declared image to @p pipeline —
+        /// the one statement of "how a medium reaches a dispatch", shared by the march, the shadow map and
+        /// the sky-occlusion volume so three call sites cannot come to disagree about a binding number.
+        ///
+        /// EVERY DECLARED SLOT IS WRITTEN, fallback included: an unwritten descriptor invalidates the whole
+        /// set, and this backend answers an invalid set by returning without dispatching — silently.
+        void BindMedium( ComputePipeline* pipeline, ShaderResources::StorageBuffer* buffer ) const;
+
         /// Creates the three pipelines whose programs carry the medium, from the variant currently held
         /// (or from the registered programs when it is default). Split out of CreatePipelines because
         /// ResolveMedium has to do exactly this again when the authored medium changes, and two
@@ -394,6 +418,29 @@ namespace Desert::Graphic::System
         std::shared_ptr<Shader> m_MarchMediumShader;
         std::shared_ptr<Shader> m_ShadowMapMediumShader;
         std::shared_ptr<Shader> m_SkyOcclusionMediumShader;
+
+        // ---- The authored medium's OWN parameters and images ----------------------------------------
+        //
+        // THE VALUES ARE NOT IN m_Material AND THAT IS THE DESIGN. m_Material mirrors ONE shader's
+        // Properties block field for field; a medium's properties are named by whoever drew the graph, so
+        // they are resolved separately out of the same `.demat` and live here. See CloudMediumValues.hpp.
+        //
+        // Resolved once per frame beside m_Material, for the same reason: an artist dragging a slider in
+        // the Material Editor must see the sky move in the frame that follows.
+        CloudMediumValues m_MediumValues;
+
+        /// CloudMediumValuesFingerprint( m_MediumValues ) — kept beside them so the environment bake's
+        /// trigger is one integer. 0 is "this medium exposes nothing", which is every shipped scene.
+        uint64_t m_MediumValuesFingerprint = 0;
+
+        /// The medium's images, resolved from m_MediumValues.Textures once per frame. BORROWED — the
+        /// texture service owns them — and one entry per declared slot, null where the material assigned
+        /// nothing, because an unassigned slot is still a descriptor that has to be written.
+        std::vector<Image2D*> m_MediumImages;
+
+        /// Handles already reported as naming nothing the texture service has, so an unresolvable medium
+        /// image is said once rather than once per frame.
+        std::unordered_set<uint64_t> m_WarnedMediumImages;
 
         std::shared_ptr<ComputePipeline>  m_MarchPipeline;
         std::shared_ptr<ComputePipeline>  m_ResolvePipeline;
@@ -492,6 +539,15 @@ namespace Desert::Graphic::System
         // the fallback volume is bound instead and the count is zero.
         std::shared_ptr<ShaderResources::StorageBuffer> m_AuthoredBuffer;
         std::shared_ptr<ShaderResources::StorageBuffer> m_ShadowAuthoredBuffer;
+
+        // THE AUTHORED MEDIUM'S PARAMETER BLOCK, doubled for exactly the reason the layer's own block and
+        // the hero instance list are: two dispatches on opposite sides of the render graph read it, and
+        // one non-persistent buffer holds one set of bytes per (frame x renderer slot) — not per pass.
+        // Sized for Core::kCloudMediumMaxValues and allocated unconditionally, because a buffer created
+        // when the first medium arrives would be created inside the frame, where a failed allocation has
+        // nowhere to go but a silently skipped dispatch.
+        std::shared_ptr<ShaderResources::StorageBuffer> m_MediumParamsBuffer;
+        std::shared_ptr<ShaderResources::StorageBuffer> m_ShadowMediumParamsBuffer;
 
         std::vector<HeroCloudInstance> m_HeroClouds;
         CloudAuthoredPayload           m_AuthoredPayload{};

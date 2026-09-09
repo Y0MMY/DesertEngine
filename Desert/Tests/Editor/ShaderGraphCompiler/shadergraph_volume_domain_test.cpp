@@ -32,6 +32,8 @@
 #include <ShaderGraph.hpp>
 
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
+#include <Engine/Core/ShaderCompiler/ShaderGraphMedium.hpp>
+#include <Engine/Graphic/Clouds/CloudMaterialValues.hpp>
 
 #include <algorithm>
 #include <array>
@@ -196,6 +198,94 @@ TEST( ShaderGraphVolumeDomain, DISABLED_DumpWiredMedium )
     doc.Links.push_back( { doc.NextId++, emitO, glowA } );
     doc.Links.push_back( { doc.NextId++, profile, glowB } );
     doc.Links.push_back( { doc.NextId++, glowO, out.Inputs[IndexOfInput( out, "Emissive" )].Id } );
+
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    std::printf( "%s", compiled.GetValue().c_str() );
+}
+
+// The two media О1-G-2's acceptance is taken with, printed so the frames are shot against the EMITTER's
+// own output and not a hand-written imitation of it. Both are NEUTRAL at their declared defaults —
+// `Thin` is 1.0 and an unassigned image reads the schema's white — so each must be byte-for-byte the
+// baseline until the `.demat` moves one value, which is what makes the positive control a control.
+//   ./ShaderGraphCompiler --gtest_also_run_disabled_tests --gtest_filter=*DumpMediumWithAValue*
+TEST( ShaderGraphVolumeDomain, DISABLED_DumpMediumWithAValue )
+{
+    SG::Document doc = EmptyVolumeDoc();
+    doc.Name         = "O1G2_Param";
+
+    const uint64_t densityPin =
+         NodeOfKind( doc, "VolumeOutput" ).Inputs[IndexOfInput( NodeOfKind( doc, "VolumeOutput" ), "Density" )].Id;
+
+    auto           shipped    = SG::MakeNode( doc, "DefaultDensity" );
+    const uint64_t shippedOut = shipped.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( shipped ) );
+
+    auto thin              = SG::MakeNode( doc, "FloatParam" );
+    thin.ParamName         = "Thin";
+    thin.Value             = { 1.0f, 0.0f, 0.0f, 0.0f };
+    const uint64_t thinOut = thin.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( thin ) );
+
+    auto           mul  = SG::MakeNode( doc, "MultiplyFloat" );
+    const uint64_t mulA = mul.Inputs[0].Id;
+    const uint64_t mulB = mul.Inputs[1].Id;
+    const uint64_t mulO = mul.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( mul ) );
+
+    doc.Links.push_back( { doc.NextId++, shippedOut, mulA } );
+    doc.Links.push_back( { doc.NextId++, thinOut, mulB } );
+    doc.Links.push_back( { doc.NextId++, mulO, densityPin } );
+
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    std::printf( "%s", compiled.GetValue().c_str() );
+}
+
+//   ./ShaderGraphCompiler --gtest_also_run_disabled_tests --gtest_filter=*DumpMediumWithAnImage*
+TEST( ShaderGraphVolumeDomain, DISABLED_DumpMediumWithAnImage )
+{
+    SG::Document doc = EmptyVolumeDoc();
+    doc.Name         = "O1G2_Image";
+
+    const uint64_t densityPin =
+         NodeOfKind( doc, "VolumeOutput" ).Inputs[IndexOfInput( NodeOfKind( doc, "VolumeOutput" ), "Density" )].Id;
+
+    auto           shipped    = SG::MakeNode( doc, "DefaultDensity" );
+    const uint64_t shippedOut = shipped.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( shipped ) );
+
+    // The sample position in kilometres, split so its X and Z can be the image's coordinates. A medium
+    // has no UV; where an image is read is a decision the graph makes.
+    auto           sample   = SG::MakeNode( doc, "CloudSample" );
+    const uint64_t position = sample.Outputs[0].Id; // PositionKm
+    doc.Nodes.push_back( std::move( sample ) );
+
+    auto           split   = SG::MakeNode( doc, "SplitVec3" );
+    const uint64_t splitIn = split.Inputs[0].Id;
+    const uint64_t splitX  = split.Outputs[0].Id;
+    const uint64_t splitZ  = split.Outputs[2].Id;
+    doc.Nodes.push_back( std::move( split ) );
+
+    auto image            = SG::MakeNode( doc, "MediumTexture" );
+    image.ParamName       = "Streaks";
+    const uint64_t imageU = image.Inputs[0].Id;
+    const uint64_t imageV = image.Inputs[1].Id;
+    const uint64_t imageR = image.Outputs[1].Id; // the R channel, a Float
+    doc.Nodes.push_back( std::move( image ) );
+
+    auto           mul  = SG::MakeNode( doc, "MultiplyFloat" );
+    const uint64_t mulA = mul.Inputs[0].Id;
+    const uint64_t mulB = mul.Inputs[1].Id;
+    const uint64_t mulO = mul.Outputs[0].Id;
+    doc.Nodes.push_back( std::move( mul ) );
+
+    doc.Links.push_back( { doc.NextId++, position, splitIn } );
+    doc.Links.push_back( { doc.NextId++, splitX, imageU } );
+    doc.Links.push_back( { doc.NextId++, splitZ, imageV } );
+    doc.Links.push_back( { doc.NextId++, shippedOut, mulA } );
+    doc.Links.push_back( { doc.NextId++, imageR, mulB } );
+    doc.Links.push_back( { doc.NextId++, mulO, densityPin } );
 
     const auto compiled = SG::CompileToDShader( doc );
     ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
@@ -512,26 +602,243 @@ TEST( ShaderGraphVolumeDomain, TheLayersOwnValuesAreRefusedOutsideTheOutputTheyB
 // THE PALETTE
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
-TEST( ShaderGraphVolumeDomain, TheDomainOffersNoNodeThatDeclaresABindingOrNeedsAVertexStage )
+TEST( ShaderGraphVolumeDomain, TheDomainOffersNoNodeThatNeedsAVertexStageOrTheSceneColour )
 {
-    // A medium is compiled into four programs whose descriptor sets are hand-built at bindings 0..24. A
-    // node that declared a texture or an exposed property would have to pick a number free in all four,
-    // and a collision between two GLSL declarations at one binding is SILENT — the engine writes the
-    // descriptor twice and the shader reads whichever it got. Until that census exists, the domain
-    // offers no such node, and this is what says so.
+    // WHAT IS STILL OUT OF THIS DOMAIN, and the list is shorter than it was. Exposed properties and
+    // images are IN as of О1-G-2 — they land in the window Core::kGraphOwnedBindingFirst reserves, which
+    // Desert/Tests/Engine/ShaderCacheKey measures free over every shipped pass, and the tests below pin
+    // where each of them lands. What remains excluded is what a volume genuinely does not have: a `v_UV`
+    // (there is no vertex stage in a compute march), the rendered scene colour, and a wall-clock time
+    // that would fight the layer's own wind offset.
     for ( const auto& spec : SG::Specs() )
     {
         if ( !SG::SpecInDomain( spec, SG::Domain::Volume ) )
             continue;
-        EXPECT_FALSE( spec.HasParamName && std::string( spec.Kind ) != "CloudParam" )
-             << "node '" << spec.Kind
-             << "' is offered in the Cloud Medium domain and exposes a property of its own, which would "
-                "need a binding that is free in all four consumers.";
         EXPECT_NE( std::string( spec.Kind ), "TextureSample" );
         EXPECT_NE( std::string( spec.Kind ), "UV" );
         EXPECT_NE( std::string( spec.Kind ), "SceneColor" );
         EXPECT_NE( std::string( spec.Kind ), "Time" );
     }
+}
+
+namespace
+{
+    /// A Volume graph with @p floats Float Params and @p textures Medium Textures, every one of them
+    /// WIRED — an unread property is not a property, which is its own test below. The floats and the
+    /// texture reads are chained through Multiply (Float) into the Density output, and a Vector 3 Param
+    /// feeds Emissive when @p vec3 is asked for.
+    SG::Document MediumDocWithProperties( int floats, int textures, bool vec3 = false )
+    {
+        SG::Document doc = EmptyVolumeDoc();
+
+        // THE PIN IDS ARE TAKEN NOW AND THE NODE REFERENCE IS NOT KEPT: every push_back below can
+        // reallocate doc.Nodes, and a reference into it would dangle in a way that happens to work.
+        const uint64_t densityPin = NodeOfKind( doc, "VolumeOutput" )
+                                         .Inputs[IndexOfInput( NodeOfKind( doc, "VolumeOutput" ), "Density" )]
+                                         .Id;
+        const uint64_t emissivePin = NodeOfKind( doc, "VolumeOutput" )
+                                          .Inputs[IndexOfInput( NodeOfKind( doc, "VolumeOutput" ), "Emissive" )]
+                                          .Id;
+
+        uint64_t chain = 0;
+        auto     join  = [&]( uint64_t pin )
+        {
+            if ( chain == 0 )
+            {
+                chain = pin;
+                return;
+            }
+            auto mul = SG::MakeNode( doc, "MultiplyFloat" );
+            doc.Links.push_back( { doc.NextId++, chain, mul.Inputs[0].Id } );
+            doc.Links.push_back( { doc.NextId++, pin, mul.Inputs[1].Id } );
+            chain = mul.Outputs[0].Id;
+            doc.Nodes.push_back( std::move( mul ) );
+        };
+
+        for ( int i = 0; i < floats; ++i )
+        {
+            auto node          = SG::MakeNode( doc, "FloatParam" );
+            node.ParamName     = "Amount" + std::to_string( i );
+            node.Value         = { 0.25f * static_cast<float>( i + 1 ), 0, 0, 0 };
+            const uint64_t pin = node.Outputs[0].Id;
+            doc.Nodes.push_back( std::move( node ) );
+            join( pin );
+        }
+        for ( int i = 0; i < textures; ++i )
+        {
+            auto node          = SG::MakeNode( doc, "MediumTexture" );
+            node.ParamName     = "Image" + std::to_string( i );
+            const uint64_t pin = node.Outputs[1].Id; // the R pin, a Float
+            doc.Nodes.push_back( std::move( node ) );
+            join( pin );
+        }
+        if ( chain != 0 )
+            doc.Links.push_back( { doc.NextId++, chain, densityPin } );
+
+        if ( vec3 )
+        {
+            auto node          = SG::MakeNode( doc, "Vec3Param" );
+            node.ParamName     = "Tint";
+            node.Value         = { 0.1f, 0.2f, 0.3f, 1.0f };
+            const uint64_t pin = node.Outputs[0].Id;
+            doc.Nodes.push_back( std::move( node ) );
+            doc.Links.push_back( { doc.NextId++, pin, emissivePin } );
+        }
+        return doc;
+    }
+} // namespace
+
+TEST( ShaderGraphVolumeDomain, TheMediumsOwnResourcesLandExactlyInTheReservedWindow )
+{
+    // THE RELATION THIS PINS IS THE ONE THAT CANNOT BE SEEN FROM EITHER SIDE ALONE: the order of the
+    // Properties block IS the layout. The runtime packs one vec4 per numeric property in that order and
+    // binds the i-th image at Core::kCloudMediumTextureFirst + i, and it never counts anything itself —
+    // it reads this schema back. A reordering here that nothing checked would rebind every slot after the
+    // first difference, silently, with a perfectly valid descriptor set.
+    const int          kTextures = 2;
+    const SG::Document doc       = MediumDocWithProperties( /*floats=*/2, kTextures, /*vec3=*/true );
+    const auto         compiled  = SG::CompileToDShader( doc );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+
+    const auto parsed = DShaderParser::Parse( compiled.GetValue() );
+    ASSERT_TRUE( parsed.IsSuccess() ) << parsed.GetError();
+    const auto& meta = parsed.GetValue().Meta;
+
+    ASSERT_EQ( meta.Params.size(), 5u ) << compiled.GetValue();
+
+    std::vector<std::string> values;
+    std::vector<std::string> images;
+    for ( const ShaderParam& p : meta.Params )
+    {
+        EXPECT_EQ( p.Timing, ShaderParamTiming::Immediate )
+             << p.Name
+             << ": a medium is GLSL the march runs per sample, so nothing it declares can be an input to "
+                "the CPU bake. An unclassified property is refused by the material window's census.";
+        EXPECT_FALSE( p.IsAssetRef() ) << p.Name
+                                       << ": the Volume palette has no node for an asset "
+                                          "reference, and Graphic::BuildCloudMediumValues skips "
+                                          "one — a schema that could carry it would shift the "
+                                          "layout of everything after it.";
+        ( p.IsTexture ? images : values ).push_back( p.Name );
+    }
+    EXPECT_EQ( values.size(), 3u );
+    EXPECT_EQ( images.size(), static_cast<size_t>( kTextures ) );
+
+    const std::string& text = compiled.GetValue();
+
+    // The block is declared once, at the reserved binding, and its FIELDS are the numeric properties in
+    // the schema's own order.
+    const std::string bufferDecl =
+         "layout( std430, binding = " + std::to_string( Desert::Core::kCloudMediumParamsBinding ) +
+         " ) readonly buffer " + Desert::Core::kCloudMediumBlockName;
+    EXPECT_NE( text.find( bufferDecl ), std::string::npos ) << text;
+
+    std::size_t cursor = text.find( std::string( "struct " ) + Desert::Core::kCloudMediumStructName );
+    ASSERT_NE( cursor, std::string::npos ) << text;
+    for ( const std::string& name : values )
+    {
+        const std::size_t at = text.find( "vec4 " + name + ";", cursor );
+        EXPECT_NE( at, std::string::npos ) << name << " is not a field of the medium's block:\n" << text;
+        EXPECT_GT( at, cursor ) << name << " is declared out of the schema's order, which IS the layout";
+        cursor = at;
+    }
+
+    // Every image at its own slot of the window, in the schema's order.
+    for ( std::size_t i = 0; i < images.size(); ++i )
+    {
+        const std::string decl =
+             "layout( binding = " + std::to_string( Desert::Core::kCloudMediumTextureFirst + i ) +
+             " ) uniform sampler2D " + images[i] + ";";
+        EXPECT_NE( text.find( decl ), std::string::npos ) << decl << " is missing from:\n" << text;
+    }
+
+    // AND NOTHING BELOW THE WINDOW. A medium declaring anything at an engine binding is the one failure
+    // Г17 catches at reflection — in front of the artist who applied the material, which is late.
+    for ( uint32_t binding = 0; binding < Desert::Core::kGraphOwnedBindingFirst; ++binding )
+    {
+        EXPECT_EQ( text.find( "binding = " + std::to_string( binding ) + " " ), std::string::npos )
+             << "the emitted medium declares something at engine binding " << binding;
+    }
+}
+
+TEST( ShaderGraphVolumeDomain, APropertyNoFunctionReadsIsNotDeclaredAtAll )
+{
+    // TWO RULES IN ONE ASSERTION, and they happen to want the same thing.
+    //
+    // The contract's: a property that reaches no output is a row in the material window that moves
+    // nothing — a dead setting, which §1.3 refuses.
+    //
+    // The mechanical one, which is the expensive half: a storage block no function reads is eliminated
+    // from the SPIR-V, so the renderer — which binds by NUMBER and never consults reflection — would
+    // write a descriptor into a layout that does not have that slot.
+    SG::Document doc  = EmptyVolumeDoc();
+    auto         node = SG::MakeNode( doc, "FloatParam" );
+    node.ParamName    = "Unread";
+    doc.Nodes.push_back( std::move( node ) );
+
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+
+    EXPECT_EQ( compiled.GetValue().find( "Unread" ), std::string::npos ) << compiled.GetValue();
+    EXPECT_EQ( compiled.GetValue().find( "Properties" ), std::string::npos ) << compiled.GetValue();
+    EXPECT_EQ( compiled.GetValue().find( Desert::Core::kCloudMediumBlockName ), std::string::npos )
+         << compiled.GetValue();
+
+    // And it is still byte-for-byte the shipped medium, which is the invariant the whole mechanism rests
+    // on: a graph that changes nothing changes nothing.
+    const auto neutral = SG::CompileToDShader( EmptyVolumeDoc() );
+    ASSERT_TRUE( neutral.IsSuccess() ) << neutral.GetError();
+    EXPECT_EQ( compiled.GetValue(), neutral.GetValue() );
+}
+
+TEST( ShaderGraphVolumeDomain, AMediumKeyCanNeverBeReadAsAShippedMaterialProperty )
+{
+    // THE COLLISION THAT WOULD BE SILENT, CLOSED BY CONSTRUCTION. Both schemas are resolved out of ONE
+    // flat name -> value map in the `.demat`. A medium property called `Coverage` written under its own
+    // name would be picked up by Graphic::ApplyCloudOverride and would retune the layer's CPU bake, with
+    // the graph reading it as its own value at the same time — one key, two meanings.
+    //
+    // The prefix is what makes that unexpressible rather than merely refused: it contains a character no
+    // GLSL identifier may contain, so no shipped property name can ever be a medium key and no medium key
+    // can ever be a shipped property name. Asserted over the real shipped schema, in both directions.
+    ASSERT_FALSE( CloudSchema().empty() );
+    for ( const ShaderParam& p : CloudSchema() )
+    {
+        EXPECT_FALSE( Desert::Core::IsCloudMediumOverrideKey( p.Name ) )
+             << p.Name << " is a shipped cloud property whose name reads as a medium key.";
+        for ( const ShaderParam& q : CloudSchema() )
+            EXPECT_NE( Desert::Core::CloudMediumOverrideKey( q.Name ), p.Name );
+    }
+
+    // And the slot that NAMES the medium is not a prefix of its own properties' keys — "Medium" and
+    // "Medium." are different keys, which is what lets both live in the same map.
+    EXPECT_FALSE( Desert::Core::IsCloudMediumOverrideKey( Desert::Graphic::kCloudMediumSlotName ) );
+}
+
+TEST( ShaderGraphVolumeDomain, AMediumPastTheWindowsCapacityIsRefusedByName )
+{
+    // BOTH CEILINGS ARE REAL RESOURCES AND BOTH ARE NAMED WHEN THEY ARE HIT. The image count is
+    // descriptors four shipped programs bind on every frame of every scene, clouds or not; the value
+    // count is a buffer allocated once, before any medium exists, because a device allocation inside the
+    // frame has nowhere to report a failure.
+    {
+        const auto compiled = SG::CompileToDShader( MediumDocWithProperties(
+             /*floats=*/0, static_cast<int>( Desert::Core::kCloudMediumMaxTextures ) + 1 ) );
+        ASSERT_FALSE( compiled.IsSuccess() );
+        EXPECT_NE( compiled.GetError().find( "Medium Texture" ), std::string::npos ) << compiled.GetError();
+    }
+    {
+        const auto compiled = SG::CompileToDShader( MediumDocWithProperties(
+             static_cast<int>( Desert::Core::kCloudMediumMaxValues ) + 1, /*textures=*/0 ) );
+        ASSERT_FALSE( compiled.IsSuccess() );
+        EXPECT_NE( compiled.GetError().find( "exposed values" ), std::string::npos ) << compiled.GetError();
+    }
+    // And exactly at the ceiling it compiles, so the bound is a bound and not an off-by-one.
+    EXPECT_TRUE( SG::CompileToDShader(
+                      MediumDocWithProperties( static_cast<int>( Desert::Core::kCloudMediumMaxValues ) - 1,
+                                               static_cast<int>( Desert::Core::kCloudMediumMaxTextures ),
+                                               /*vec3=*/true ) )
+                      .IsSuccess() );
 }
 
 TEST( ShaderGraphVolumeDomain, EveryVolumeNodeHasACompilerRule )

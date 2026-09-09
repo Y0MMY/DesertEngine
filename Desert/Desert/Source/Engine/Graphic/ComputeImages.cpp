@@ -163,6 +163,31 @@ namespace Desert::Graphic
                                  ? clouds.DistantSkyLight
                                  : fallbacks.GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA32F ).get() );
 
+        // ---- THE AUTHORED MEDIUM'S OWN RESOURCES -----------------------------------------------------
+        //
+        // THE FOURTH BINDING SITE OF THE SAME TWO THINGS, and the one that is easiest to forget because it
+        // is in another renderer's file. A medium that reached the march, the shadow map and the occlusion
+        // volume but not this pass would light the world from a sky judged by a different tint than the one
+        // on screen — the grey-clouds shape, arriving through the IBL.
+        //
+        // BOUND ONLY WHEN THE MEDIUM DECLARES THEM, and "declares" is not a guess: the emitter writes a
+        // block only for properties its five functions read and a sampler only per Texture2D property, so
+        // a non-empty MediumValues/MediumImages here means the program above has exactly those slots. The
+        // gate is not `Marched`: this is the medium's own layout, which exists whether or not the layer is
+        // marching this frame.
+        if ( clouds.MediumParams )
+            pipeline->SetStorageBuffer( Core::kCloudMediumParamsBinding, clouds.MediumParams );
+
+        // EVERY DECLARED SLOT IS WRITTEN, fallback included, for the reason the whole cloud block above is:
+        // a declared sampler left unwritten invalidates the set and this pass answers that by not
+        // dispatching, which costs the scene its entire environment rather than its clouds.
+        for ( std::size_t slot = 0; slot < clouds.MediumImages.size(); ++slot )
+            pipeline->SetInput(
+                 Core::kCloudMediumTextureFirst + static_cast<uint32_t>( slot ),
+                 clouds.MediumImages[slot]
+                      ? clouds.MediumImages[slot]
+                      : fallbacks.GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA32F ).get() );
+
         // x marches, y reads the sky-occlusion volume, z is the aerial perspective's start depth, w applies
         // the atmosphere's transmittance at each cloud sample's own altitude. The last three are ANDed with
         // the buffers above for the reason the march's own gates are: a layer whose flag is on but whose

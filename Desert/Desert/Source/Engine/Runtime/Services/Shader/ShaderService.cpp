@@ -8,21 +8,29 @@
 
 namespace
 {
-    /// The `Medium { ... }` body of @p source, or empty when it has none.
+    /// The `Medium { ... }` body of @p source AND the Properties block beside it, or an empty body when it
+    /// has none. ONE PARSE FOR BOTH: they describe the same file and a second parse could see a different
+    /// revision of it after a hot reload.
     ///
     /// THE RESULT-RETURNING PARSER AND NOT ShaderPreprocess::ParseProgramMeta, and the difference is a
     /// crash. ParseProgramMeta ends in a DESERT_VERIFY on anything that is not DSL text — right for a
     /// shader the engine is about to compile, fatal for a QUESTION asked about arbitrary content. The
     /// first version of this asked it once per frame about an asset the eviction sweep had unloaded,
     /// and an emptied asset is not DSL text: the editor died three seconds after the medium applied.
-    std::string MediumBodyOf( const std::string& source )
+    struct ParsedMedium
+    {
+        std::string                                     Body;
+        std::vector<Desert::Core::Formats::ShaderParam> Properties;
+    };
+
+    ParsedMedium MediumOf( const std::string& source )
     {
         if ( source.empty() || !Desert::Core::Preprocess::DShaderParser::IsDShader( source ) )
             return {};
-        const auto parsed = Desert::Core::Preprocess::DShaderParser::Parse( source );
-        if ( !parsed.IsSuccess() )
+        auto parsed = Desert::Core::Preprocess::DShaderParser::Parse( source );
+        if ( !parsed.IsSuccess() || parsed.GetValue().Meta.MediumSource.empty() )
             return {};
-        return parsed.GetValue().Meta.MediumSource;
+        return { std::move( parsed.GetValue().Meta.MediumSource ), std::move( parsed.GetValue().Meta.Params ) };
     }
 } // namespace
 
@@ -48,14 +56,16 @@ namespace Desert::Runtime
         // was empty, and an empty asset is not DSL text. Holding the ASSET instead would have fought the
         // sweep for the sake of a few kilobytes of text; holding the text is bounded, immune to the
         // sweep, and re-read by RefreshMediumSource when the file on disk changes.
-        if ( std::string body = MediumBodyOf( shaderAsset->GetShaderContent() ); !body.empty() )
+        if ( ParsedMedium medium = MediumOf( shaderAsset->GetShaderContent() ); !medium.Body.empty() )
         {
             const auto name         = shaderAsset->GetMetadata().Filepath.stem().string();
             m_NameToHandleMap[name] = shaderAsset->GetMetadata().Handle;
-            LOG_INFO( "[ShaderService] '{}' is a Volume medium ({} bytes of authored source); it compiles "
-                      "into the programs that sample the cloud field rather than into one of its own.",
-                      name, body.size() );
-            m_MediumSources[shaderAsset->GetMetadata().Handle] = std::move( body );
+            LOG_INFO( "[ShaderService] '{}' is a Volume medium ({} bytes of authored source, {} own "
+                      "propert(ies)); it compiles into the programs that sample the cloud field rather "
+                      "than into one of its own.",
+                      name, medium.Body.size(), medium.Properties.size() );
+            m_Media[shaderAsset->GetMetadata().Handle] =
+                 MediumEntry{ std::move( medium.Body ), std::move( medium.Properties ) };
             return BOOLSUCCESS;
         }
 
@@ -205,8 +215,8 @@ namespace Desert::Runtime
         if ( handle.IsNull() )
             return {};
 
-        if ( const auto it = m_MediumSources.find( handle ); it != m_MediumSources.end() )
-            return it->second;
+        if ( const auto it = m_Media.find( handle ); it != m_Media.end() )
+            return it->second.Source;
 
         // A HANDLE THAT IS NOT A MEDIUM, and the two ways to get there are an unregistered shader and a
         // Medium slot pointed at an ordinary one. Both draw the shipped medium, which is a picture that
@@ -222,10 +232,23 @@ namespace Desert::Runtime
         return {};
     }
 
+    const std::vector<Core::Formats::ShaderParam>*
+    ShaderService::MediumSchemaOf( const Assets::AssetHandle& handle ) const
+    {
+        if ( handle.IsNull() )
+            return nullptr;
+
+        // NO WARNING HERE, and that is deliberate rather than an omission: MediumSourceOf is asked the same
+        // question about the same handle in the same frame and latches the one message. Two refusals for
+        // one mistake is how a log stops being read.
+        const auto it = m_Media.find( handle );
+        return it != m_Media.end() ? &it->second.Properties : nullptr;
+    }
+
     bool ShaderService::RefreshMediumSource( const Assets::AssetHandle& handle, const std::string& content )
     {
-        std::string body = MediumBodyOf( content );
-        if ( body.empty() )
+        ParsedMedium medium = MediumOf( content );
+        if ( medium.Body.empty() )
             return false;
 
         // A file that STOPS being a medium keeps its old body rather than silently reverting the sky to
@@ -233,7 +256,7 @@ namespace Desert::Runtime
         // back to the default every time they saved would be worse than one frame of stale text. The
         // empty case above is therefore "not a medium", not "an empty medium" — the parser refuses an
         // empty Medium block outright, for the same reason.
-        m_MediumSources[handle] = std::move( body );
+        m_Media[handle] = MediumEntry{ std::move( medium.Body ), std::move( medium.Properties ) };
         m_WarnedNotAMedium.erase( static_cast<uint64_t>( handle ) );
         return true;
     }
@@ -273,7 +296,7 @@ namespace Desert::Runtime
         m_PassShaders.clear();
         m_NameToHandleMap.clear();
         m_ShaderAssets.clear();
-        m_MediumSources.clear();
+        m_Media.clear();
         m_WarnedNotAMedium.clear();
         // Only the weak bookkeeping — a variant's modules belong to whoever still holds it, and freeing
         // them from here would leave that holder with a program made of destroyed modules.

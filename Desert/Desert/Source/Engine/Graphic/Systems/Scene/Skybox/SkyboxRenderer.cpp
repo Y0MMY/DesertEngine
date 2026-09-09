@@ -100,6 +100,9 @@ namespace Desert::Graphic::System
             m_CloudBakeAuthored = ShaderResources::StorageBuffer::Create(
                  "SkyBakeCloudAuthored", static_cast<uint32_t>( sizeof( CloudAuthoredPayload ) ),
                  kSkyBakeCloudAuthoredBinding, /*persistent=*/false );
+            m_CloudBakeMediumParams = ShaderResources::StorageBuffer::Create(
+                 "SkyBakeCloudMediumParams", Core::kCloudMediumParamsBytes, Core::kCloudMediumParamsBinding,
+                 /*persistent=*/false );
 
             // The physical atmosphere's LUT pipelines. Built up front (they are two small compute
             // pipelines); the IMAGES stay lazy, so a scene on
@@ -755,6 +758,31 @@ namespace Desert::Graphic::System
         cloudBinding.AuthoredAtlas      = clouds.AuthoredAtlas;
         cloudBinding.SkyOcclusionVolume = clouds.SkyOcclusionVolume;
         cloudBinding.DistantSkyLight    = m_Atmosphere.DistantSkyLight;
+
+        // THE AUTHORED MEDIUM'S OWN VALUES AND IMAGES. Uploaded onto this renderer's buffer for the reason
+        // the two blocks above are, and bound ONLY when there are values: the medium's program declares
+        // that block exactly when its schema has something in it, and this backend writes a descriptor for
+        // any binding a caller names — including one the layout does not have.
+        if ( !clouds.MediumValues.empty() && m_CloudBakeMediumParams )
+        {
+            const auto uploaded = m_CloudBakeMediumParams->SetData(
+                 clouds.MediumValues.data(),
+                 static_cast<uint32_t>( clouds.MediumValues.size() * sizeof( glm::vec4 ) ) );
+            if ( uploaded.IsSuccess() )
+            {
+                cloudBinding.MediumParams = m_CloudBakeMediumParams.get();
+            }
+            else
+            {
+                // NOT SILENT, AND NOT SUBSTITUTED. An unbound block here means the bake's dispatch is
+                // skipped for an invalid descriptor set — the environment then keeps the panorama it had,
+                // which is the honest outcome, but only if somebody can find out why.
+                LOG_ERROR( "[SkyAtmosphere] the authored medium's {} value(s) were not uploaded for the "
+                           "environment bake: {}. The panorama that lights this scene will not be rebuilt.",
+                           clouds.MediumValues.size(), uploaded.GetError() );
+            }
+        }
+        cloudBinding.MediumImages = clouds.MediumImages;
         // THE AUTHORED MEDIUM, so the panorama that LIGHTS the scene is compiled under the same
         // substitution the three on-screen cloud programs are. It points at `clouds`, which outlives this
         // call — the bake is a submit-and-wait below.

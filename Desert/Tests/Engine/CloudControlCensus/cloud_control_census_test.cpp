@@ -43,6 +43,7 @@
 // Pure: reads the reflection table and one shader file as text. No GPU, no registry, no scene.
 
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
+#include <Engine/Core/ShaderCompiler/ShaderGraphMedium.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 
 #include <gtest/gtest.h>
@@ -54,6 +55,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <array>
 #include <string_view>
 #include <vector>
 
@@ -369,6 +371,42 @@ namespace
         std::size_t    Count;
     };
 
+    // ── AUTHORED CLOUD CONTROLS THIS CENSUS CANNOT COVER, WITH THE REASON ───────────────────────────
+    //
+    // Added by О1-G-2, which introduced the first authored cloud control whose MEMBERSHIP is not
+    // derivable. Every population above is derived — from a reflected type or from a shipped shader's
+    // Properties block — and that is what makes a new knob red here before it can reach a panel
+    // unmeasured. A property of an authored medium has no such source: its name was invented by whoever
+    // drew a `.dgraph` that the repository need not contain, and what it DOES is decided by the graph, so
+    // there is no range for this register to sweep and no figure for it to hold.
+    //
+    // The row is here rather than absent because a silent gap is indistinguishable from an oversight —
+    // the exact failure that let five controls appear between Р11 and O1 with nothing going red. What the
+    // row buys is that the reason is written where the next person counting controls will read it.
+    //
+    // std::array AND NOT A C ARRAY, deliberately: this register is DESIGNED to be able to empty — the day
+    // medium properties acquire a derivable population, its rows go away — and a zero-length C array is a
+    // GNU extension clang takes and MSVC rejects (C2466), which has reached `dev` twice.
+    struct OutOfScope
+    {
+        const char* Population;
+        const char* Reason;
+    };
+
+    constexpr std::array<OutOfScope, 2> kOutOfScope = {
+         { { "a Volume medium's own value properties",
+             "the name is the graph author's and the effect is the graph's: there is no shipped range to "
+             "sweep and no figure a register could hold. What IS pinned about them is that they cannot be "
+             "read as a shipped property (Desert/Tests/Engine/CloudMaterialSchema) and that a property no "
+             "medium function reads is never emitted at all "
+             "(Desert/Tests/Editor/ShaderGraphCompiler), which is this census's own rule -- a control that "
+             "moves nothing does not exist -- enforced where it CAN be" },
+           { "a Volume medium's own image properties",
+             "same, and one more: what an image does to the frame is a property of the IMAGE as much as of "
+             "the graph, so even a graph in the repository would not fix the figure. The slot is proved "
+             "always bound in all four consumers instead (Desert/Tests/Engine/ShaderCacheKey), which is the "
+             "half that can be wrong silently" } } };
+
 #define CENSUS_ROWS( rows ) ( rows ), std::size( rows )
 
     constexpr Population kPopulations[] = {
@@ -468,6 +506,33 @@ TEST( CloudControlCensus, NoControlIsRegisteredTwiceAcrossPopulations )
              << c.Name
              << " is authored on the component AND on the material. One value, two homes: the panel "
                 "shows two knobs, and the picture follows whichever the renderer resolved last.";
+}
+
+TEST( CloudControlCensus, EveryPopulationOutsideThisCensusSaysWhyAndCannotBeADerivableOne )
+{
+    // A ROW HERE IS AN EXEMPTION, so it has to carry its reason and it has to be about something this
+    // census genuinely cannot derive. Both halves are checked, because an exemption whose reason is empty
+    // is unreadable in a month and an exemption for something derivable is a knob somebody skipped.
+    for ( const OutOfScope& row : kOutOfScope )
+    {
+        ASSERT_NE( row.Population, nullptr );
+        ASSERT_NE( row.Reason, nullptr );
+        EXPECT_STRNE( row.Population, "" );
+        EXPECT_GT( std::string_view( row.Reason ).size(), 40u )
+             << row.Population << " is excused from the census by a sentence too short to be a reason.";
+    }
+
+    // AND THE EXEMPTION IS ONLY ABOUT KEYS THIS CENSUS'S OWN POPULATIONS CANNOT CONTAIN. A medium's
+    // properties live in the same `.demat` map as the shipped ones and are told apart by a prefix no GLSL
+    // identifier may carry; if a shipped property ever COULD be spelled as a medium key, the exemption
+    // above would be excusing a control this census is supposed to hold.
+    for ( const ShaderParam& p : CloudSchema().Params )
+        EXPECT_FALSE( Desert::Core::IsCloudMediumOverrideKey( p.Name ) )
+             << p.Name
+             << " is a shipped cloud material property that reads as an authored medium's key, so the "
+                "out-of-scope rows above would be excusing it from its own census row.";
+
+    std::printf( "[CloudControlCensus] %zu population(s) explicitly out of scope\n", kOutOfScope.size() );
 }
 
 int main( int argc, char** argv )

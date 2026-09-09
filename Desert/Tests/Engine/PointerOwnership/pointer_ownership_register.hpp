@@ -212,6 +212,29 @@ namespace Desert::Tests::PointerCensus
         { "Desert/Desert/Source/Engine/Graphic/Clouds/CloudEnvironmentBake.hpp",
           "CloudBakeBinding", "DistantSkyLight", Guard::CallScoped,
           kWhyArgumentPack },
+        // О1-G-2: THE AUTHORED MEDIUM'S OWN IMAGES AND PARAMETER BLOCK, crossing the same seam as the
+        // three above and guarded by the same two things.
+        { "Desert/Desert/Source/Engine/Graphic/Clouds/CloudEnvironmentBake.hpp",
+          "CloudEnvironmentBake", "MediumImages", Guard::FrameScoped,
+          "the medium's images are the TEXTURE service's, and this frame payload is safe for the reason "
+          "the noise volumes beside it are: VolumetricCloudRenderer::ResolveMediumValues re-resolves them "
+          "every frame from the material's handles and the bake is issued inside that same frame, so no "
+          "entry here outlives the resolve that produced it" },
+        { "Desert/Desert/Source/Engine/Graphic/Clouds/CloudEnvironmentBake.hpp",
+          "CloudBakeBinding", "MediumParams", Guard::CallScoped,
+          kWhyArgumentPack },
+        { "Desert/Desert/Source/Engine/Graphic/Clouds/CloudEnvironmentBake.hpp",
+          "CloudBakeBinding", "MediumImages", Guard::CallScoped,
+          kWhyArgumentPack },
+        { "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Clouds/VolumetricCloudRenderer.hpp",
+          "VolumetricCloudRenderer", "m_MediumImages", Guard::FrameScoped,
+          "borrowed from the texture service and rebuilt from scratch by ResolveMediumValues once per "
+          "frame, before any pass reads it. Nothing here survives a frame boundary, so an image the "
+          "service released between frames cannot be bound: the vector is assigned, not patched" },
+        { "Editor/Source/Editor/Panels/NodeGraph/ShaderGraph.cpp",
+          "Compiler", "touchedParams", Guard::ObservedContainsUs,
+          "addresses of nodes in the Document the Compiler holds a reference to and never mutates; the "
+          "set is read within CompileToDShader, which the document outlives by construction" },
         // THE REGISTER OF PARAMETER-BLOCK SLOTS NO SHADER READS (O1). Both members are string literals in
         // an `inline constexpr std::array`, so the pointees live in the binary's read-only data and Q2 is
         // closed by the language — the same argument, and the same guard, as SkyPresetEntry::Name below.

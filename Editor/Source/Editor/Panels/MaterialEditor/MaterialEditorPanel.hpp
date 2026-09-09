@@ -235,6 +235,18 @@ namespace Desert::Editor
         // An INSTANCE resolves through its parent, because EffectiveShaderName() does.
         [[nodiscard]] const ::Desert::Core::Formats::ShaderProgramMeta* Schema() const;
 
+        // THE MERGED SCHEMA'S STORAGE, and it exists because Schema() answers a POINTER that outlives the
+        // call. For everything but a cloud material the answer is the shader's own meta, owned by the
+        // shader; for a cloud material whose Medium slot names a graph with properties of its own, the
+        // answer is that meta PLUS those properties, which is an object nobody owns yet.
+        //
+        // Rebuilt inside Schema() rather than latched on a change, for the reason the cloud renderer
+        // resolves its material every frame: the medium can be re-picked, hot-reloaded or edited under the
+        // same handle, and a cache keyed on anything less than the schema itself is a row that stops
+        // appearing. It is a vector copy of a few dozen small structs, once per frame, in a window that is
+        // drawing ImGui.
+        mutable ::Desert::Core::Formats::ShaderProgramMeta m_MergedSchema;
+
         // THE ONE WRITE. Every value that reaches this material's working copy goes through here: the
         // slider in DrawParameters and a `set` arriving on the control channel alike.
         //

@@ -29,6 +29,13 @@ namespace Desert::Graphic
     /// silently does nothing.
     inline constexpr const char* kCloudMediumInclude = "Generated/CloudMedium.glslh";
 
+    /// The cloud material property that NAMES the authored medium — a `ShaderAsset` reference in
+    /// CloudRaymarch's Properties block. One spelling for its three readers: the override reader below,
+    /// the material window (which merges the named medium's own schema into its rows) and the shader file
+    /// itself. It is NOT a prefix of a medium's own keys, which carry Core::kCloudMediumOverridePrefix —
+    /// "Medium" and "Medium." are different keys and that is deliberate.
+    inline constexpr const char* kCloudMediumSlotName = "Medium";
+
     /**
      * @brief The cloud LOOK, resolved from the layer's material — the thirty-three values O1 moved out of
      *        ECS::VolumetricCloudData.
@@ -213,7 +220,7 @@ namespace Desert::Graphic
                 v.LayoutPattern = Assets::AssetHandle( handle );
             else if ( name == "LayoutMask" )
                 v.LayoutMask = Assets::AssetHandle( handle );
-            else if ( name == "Medium" )
+            else if ( name == kCloudMediumSlotName )
                 v.Medium = Assets::AssetHandle( handle );
         }
     } // namespace Detail
