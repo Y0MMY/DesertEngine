@@ -210,6 +210,10 @@ namespace Desert::Graphic::Render2D
         std::vector<uint32_t>    m_Indices;
         std::vector<DrawCommand> m_Commands;
 
+        // Staging for the one primitive whose corner count is not a compile-time constant (AddRing). Kept
+        // on the list so its capacity survives Reset() like the geometry buffers' does.
+        std::vector<Vertex2D> m_Scratch;
+
         ClipRegion2D              m_Clip;
         std::vector<ClipRegion2D> m_ClipStack;
 

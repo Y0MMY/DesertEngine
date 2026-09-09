@@ -133,13 +133,18 @@ namespace Desert::Graphic::Render2D
     {
         // Sutherland-Hodgman. A convex polygon gains at most one corner per half-plane, so 3 + kMaxClipPlanes
         // bounds the working set and neither buffer ever allocates.
-        std::array<Vertex2D, 3 + kMaxClipPlanes> poly{ a, b, c };
-        std::array<Vertex2D, 3 + kMaxClipPlanes> next{};
-        uint32_t                                 count = 3;
+        std::array<Vertex2D, 3 + kMaxClipPlanes> buffers[2];
+        buffers[0][0]  = a;
+        buffers[0][1]  = b;
+        buffers[0][2]  = c;
+        int      front = 0;
+        uint32_t count = 3;
 
         for ( uint32_t p = 0; p < m_Clip.PlaneCount && count >= 3; ++p )
         {
             const glm::vec3& plane = m_Clip.Planes[p];
+            const auto&      poly  = buffers[front];
+            auto&            next  = buffers[front ^ 1];
             uint32_t         out   = 0;
             for ( uint32_t i = 0; i < count; ++i )
             {
@@ -153,14 +158,15 @@ namespace Desert::Graphic::Render2D
                     next[out++] = SplitEdge( cur, nxt, dc, dn );
             }
             count = out;
-            poly  = next;
+            front ^= 1; // ping-pong: the polygon is up to 19 vertices, and copying it back would be 600
+                        // bytes per plane per triangle for nothing
         }
 
         if ( count < 3 )
             return;
 
         const uint32_t base = static_cast<uint32_t>( m_Vertices.size() );
-        m_Vertices.insert( m_Vertices.end(), poly.begin(), poly.begin() + count );
+        m_Vertices.insert( m_Vertices.end(), buffers[front].begin(), buffers[front].begin() + count );
         for ( uint32_t i = 1; i + 1 < count; ++i )
         {
             m_Indices.push_back( base );
@@ -435,8 +441,10 @@ namespace Desert::Graphic::Render2D
         DrawCommand&    cmd    = CurrentCommand( nullptr, false );
 
         // Two rims (outer, inner) per angular step; colour lerps A->B->A so the seam at 0/2PI is invisible.
-        std::vector<Vertex2D> pairs;
-        pairs.reserve( static_cast<std::size_t>( segments + 1 ) * 2 );
+        // Built in the list's own scratch buffer rather than a local vector: a ring is drawn per element per
+        // frame, and this class's whole allocation policy is that Reset() keeps capacity.
+        m_Scratch.clear();
+        m_Scratch.reserve( static_cast<std::size_t>( segments + 1 ) * 2 );
         for ( int i = 0; i <= segments; ++i )
         {
             const float     f   = static_cast<float>( i ) / static_cast<float>( segments );
@@ -444,10 +452,10 @@ namespace Desert::Graphic::Render2D
             const float     t   = f < 0.5f ? f * 2.0f : ( 1.0f - f ) * 2.0f;
             const glm::vec4 col = colorA * ( 1.0f - t ) + colorB * t;
             const glm::vec2 dir( std::cos( a ), std::sin( a ) );
-            pairs.push_back( { Xf( center + dir * outerRadius ), { 0.5f, 0.5f }, col } );
-            pairs.push_back( { Xf( center + dir * innerRadius ), { 0.5f, 0.5f }, col } );
+            m_Scratch.push_back( { Xf( center + dir * outerRadius ), { 0.5f, 0.5f }, col } );
+            m_Scratch.push_back( { Xf( center + dir * innerRadius ), { 0.5f, 0.5f }, col } );
         }
 
-        EmitStrip( cmd, pairs.data(), static_cast<uint32_t>( segments + 1 ) );
+        EmitStrip( cmd, m_Scratch.data(), static_cast<uint32_t>( segments + 1 ) );
     }
 } // namespace Desert::Graphic::Render2D
