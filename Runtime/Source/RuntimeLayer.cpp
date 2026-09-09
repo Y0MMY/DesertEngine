@@ -64,9 +64,14 @@ namespace Desert::Player
          : Common::Layer( "RuntimeLayer" ), m_ScenePathOverride( std::move( scenePathOverride ) ),
            m_Application( application )
     {
-        m_AssetManager     = std::make_shared<Assets::AssetManager>();
-        m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager );
+        m_AssetManager = std::make_shared<Assets::AssetManager>();
+        // BEFORE the preloader, which now takes it: the preloader is what fills it, at the tail of the
+        // scan that finds the clips. This layer used to build a library, hand it to AnimationECSSystem and
+        // never put a single clip in it — `AnimationLibrary` appeared exactly twice in this whole file and
+        // neither occurrence was a Register — so every skinned character in a packaged game stood in its
+        // bind pose, and no editor session could reproduce it.
         m_AnimationLibrary = std::make_unique<Animation::AnimationLibrary>( m_AssetManager.get() );
+        m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager, *m_AnimationLibrary );
         m_SceneRenderer    = std::make_unique<Graphic::SceneRenderer>();
         m_Scene            = std::make_shared<Core::Scene>( "Game", m_SceneRenderer.get() );
     }

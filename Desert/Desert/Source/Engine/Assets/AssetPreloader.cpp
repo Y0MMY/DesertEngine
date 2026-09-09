@@ -35,19 +35,25 @@ namespace Desert::Assets
     constexpr std::array<std::string_view, 1> SUPPORTED_CLOUD_BODY_EXTENSIONS   = { ".dcmv" };
     constexpr std::array<std::string_view, 1> SUPPORTED_CLOUD_LAYOUT_EXTENSIONS = { ".dclayout" };
 
-    AssetPreloader::AssetPreloader( const std::shared_ptr<AssetManager>& assetManager )
-         : m_AssetManager( assetManager )
+    AssetPreloader::AssetPreloader( const std::shared_ptr<AssetManager>& assetManager,
+                                    Animation::AnimationLibrary&         animationLibrary )
+         : m_AssetManager( assetManager ), m_AnimationLibrary( &animationLibrary )
     {
     }
 
     namespace
     {
+        // RETURNS THE NUMBER OF FILES IT MATCHED, and only one caller reads it — the `.anim` scan, whose
+        // count is what `Animation::PopulateLibrary` needs to tell "this project has no clips" from "the
+        // clips never arrived". It is deliberately not `[[nodiscard]]`: the other ten call sites have
+        // nothing to do with the number, and a warning at each of them would be noise standing in for a
+        // rule that applies to one of them.
         template <typename AssetType, typename Extensions, typename... Args>
-        void ProcessAssetFiles( const std::filesystem::path& rootPath,
-                                const Extensions&                  supportedExtensions,
-                                const std::weak_ptr<AssetManager>& assetManager, AssetPriority priority,
-                                Args&&... args )
+        size_t ProcessAssetFiles( const std::filesystem::path& rootPath, const Extensions& supportedExtensions,
+                                  const std::weak_ptr<AssetManager>& assetManager, AssetPriority priority,
+                                  Args&&... args )
         {
+            size_t matched = 0;
             // Candidates = the loose files on disk PLUS everything a mounted .dpak holds under this
             // root (packaged game: the disk dirs typically do not exist at all), deduplicated with a
             // loose file overriding its pak twin. The enumeration itself is the ONE shared
@@ -62,6 +68,8 @@ namespace Desert::Assets
                      supportedExtensions.end() )
                     continue;
 
+                ++matched;
+
                 if ( auto manager = assetManager.lock() )
                 {
                     // Assets are ALWAYS registered under their full (project-rooted) path. The old
@@ -71,12 +79,34 @@ namespace Desert::Assets
                     const Common::Filepath path = candidate;
                     auto asset = manager->CreateAsset<AssetType>( priority, path, std::forward<Args>( args )... );
 
+                    // NULL IS A REACHABLE ANSWER HERE, and this line used to go straight to
+                    // `asset->GetMetadata()`. `AssetManager::CreateAsset` returns nullptr when the eager
+                    // load fails (AssetManager.hpp — it logs the parse error and gives back nothing), so
+                    // ONE malformed content file under a scanned root crashed the editor before its first
+                    // frame, on a null dereference, for every kind this scanner loads eagerly: textures,
+                    // materials, skyboxes, shaders, clips, and all four cloud kinds. Found on 2026-09-09
+                    // with a deliberately broken `.anim`, which was the first malformed file the project
+                    // had ever had to survive — the repository shipped none, so nothing had reached it.
+                    //
+                    // Continue rather than abort: one unreadable file is not a reason to start with no
+                    // content at all, and the count above still includes it, which is what lets a caller
+                    // say "the scan found N and only M arrived" (see Animation::PopulateLibrary).
+                    if ( !asset )
+                    {
+                        LOG_ERROR( "'{}' was found by the asset scan and could not be loaded, so it is NOT "
+                                   "in the project; the parse error is logged above. Everything that "
+                                   "references it will resolve to nothing.",
+                                   path.string() );
+                        continue;
+                    }
+
                     if ( !asset->GetMetadata().IsValid() )
                     {
                         LOG_ERROR( "Asset metadata is invalid for: {}", path.string() );
                     }
                 }
             }
+            return matched;
         }
     } // namespace
 
@@ -93,8 +123,13 @@ namespace Desert::Assets
         ProcessAssetFiles<TextureAsset>( Common::Constants::Path::TEXTURE_PATH_COOKED,
                                          SUPPORTED_TEXTURE_EXTENSIONS, m_AssetManager, AssetPriority::Low );
 
-        ProcessAssetFiles<AnimationAsset>( Common::Constants::Path::MESH_PATH_COOKED,
-                                           SUPPORTED_ANIMATION_EXTENSIONS, m_AssetManager, AssetPriority::Low );
+        // The count is kept because the animation library's population needs it, and needing it is what
+        // makes the ordering a compile-time fact rather than a line-order convention: `PopulateLibrary` at
+        // the tail of this function cannot be moved above this statement, because its argument would not
+        // exist yet. See Animation::PopulateLibrary for the defect that argument is there to state.
+        const size_t animationFilesFound = ProcessAssetFiles<AnimationAsset>(
+             Common::Constants::Path::MESH_PATH_COOKED, SUPPORTED_ANIMATION_EXTENSIONS, m_AssetManager,
+             AssetPriority::Low );
 
         ProcessAssetFiles<SkeletonAsset>( Common::Constants::Path::MESH_PATH_COOKED,
                                           SUPPORTED_SKELETON_EXTENSIONS, m_AssetManager, AssetPriority::Low );
@@ -158,6 +193,19 @@ namespace Desert::Assets
                 if ( !materialAsset->IsReadyForUse() )
                     materialAsset->Load();
                 Runtime::ResourceRegistry::GetMaterialService()->RegisterAsset( materialAsset );
+            }
+
+            // THE FOURTH REGISTER LOOP, and the reason it is here rather than in a layer. The animation
+            // library is an index over clip assets exactly as the three services above are indexes over
+            // theirs; it was the only one a HOST published to, and that is how one host ended up with a
+            // copy of the loop, the other with none at all, and the editor's copy running a whole startup
+            // stage before the scan that finds the clips. Its position among these three is free — a clip
+            // names no texture, mesh or material and none of them names a clip.
+            if ( const auto populated =
+                      Animation::PopulateLibrary( *manager, *m_AnimationLibrary, animationFilesFound );
+                 !populated )
+            {
+                LOG_ERROR( "[AnimationLibrary] {}", populated.GetError() );
             }
         }
     }

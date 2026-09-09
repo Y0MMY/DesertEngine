@@ -7,6 +7,8 @@
 #include <Engine/Assets/Mesh/AnimationAsset.hpp>
 #include <Engine/Geometry/ProceduralCharacterFactory.hpp>
 
+#include <Common/Core/Logger.hpp>
+
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -143,19 +145,31 @@ namespace Desert::Animation
         return *s_Jump;
     }
 
-    void ProceduralCharacterAnimations::RegisterClips( Assets::AssetManager& assets, AnimationLibrary& library )
+    size_t ProceduralCharacterAnimations::RegisterClips( Assets::AssetManager& assets, AnimationLibrary& library )
     {
         const AnimationClip* clips[] = { &Idle(), &Walk(), &Run(), &Jump() };
+
+        size_t registered = 0;
         for ( const AnimationClip* clip : clips )
         {
             auto asset = assets.CreateAsset<Assets::AnimationAsset>(
                  Assets::AssetPriority::Medium, Common::Filepath( "procedural://humanoid/" + clip->AnimationName ),
                  false );
-            if ( asset )
+            if ( !asset )
             {
-                asset->SetInMemoryClip( *clip );
-                library.Register( asset );
+                // Not silent, and it never was reachable before: CreateAsset returning nothing for one of
+                // four compiled-in clips means the manager refused a path it has already accepted three
+                // times, and the humanoid loses that state with no other trace.
+                LOG_ERROR( "[Animation] the built-in locomotion clip '{}' could not be created as an asset; "
+                           "the procedural humanoid will have no '{}' state.",
+                           clip->AnimationName, clip->AnimationName );
+                continue;
             }
+
+            asset->SetInMemoryClip( *clip );
+            library.Register( asset );
+            ++registered;
         }
+        return registered;
     }
 } // namespace Desert::Animation

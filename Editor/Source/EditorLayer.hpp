@@ -429,10 +429,12 @@ namespace Desert::Editor
         // SyncWindowTitle compares against that. See Window.hpp.
         void SyncWindowTitle();
 
-        std::shared_ptr<Assets::AssetManager>        m_AssetManager;
+        std::shared_ptr<Assets::AssetManager> m_AssetManager;
+        // BEFORE the preloader, which holds a non-owning reference to it and must therefore not outlive
+        // it: members are destroyed in reverse declaration order.
+        std::unique_ptr<Animation::AnimationLibrary> m_AnimationLibrary;
         std::unique_ptr<Assets::AssetPreloader>      m_AssetPreloader;
         std::unique_ptr<ImportManager>               m_ImportManager;
-        std::unique_ptr<Animation::AnimationLibrary> m_AnimationLibrary;
         Runtime::AssetHotReload                      m_AssetHotReload; // .demat/.shader live reload
 
         FileExplorerPanel* m_FileExplorerPanel = nullptr; // non-owning (lives in m_Panels)

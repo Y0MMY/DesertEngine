@@ -177,14 +177,38 @@ namespace Desert::Animation
 
         // Returns the clip track that drives skeleton bone `boneIndex`, matched by bone NAME (not by the clip's
         // own bone index). This lets a clip authored against a differently-ordered or skinless export of the
-        // same rig still drive the correct bones. Built lazily per clip, cached for the animator's lifetime.
+        // same rig still drive the correct bones. Built lazily per clip, and rebuilt whenever the clip's own
+        // track storage has been replaced under it — see TrackBinding.
         const BoneTrack* ResolveTrack( const AnimationClip* clip, uint32_t boneIndex ) const;
 
     private:
+        /**
+         * @brief The bone -> track lookup for ONE clip, together with the two facts about that clip's
+         *        storage the lookup is only valid against.
+         *
+         * THE CLIP'S ADDRESS IS NOT A SUFFICIENT KEY, and believing it was is a use-after-free that
+         * segfaulted the moment a file-backed clip first played in this engine. `AnimationAsset` owns its
+         * `AnimationClip` BY VALUE, so the clip keeps its address for the asset's whole life while
+         * `Unload()` frees the `Tracks` vector (`clear()` + `shrink_to_fit()`) and a later `Load()`
+         * allocates a new one. Asset eviction does exactly that to a clip an entity is still playing —
+         * deliberately, because `AnimationLibrary::Resolve` reloads on every lookup and the design accepts
+         * eviction on that basis — and the cached `BoneTrack*` then pointed into freed storage. The crash
+         * was inside `lower_bound` over a keyframe vector that no longer existed.
+         *
+         * The relation asserted here is between the cache and the container it points into: the binding is
+         * usable only while the clip's tracks still live where they lived when it was built.
+         */
+        struct TrackBinding
+        {
+            const BoneTrack*              TracksData = nullptr; ///< clip->Tracks.data() at build time
+            size_t                        TrackCount = 0;       ///< clip->Tracks.size() at build time
+            std::vector<const BoneTrack*> ByBone;               ///< skeleton bone index -> its track, or null
+        };
+
         const Skeleton& m_Skeleton;
 
-        // clip -> (skeleton bone index -> its track in that clip, or null). See ResolveTrack.
-        mutable std::unordered_map<const AnimationClip*, std::vector<const BoneTrack*>> m_TrackBinding;
+        // clip -> its binding. See ResolveTrack and TrackBinding.
+        mutable std::unordered_map<const AnimationClip*, TrackBinding> m_TrackBinding;
 
         ClipPlayback m_Current;
         ClipPlayback m_Next;

@@ -48,9 +48,9 @@ namespace Desert::Animation
         /// cannot be written that forgets it.
         [[nodiscard]] Assets::Asset<Assets::AnimationAsset> Resolve( const Assets::AssetHandle& handle ) const;
 
-        // Non-owning, and it outlives nothing: the library is destroyed with the editor layer that made
-        // it, and the manager with the project. A project switch that replaced the manager without
-        // replacing this would leave it dangling — nothing does that today, and nothing checks either.
+        // Non-owning, and it outlives nothing: the library is destroyed with the layer that made it, and
+        // the manager with the project. A project switch that replaced the manager without replacing this
+        // would leave it dangling — nothing does that today, and nothing checks either.
         Assets::AssetManager* m_AssetManager;
 
         // ONE record per registered clip, holding everything the match rule is allowed to look at. There used
@@ -59,4 +59,43 @@ namespace Desert::Animation
         // remembered. A single container cannot fall out of step with itself.
         std::vector<ClipRigIdentity> m_Clips;
     };
+
+    /// What one population run put in the library, so a caller can say which half is empty.
+    struct LibraryPopulation
+    {
+        size_t FromFiles  = 0; ///< clips registered out of `.anim` assets the scan created
+        size_t Procedural = 0; ///< the engine's built-in humanoid locomotion clips
+    };
+
+    /**
+     * @brief THE ONE PLACE AN ANIMATION LIBRARY IS FILLED — for the editor and for the packaged game alike.
+     *
+     * WHAT IT REPLACES, because the shape of the defect is the argument for the shape of the fix. The
+     * editor used to walk the manager and call Register itself, in `OnAttach`; the runtime did NOTHING —
+     * it built a library, handed it straight to `AnimationECSSystem` and never put a clip in it, so every
+     * skinned character in a shipped build stood in its T-pose. Two hosts, one of them with a copy of the
+     * loop and the other with none, is the "both ends correct, the link between them missing" shape this
+     * project keeps paying for; the answer is not a second copy of the loop but a single point that
+     * neither host has to remember, called from the asset scan itself.
+     *
+     * AND THE EDITOR'S COPY WAS ALSO IN THE WRONG ORDER, which is the half a shared function alone would
+     * not fix. `OnAttach` ran BEFORE the staged startup pass that scans `.anim` off disk, so the library
+     * was filled out of a manager that had not been shown the clips yet: with clips on disk the editor
+     * still reported exactly the four procedural ones.
+     *
+     * @param clipFilesDiscovered how many `.anim` files the asset scan just found under the cooked root.
+     *        IT IS A PARAMETER RATHER THAN SOMETHING THIS FUNCTION COUNTS FOR ITSELF, and that is the
+     *        ordering rule made structural instead of textual: the number does not exist until the scan
+     *        has run, so a caller that fills the library first has nothing to pass and does not compile.
+     *        A later refactor is free to move these statements around; it cannot move them past each
+     *        other. It is also the only way the refusal below can be stated — a library that comes out
+     *        empty is a defect when there were files and the shipped state when there were none, and
+     *        those two are indistinguishable from inside the library.
+     *
+     * @return a refusal when the scan found clip files and not one of them reached the library. Everything
+     *         else is logged with its counts; the caller is expected to LOG_ERROR the refusal, as the
+     *         preloader's other register loops do.
+     */
+    [[nodiscard]] Common::ResultStr<LibraryPopulation>
+    PopulateLibrary( Assets::AssetManager& assets, AnimationLibrary& library, size_t clipFilesDiscovered );
 } // namespace Desert::Animation

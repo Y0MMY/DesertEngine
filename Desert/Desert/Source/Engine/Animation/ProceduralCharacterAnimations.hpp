@@ -26,6 +26,12 @@ namespace Desert::Animation
         // Registers all locomotion clips as in-memory AnimationAssets so they appear in the AnimationLibrary
         // (editor clip selector + AnimationECSSystem auto-play). Engine-level: a runtime/game calls this, not
         // just the editor — locomotion is gameplay, not an editor concern.
-        static void RegisterClips( Assets::AssetManager& assets, AnimationLibrary& library );
+        //
+        // CALLED FROM `Animation::PopulateLibrary` AND NOWHERE ELSE. It used to be called by the editor
+        // layer directly and by nothing in the runtime, which is half of why a packaged game's library was
+        // empty; the population point now owns both kinds of clip so neither host can have one without the
+        // other. Returns how many were registered, because a count nobody can read is a count the caller
+        // has to guess — and the whole refusal below it is about telling an empty half from a full one.
+        [[nodiscard]] static size_t RegisterClips( Assets::AssetManager& assets, AnimationLibrary& library );
     };
 } // namespace Desert::Animation

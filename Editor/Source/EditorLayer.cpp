@@ -358,8 +358,11 @@ namespace Desert::Editor
         Common::Settings::MachineSettings::Load( std::filesystem::path( ProjectContext::ConfigDirectory() ) /
                                                  "machine.json" );
 
-        m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager );
+        // BEFORE the preloader, which now takes it and fills it at the tail of the scan that finds the
+        // clips. The editor used to fill it itself, in OnAttach — a whole startup stage BEFORE the scan
+        // ran — so with two `.anim` files on disk it reported the four procedural clips and nothing else.
         m_AnimationLibrary = std::make_unique<Animation::AnimationLibrary>( m_AssetManager.get() );
+        m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager, *m_AnimationLibrary );
         m_SceneRenderer    = std::make_unique<Graphic::SceneRenderer>();
         m_MainScene        = std::make_shared<Desert::Core::Scene>( "New Scene", m_SceneRenderer.get() );
         m_PrimaryScene     = m_MainScene; // the always-present document #-1 (see SetActiveScene)
@@ -557,20 +560,15 @@ namespace Desert::Editor
 
         BuildSceneSystems( *m_MainScene );
 
-        const auto animations = m_AssetManager->FindAllByType<Assets::AnimationAsset>();
-
-        for ( const auto& [handle, anim] : animations )
-        {
-            if ( !anim )
-                continue;
-
-            m_AnimationLibrary->Register( anim );
-        }
-
-        // Engine-level locomotion clips (idle/walk/run/jump) for the procedural humanoid — registered into the
-        // AnimationLibrary so they show in the clip selector + AnimationECSSystem can auto-play. The editor
-        // just invokes the engine helper (the locomotion knowledge lives in the engine, not here).
-        Animation::ProceduralCharacterAnimations::RegisterClips( *m_AssetManager, *m_AnimationLibrary );
+        // THE ANIMATION LIBRARY IS NOT FILLED HERE ANY MORE, and its absence is the fix rather than an
+        // omission. A `FindAllByType<AnimationAsset>` loop and a `ProceduralCharacterAnimations::
+        // RegisterClips` call used to stand on these lines, and both were wrong in the same way: they ran
+        // in OnAttach, several startup stages BEFORE `PreloadCookedAssetsAndMaterials` scans `.anim` off
+        // disk, so they filled the library out of a manager that had not been shown a single clip file —
+        // measured at "4 clip(s) known" with three clips sitting in Cooked/Meshes. The runtime layer, which
+        // has no OnAttach loop of its own, had no clips at all. Both are now `Animation::PopulateLibrary`,
+        // called from the tail of that scan, and `Desert/Tests/Editor/AssetPreloadCensus` forbids either
+        // host from growing its own copy again.
 
         // NOT INITIALISED WHEN A SCENE LOAD IS ALREADY QUEUED, and that condition is why the line moved
         // rather than why it is conditional. The constructor above has already called LoadScene() for

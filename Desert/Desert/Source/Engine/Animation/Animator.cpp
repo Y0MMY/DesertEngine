@@ -300,10 +300,18 @@ namespace Desert::Animation
             return nullptr;
 
         auto& binding = m_TrackBinding[clip];
-        if ( binding.empty() )
+
+        // REBUILT WHEN THE CLIP'S TRACK STORAGE HAS MOVED, not only when the cache is empty. An unload +
+        // reload of the clip's asset leaves the AnimationClip at the same address holding a freshly
+        // allocated Tracks vector, so a cache keyed on the address alone hands back pointers into memory
+        // that has been returned to the allocator. See Animator::TrackBinding for the crash this caused.
+        if ( binding.ByBone.empty() || binding.TracksData != clip->Tracks.data() ||
+             binding.TrackCount != clip->Tracks.size() )
         {
             const auto& bones = m_Skeleton.GetBones();
-            binding.assign( bones.size(), nullptr );
+            binding.ByBone.assign( bones.size(), nullptr );
+            binding.TracksData = clip->Tracks.data();
+            binding.TrackCount = clip->Tracks.size();
 
             std::unordered_map<std::string, const BoneTrack*> byName;
             for ( const auto& track : clip->Tracks )
@@ -314,11 +322,11 @@ namespace Desert::Animation
             {
                 auto it = byName.find( bones[i].Name );
                 if ( it != byName.end() )
-                    binding[i] = it->second;
+                    binding.ByBone[i] = it->second;
             }
         }
 
-        return ( boneIndex < binding.size() ) ? binding[boneIndex] : nullptr;
+        return ( boneIndex < binding.ByBone.size() ) ? binding.ByBone[boneIndex] : nullptr;
     }
 
     void Animator::CalculateBoneTransform( const ClipPlayback& playback, uint32_t boneIndex,

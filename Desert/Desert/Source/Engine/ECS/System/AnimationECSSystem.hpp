@@ -155,6 +155,18 @@ namespace Desert::ECS
                         anim.CurrentClip = clip.AnimationName;
                         anim.Animator->Play( clip, anim.Loop );
                     }
+                    else
+                    {
+                        // THE T-POSE'S OWN VOICE. This branch is what an entity does when it names no clip
+                        // and the library offers none for its rig, and until now it did it in complete
+                        // silence — the character stood in its bind pose, every frame, with not one line
+                        // anywhere in the process to distinguish "this project has no clips for this rig"
+                        // from "the library was never filled", which is exactly the state a packaged game
+                        // shipped in. Deduped by the same reporter as the named-clip failures above, so
+                        // it costs one line per rig rather than sixty a second.
+                        ReportUnplayableState( skeleton, "AnimationComponent (no clip named)", "<any>",
+                                               "the library offers no clip for this rig at all." );
+                    }
                 }
 
                 if ( anim.Playing )
