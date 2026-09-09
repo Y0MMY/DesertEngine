@@ -199,36 +199,18 @@ namespace Desert::Editor
             return;
         }
 
-        // ── THE PREVIEW IS REFUSED WHEN IT WOULD SHOW SOMEBODY ELSE'S CANVAS ───────────────────────────
+        // U7-2 refused the preview here whenever this document's canvas was not the one RenderCanvas2D
+        // elected — the FIRST in the registry — because the alternative was sizing the target to this
+        // canvas's design resolution and then showing a picture of a different one. Ю1 made the renderer
+        // askable, so the document's own canvas is simply what gets drawn (see the call below) and there is
+        // nothing left to refuse: every canvas in a scene is previewable, by name.
         //
-        // UI::RenderCanvas2D takes a REGISTRY and elects a canvas itself: `*reg.view<UICanvasComponent>()
-        // .begin()`, the first one (UICanvasRenderer2D.cpp). That is the shipping behaviour and it is what
-        // the game and the viewport get, so a second canvas is not drawn by this engine at all today.
-        //
-        // A document, though, names ONE canvas — and a document over the second canvas would size its
-        // target to that canvas's design resolution and then be handed a picture of the FIRST one, with
-        // nothing on screen saying so. That is the silently-wrong-preview this project has paid for
-        // repeatedly, so it is refused by name instead: the toolbar still parents into the right canvas
-        // (that part is honest), and the picture says which canvas the renderer would have shown.
-        //
-        // The fix is in RenderCanvas2D — it has to be able to be asked for a canvas rather than electing
-        // one — and that is the shared pass the viewport and the game run, so it is not this task's to
-        // change. Until then a scene with two canvases has one previewable and says which.
-        const entt::entity elected = FindUICanvas( scene->GetRegistry() );
-        if ( elected != ResolveCanvasEntity() )
-        {
-            m_PreviewError = "the engine draws only the FIRST UI canvas in a scene "
-                             "(UI::RenderCanvas2D elects it), and this is not that one — the toolbar "
-                             "still adds elements to THIS canvas, but a picture of it cannot be produced";
-            ReleaseTarget();
-            return;
-        }
-        // Cleared on the way THROUGH, so a canvas that becomes the elected one (the first was deleted) does
-        // not keep showing a refusal that no longer applies. EnsureTarget below is what writes the message
-        // again if the target itself cannot be built.
+        // Cleared on the way THROUGH so that EnsureTarget below is what writes a message again if the target
+        // itself cannot be built.
         m_PreviewError.clear();
 
-        const auto& canvasData = canvas->Data;
+        const entt::entity canvasEntity = ResolveCanvasEntity();
+        const auto&        canvasData   = canvas->Data;
         if ( !canvasData.Visible )
             return;
 
@@ -264,13 +246,19 @@ namespace Desert::Editor
         // the viewport's elected element every single frame it was open — one scene, no second document
         // needed. See UICanvasContext.hpp.
         //
-        // THE REGISTRY AND NOT THIS SUBJECT'S SUBTREE, because that is RenderCanvas2D's own interface: it
-        // takes a registry and elects a canvas. Reaching past it to walk one subtree here would be a second
-        // implementation of the canvas pass — exactly what this window's previous ImGui-based preview was,
-        // and why it was deleted. The guard above is what keeps the election and the subject honest.
-        ::Desert::UI::RenderCanvas2D( m_UICanvas, scene->GetRegistry(), m_Render2D.GetDrawList(), viewport,
-                                      /*worldViewProj=*/nullptr,
-                                      /*input=*/nullptr );
+        // THIS DOCUMENT'S OWN CANVAS, named. The window is a document over one UICanvasComponent, so the
+        // entity it was opened on IS the answer — no election, no guard, and no second implementation of the
+        // canvas pass (which is what this window's previous ImGui-based preview was, and why it was deleted).
+        if ( const auto drawn = ::Desert::UI::RenderCanvas2D( m_UICanvas, scene->GetRegistry(), canvasEntity,
+                                                              m_Render2D.GetDrawList(), viewport,
+                                                              /*worldViewProj=*/nullptr,
+                                                              /*input=*/nullptr );
+             !drawn )
+        {
+            // Reached only if the subject stopped being a canvas between ResolveCanvas() above and here.
+            m_PreviewError = drawn.GetError();
+            LOG_ERROR( "[UI Editor] {}", m_PreviewError );
+        }
         m_Render2D.Flush();
         renderer.EndRenderPass();
 

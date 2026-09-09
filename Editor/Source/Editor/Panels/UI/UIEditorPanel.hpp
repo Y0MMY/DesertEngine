@@ -48,12 +48,10 @@ namespace Desert::Editor
     // what a singleton window over a per-entity component has to do: with one window there is nothing to
     // say WHICH. A subject says it, and two canvases are two windows.
     //
-    // AND THE ENGINE STILL DRAWS ONLY THE FIRST ONE, which is the half this task did NOT fix and must not
-    // be read as fixed. UI::RenderCanvas2D elects `*reg.view<UICanvasComponent>().begin()` itself
-    // (UICanvasRenderer2D.cpp), so the window over a second canvas would have been handed a picture of the
-    // first with nothing saying so. OnPreUpdate refuses that preview by name rather than showing it; the
-    // real fix is for RenderCanvas2D to be askable for a canvas, and that is the pass the viewport and the
-    // game both run, so it belongs to whoever changes it and not to this window.
+    // AND THE ENGINE DREW ONLY THE FIRST ONE, which U7-2 named as the half it did not fix and refused the
+    // preview over rather than showing the wrong canvas. Ю1 closed it: UI::RenderCanvas2D takes the canvas
+    // as an argument, so this window hands it the entity its own subject names and the refusal is gone. Two
+    // canvases are two windows, and both of them draw.
     //
     // AND ITS "CREATE UI CANVAS" EMPTY STATE IS GONE WITH IT. A document is opened OVER a canvas that
     // exists; making one is Details ▸ Add Component ▸ UI Canvas and the viewport toolbar's UI ▸ UI Canvas

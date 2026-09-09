@@ -194,11 +194,25 @@ namespace
         return dl.GetVertices().empty() ? glm::vec4( -1.0f ) : dl.GetVertices().front().Color;
     }
 
+    // Every walk in this file goes through here. RenderCanvas2D REFUSES rather than returning a bare false
+    // (Ю1), and a test that swallowed the refusal would go on to assert about an empty draw list and pass
+    // for entirely the wrong reason — so the refusal is surfaced at the one place that makes the call.
+    bool Draw( UICanvasContext& ctx, entt::registry& reg, entt::entity canvas, R2D::DrawList2D& dl,
+               const UIInput* input = nullptr, std::string* outClicked = nullptr, entt::entity* focused = nullptr,
+               std::vector<std::string>* outMessages = nullptr )
+    {
+        const auto drawn =
+             Desert::UI::RenderCanvas2D( ctx, reg, canvas, dl, kViewport,
+                                         /*worldViewProj=*/nullptr, input, outClicked, focused, outMessages );
+        EXPECT_TRUE( drawn.IsSuccess() ) << drawn.GetError();
+        return drawn.IsSuccess() && drawn.GetValue();
+    }
+
     // Draw one frame of @p f through @p ctx and hand back what the button was painted.
     glm::vec4 Frame( UICanvasContext& ctx, Fixture& f, const UIInput* input )
     {
         R2D::DrawList2D dl;
-        Desert::UI::RenderCanvas2D( ctx, f.Registry, dl, kViewport, /*worldViewProj=*/nullptr, input );
+        Draw( ctx, f.Registry, f.Canvas, dl, input );
         return DrawnColor( dl );
     }
 
@@ -377,7 +391,7 @@ TEST( UICanvasContext, ScreenNavigationBelongsToTheViewThatDidIt )
     {
         R2D::DrawList2D dl;
         std::string     clicked;
-        Desert::UI::RenderCanvas2D( viewport, f.Registry, dl, kViewport, nullptr, &click, &clicked );
+        Draw( viewport, f.Registry, f.Canvas, dl, &click, &clicked );
         EXPECT_EQ( clicked, "screen:Settings" );
     }
     Frame( second, f, At( 900.0f, 900.0f ) );
@@ -450,8 +464,8 @@ TEST( UICanvasContext, AnUnresolvableCanvasBackgroundDrawsNothingRatherThanAWhit
 
     UICanvasContext c1, c2;
     R2D::DrawList2D dlBare, dlSprite;
-    Desert::UI::RenderCanvas2D( c1, bare.Registry, dlBare, kViewport );
-    Desert::UI::RenderCanvas2D( c2, withSprite.Registry, dlSprite, kViewport );
+    Draw( c1, bare.Registry, bare.Canvas, dlBare );
+    Draw( c2, withSprite.Registry, withSprite.Canvas, dlSprite );
 
     EXPECT_EQ( dlSprite.GetVertices().size(), dlBare.GetVertices().size() )
          << "a background sprite that did not resolve still put geometry on screen";
@@ -479,7 +493,7 @@ TEST( UICanvasContext, AResolvableCanvasBackgroundCoversTheCanvasAndIsDrawnFirst
     g_BackgroundServiceArmed = true;
     UICanvasContext ctx;
     R2D::DrawList2D dl;
-    Desert::UI::RenderCanvas2D( ctx, f.Registry, dl, kViewport );
+    Draw( ctx, f.Registry, f.Canvas, dl );
     g_BackgroundServiceArmed = false;
 
     ASSERT_FALSE( dl.GetCommands().empty() );
@@ -616,7 +630,7 @@ namespace
     {
         UICanvasContext ctx;
         R2D::DrawList2D dl;
-        Desert::UI::RenderCanvas2D( ctx, s.Registry, dl, kViewport );
+        Draw( ctx, s.Registry, s.Canvas, dl );
         return { RectOfColor( dl, Stack::ColorOf( 0 ) ), RectOfColor( dl, Stack::ColorOf( 1 ) ),
                  RectOfColor( dl, Stack::ColorOf( 2 ) ) };
     }
@@ -676,12 +690,12 @@ TEST( UICanvasVisibility, TheEditorPickAgreesWithTheDrawAboutACollapsedSlot )
     ASSERT_TRUE( drawn[2].has_value() );
 
     const glm::vec2 inside( drawn[2]->X + 5.0f, drawn[2]->Y + drawn[2]->H * 0.5f );
-    EXPECT_EQ( Desert::UI::PickElement( s.Registry, inside, kViewport ), s.Item[2] )
+    EXPECT_EQ( Desert::UI::PickElement( s.Registry, s.Canvas, inside, kViewport ), s.Item[2] )
          << "a click in the middle of the third item, where it is DRAWN, did not pick it";
 
     // And the collapsed one is not pickable anywhere, because it is nowhere.
     for ( float y = 0.0f; y < 3.0f * Stack::kItemH; y += 5.0f )
-        EXPECT_NE( Desert::UI::PickElement( s.Registry, { 5.0f, y }, kViewport ), s.Item[1] )
+        EXPECT_NE( Desert::UI::PickElement( s.Registry, s.Canvas, { 5.0f, y }, kViewport ), s.Item[1] )
              << "the collapsed item was picked at y=" << y;
 }
 
@@ -757,11 +771,11 @@ namespace
         UICanvasContext ctx;
         R2D::DrawList2D first;
         const UIInput   in = At( x, y );
-        Desert::UI::RenderCanvas2D( ctx, n.Registry, first, kViewport, nullptr, &in );
+        Draw( ctx, n.Registry, n.Canvas, first, &in );
 
         Probe           out;
         R2D::DrawList2D second;
-        Desert::UI::RenderCanvas2D( ctx, n.Registry, second, kViewport, nullptr, &in );
+        Draw( ctx, n.Registry, n.Canvas, second, &in );
         out.Hot = ctx.HotNext == entt::null ? ctx.Hot : ctx.HotNext;
         // The panel is drawn first and the button on top of it, so the button's quad is the LAST colour in
         // the list that is one of its three states.
@@ -870,6 +884,357 @@ TEST( UICanvasHitTest, AnElementThatIsNotVisibleIsNotHitTestableWhateverItsHitTe
                  << static_cast<int>( invisible ) << " and Hit Test " << static_cast<int>( hit );
         }
     }
+}
+
+// =========================================================================================================
+// Ю1 — THE KEYBOARD IS THE SAME HIT TEST. У4 above asserts all four values through the POINTER; every one of
+// those tests stays green on a build where Tab and Enter ignore the axis entirely, which is what `dev`
+// shipped. So the claim here is not "the keyboard obeys Blocking" — it is that the two input paths reach the
+// SAME SET, asserted as an equality across all four values, plus one pinned row so that "neither path works"
+// cannot satisfy it (a count with no named row is satisfiable by breaking both sides).
+// =========================================================================================================
+
+namespace
+{
+    constexpr const char* kFired = "u1-fired";
+
+    // Make the button report its own activation, whichever path fires it. Without an action a click writes
+    // nothing to outClicked and both probes below would read "did not fire" forever.
+    void ArmButton( Nested& n )
+    {
+        auto& b          = n.Registry.get<ECS::UIButtonComponent>( n.Button ).Data;
+        b.Action         = ECS::UIButtonAction::SendMessage;
+        b.OnClickMessage = kFired;
+    }
+
+    // Did the POINTER manage to fire the button, with the panel set to @p hit? Frame one elects (the hot
+    // element is resolved a frame late by design), frame two releases over it.
+    bool PointerFires( ECS::UIHitTest hit )
+    {
+        Nested n;
+        n.SetHitTest( n.Panel, hit );
+        ArmButton( n );
+
+        UICanvasContext ctx;
+        R2D::DrawList2D a, b;
+        const UIInput   hold = At( 10.0f, 10.0f );
+        Draw( ctx, n.Registry, n.Canvas, a, &hold );
+
+        UIInput release       = At( 10.0f, 10.0f, /*down=*/false );
+        release.MouseReleased = true;
+        std::string clicked;
+        Draw( ctx, n.Registry, n.Canvas, b, &release, &clicked );
+        return clicked == kFired;
+    }
+
+    // Did the KEYBOARD? Frame one presses Tab, which fills the focus list and moves focus into it; frame two
+    // presses Enter. The pointer is parked at (900,900) — over the panel, never over the button — and never
+    // released, so nothing here can fire through the pointer path by accident.
+    bool KeyboardFires( ECS::UIHitTest hit )
+    {
+        Nested n;
+        n.SetHitTest( n.Panel, hit );
+        ArmButton( n );
+
+        UICanvasContext ctx;
+        R2D::DrawList2D a, b;
+        entt::entity    focused = entt::null;
+
+        UIInput tab = At( 900.0f, 900.0f, /*down=*/false );
+        tab.Tab     = true;
+        Draw( ctx, n.Registry, n.Canvas, a, &tab, nullptr, &focused );
+
+        UIInput enter = At( 900.0f, 900.0f, /*down=*/false );
+        enter.Submit  = true;
+        std::string clicked;
+        Draw( ctx, n.Registry, n.Canvas, b, &enter, &clicked, &focused );
+        return clicked == kFired;
+    }
+
+    // Where Tab PARKED the focus, with the panel set to @p hit. Separate from KeyboardFires because the two
+    // gates are separate: Enter being inert on an unreachable control and Tab refusing to stop on it are
+    // different properties, and a build with only the first still makes the user press Tab twice to get past
+    // a control they cannot use. Measured: gating Enter alone leaves every assertion in (17) green.
+    entt::entity FocusAfterTab( Nested& n, ECS::UIHitTest hit )
+    {
+        n.SetHitTest( n.Panel, hit );
+
+        UICanvasContext ctx;
+        R2D::DrawList2D dl;
+        entt::entity    focused = entt::null;
+        UIInput         tab     = At( 900.0f, 900.0f, /*down=*/false );
+        tab.Tab                 = true;
+        Draw( ctx, n.Registry, n.Canvas, dl, &tab, nullptr, &focused );
+        return focused;
+    }
+} // namespace
+
+// --- (17) The relation, over all four values ------------------------------------------------------------
+TEST( UICanvasHitTest, TheKeyboardReachesExactlyWhatThePointerReaches )
+{
+    for ( const ECS::UIHitTest hit :
+          { ECS::UIHitTest::All, ECS::UIHitTest::ChildrenOnly, ECS::UIHitTest::Blocking, ECS::UIHitTest::None } )
+    {
+        const bool pointer  = PointerFires( hit );
+        const bool keyboard = KeyboardFires( hit );
+        EXPECT_EQ( pointer, keyboard )
+             << "with the ancestor's Hit Test = " << static_cast<int>( hit ) << " the pointer "
+             << ( pointer ? "could" : "could not" ) << " fire the button and the keyboard "
+             << ( keyboard ? "could" : "could not" )
+             << " — the two paths must agree, and the greyed-out "
+                "modal is exactly the case where a keyboard that disagrees is the whole defect";
+    }
+
+    // THE PINNED ROWS. An equality is satisfied just as well by both paths being dead, so say which way
+    // round each end is. All must fire through both doors; Blocking must fire through neither.
+    EXPECT_TRUE( PointerFires( ECS::UIHitTest::All ) ) << "the pointer stopped working entirely";
+    EXPECT_TRUE( KeyboardFires( ECS::UIHitTest::All ) ) << "Tab+Enter no longer reaches a plain button";
+    EXPECT_FALSE( KeyboardFires( ECS::UIHitTest::Blocking ) )
+         << "Tab walked into a Blocking panel and Enter fired the button inside it";
+}
+
+// --- (17b) And Tab does not even STOP on a control the pointer cannot reach ------------------------------
+//
+// The focus LIST is gated as well as the activation, and this is the assertion that says so: with Enter
+// alone gated, a Blocking panel still swallows a Tab stop — focus lands on something inert and the author
+// has to press Tab twice to get anywhere, with nothing on screen explaining it. Two gates, two properties.
+TEST( UICanvasHitTest, TabDoesNotStopOnAControlThePointerCannotReach )
+{
+    Nested all, blocking, none;
+    EXPECT_EQ( FocusAfterTab( all, ECS::UIHitTest::All ), all.Button ) << "Tab no longer reaches a plain button";
+    EXPECT_TRUE( FocusAfterTab( blocking, ECS::UIHitTest::Blocking ) == entt::null )
+         << "Tab parked focus inside a Blocking panel";
+    EXPECT_TRUE( FocusAfterTab( none, ECS::UIHitTest::None ) == entt::null )
+         << "Tab parked focus inside a HitTest::None sub-tree";
+}
+
+// --- (17c) A focus the host already held does not fire Enter either -------------------------------------
+//
+// The focus list gate (17b) only decides where Tab can GO. `focused` belongs to the host and survives
+// frames, so the case it cannot cover is a control that held focus legitimately and had an ancestor turned
+// Blocking under it afterwards — a modal opening over a form is exactly that, and it has no pointer
+// equivalent to compare against. Hence the second gate, on the focus test itself, and hence this test:
+// removing it leaves (17) and (17b) entirely green.
+TEST( UICanvasHitTest, EnterOnAFocusHeldFromBeforeDoesNotFireAnUnreachableButton )
+{
+    auto fires = []( ECS::UIHitTest hit )
+    {
+        Nested n;
+        n.SetHitTest( n.Panel, hit );
+        ArmButton( n );
+
+        entt::entity    focused = n.Button; // handed, not tabbed: the panel changed under a live focus
+        UICanvasContext ctx;
+        R2D::DrawList2D dl;
+        std::string     clicked;
+        UIInput         enter = At( 900.0f, 900.0f, /*down=*/false );
+        enter.Submit          = true;
+        Draw( ctx, n.Registry, n.Canvas, dl, &enter, &clicked, &focused );
+        return clicked == kFired;
+    };
+
+    EXPECT_TRUE( fires( ECS::UIHitTest::All ) ) << "Enter stopped working on a reachable focused button";
+    EXPECT_FALSE( fires( ECS::UIHitTest::Blocking ) )
+         << "Enter fired a button inside a Blocking panel because focus predated the panel's change";
+    EXPECT_FALSE( fires( ECS::UIHitTest::None ) ) << "Enter fired a button inside a HitTest::None sub-tree";
+}
+
+// --- (18) The fourth keyboard door: typing ---------------------------------------------------------------
+//
+// Enter is not the only key that reaches a control. A focused UIInputField consumes TypedText and Backspace,
+// and `focused` is the HOST's — it survives frames — so the case that has no pointer analogue at all is a
+// field that held focus legitimately and then had an ancestor turned Blocking under it. Nothing in the
+// pointer path can express that, which is why it is a test of its own rather than a row in (17).
+TEST( UICanvasHitTest, AFieldOutOfTheHitTestsReachStopsAcceptingTypedText )
+{
+    auto typeInto = [&]( ECS::UIHitTest hit ) -> std::string
+    {
+        Nested n;
+        n.SetHitTest( n.Panel, hit );
+
+        // A field beside the button, inside the same panel.
+        const entt::entity field = n.Registry.create();
+        auto&              L     = n.Registry.emplace<ECS::UILayoutComponent>( field ).Data;
+        L.AnchorMin              = { 0.0f, 0.0f };
+        L.AnchorMax              = { 0.0f, 0.0f };
+        L.OffsetMin              = { 0.0f, 100.0f };
+        L.OffsetMax              = { 200.0f, 140.0f };
+        n.Registry.emplace<ECS::UIInputFieldComponent>( field );
+        n.Registry.emplace<ECS::RelationshipComponent>( field ).Parent = n.Panel;
+        n.Registry.get<ECS::RelationshipComponent>( n.Panel ).Children.push_back( field );
+
+        // Focus is HANDED to the field rather than tabbed to, which is the stale-focus case: it is what a
+        // host holds after the field was legitimately focused and the panel changed afterwards.
+        entt::entity    focused = field;
+        UICanvasContext ctx;
+        R2D::DrawList2D dl;
+        UIInput         keys = At( 900.0f, 900.0f, /*down=*/false );
+        keys.TypedText       = "x";
+        Draw( ctx, n.Registry, n.Canvas, dl, &keys, nullptr, &focused );
+        return n.Registry.get<ECS::UIInputFieldComponent>( field ).Data.Text;
+    };
+
+    EXPECT_EQ( typeInto( ECS::UIHitTest::All ), "x" ) << "a reachable field stopped accepting text";
+    EXPECT_EQ( typeInto( ECS::UIHitTest::Blocking ), "" )
+         << "a field inside a Blocking panel took keystrokes the pointer could never have delivered to it";
+    EXPECT_EQ( typeInto( ECS::UIHitTest::None ), "" ) << "a field inside a HitTest::None sub-tree took keystrokes";
+}
+
+// =========================================================================================================
+// Ю1 — THE CANVAS IS ASKED. RenderCanvas2D and the layout queries used to elect
+// `*reg.view<UICanvasComponent>().begin()`, so a scene's second canvas was drawn by nothing, picked by
+// nothing and measured by nothing, silently. These assert the relation "what you ask for is what you get",
+// which is the only claim that a build electing the first canvas cannot satisfy.
+// =========================================================================================================
+
+namespace
+{
+    // Two canvases in one registry, each with a full-canvas panel of its own colour, so which canvas was
+    // drawn is a question the vertex buffer answers.
+    struct TwoCanvases
+    {
+        entt::registry Registry;
+        entt::entity   CanvasA = entt::null, CanvasB = entt::null;
+        entt::entity   PanelA = entt::null, PanelB = entt::null;
+
+        static glm::vec3 ColorA()
+        {
+            return { 1.0f, 0.0f, 0.0f };
+        }
+        static glm::vec3 ColorB()
+        {
+            return { 0.0f, 1.0f, 0.0f };
+        }
+
+        TwoCanvases()
+        {
+            CanvasA = Make( ColorA(), PanelA );
+            CanvasB = Make( ColorB(), PanelB );
+        }
+
+    private:
+        entt::entity Make( const glm::vec3& rgb, entt::entity& panelOut )
+        {
+            const entt::entity canvas = Registry.create();
+            auto&              cd     = Registry.emplace<ECS::UICanvasComponent>( canvas ).Data;
+            cd.ScaleMode              = ECS::UICanvasScaleMode::Stretch;
+            cd.ReferenceWidth         = kSide;
+            cd.ReferenceHeight        = kSide;
+
+            panelOut         = Registry.create();
+            auto& layout     = Registry.emplace<ECS::UILayoutComponent>( panelOut ).Data;
+            layout.AnchorMin = { 0.0f, 0.0f };
+            layout.AnchorMax = { 1.0f, 1.0f };
+            layout.OffsetMin = { 0.0f, 0.0f };
+            layout.OffsetMax = { 0.0f, 0.0f };
+
+            auto& p        = Registry.emplace<ECS::UIPanelComponent>( panelOut ).Data;
+            p.Color        = rgb;
+            p.Opacity      = 1.0f;
+            p.CornerRadius = 0.0f;
+
+            Registry.emplace<ECS::RelationshipComponent>( canvas ).Children.push_back( panelOut );
+            Registry.emplace<ECS::RelationshipComponent>( panelOut ).Parent = canvas;
+            return canvas;
+        }
+    };
+} // namespace
+
+// --- (19) Whichever canvas is named is the one that draws ------------------------------------------------
+TEST( UICanvasSelection, TheCanvasThatWasAskedForIsTheOneDrawn )
+{
+    TwoCanvases t;
+
+    UICanvasContext ctxA, ctxB;
+    R2D::DrawList2D a, b;
+    EXPECT_TRUE( Draw( ctxA, t.Registry, t.CanvasA, a ) );
+    EXPECT_TRUE( Draw( ctxB, t.Registry, t.CanvasB, b ) );
+
+    EXPECT_TRUE( RectOfColor( a, TwoCanvases::ColorA() ).has_value() );
+    EXPECT_FALSE( RectOfColor( a, TwoCanvases::ColorB() ).has_value() )
+         << "asking for canvas A drew canvas B's content too";
+
+    // THE HALF THAT WAS BROKEN. On the electing build this one is empty: B is not `*view.begin()`, so
+    // whatever the caller asked for, A came back.
+    EXPECT_TRUE( RectOfColor( b, TwoCanvases::ColorB() ).has_value() )
+         << "the second canvas was asked for and something else was drawn — this is the whole defect";
+    EXPECT_FALSE( RectOfColor( b, TwoCanvases::ColorA() ).has_value() );
+}
+
+// --- (20) The layout queries answer about the SAME canvas the draw did ----------------------------------
+//
+// Pick and draw disagreeing is this project's recurring shape, and a second canvas is a fresh way to get it:
+// the editor's pick used to walk canvas A whatever was on screen, so an element of canvas B was drawn where
+// nothing could select it.
+TEST( UICanvasSelection, ThePickAndTheScaleAnswerAboutTheCanvasTheyWereGiven )
+{
+    TwoCanvases t;
+
+    EXPECT_EQ( Desert::UI::PickElement( t.Registry, t.CanvasB, { 500.0f, 500.0f }, kViewport ), t.PanelB );
+    EXPECT_EQ( Desert::UI::PickElement( t.Registry, t.CanvasA, { 500.0f, 500.0f }, kViewport ), t.PanelA );
+
+    Rect r;
+    EXPECT_TRUE( Desert::UI::GetElementRect( t.Registry, t.CanvasB, t.PanelB, kViewport, r ) );
+    EXPECT_FALSE( Desert::UI::GetElementRect( t.Registry, t.CanvasA, t.PanelB, kViewport, r ) )
+         << "canvas A reported a rect for an element that is not in it";
+
+    const auto scale = Desert::UI::CanvasScale( t.Registry, t.CanvasB, kViewport );
+    ASSERT_TRUE( scale.IsSuccess() ) << scale.GetError();
+    EXPECT_FLOAT_EQ( scale.GetValue(), 1.0f ); // Stretch
+}
+
+// --- (21) Not naming one is a refusal, never a default --------------------------------------------------
+//
+// The contract's §1.4 case: "there are two and I drew one of them" is a successful-looking answer to a
+// question nobody could have asked. Both the renderer and the resolver have to say so out loud.
+TEST( UICanvasSelection, NotNamingACanvasIsARefusalAndNotTheFirstOne )
+{
+    TwoCanvases t;
+
+    UICanvasContext ctx;
+    R2D::DrawList2D dl;
+    const auto      unnamed = Desert::UI::RenderCanvas2D( ctx, t.Registry, entt::null, dl, kViewport );
+    EXPECT_FALSE( unnamed.IsSuccess() ) << "RenderCanvas2D accepted no canvas and drew something anyway";
+    EXPECT_TRUE( dl.GetVertices().empty() ) << "a refused walk still emitted geometry";
+
+    // An entity that exists but is not a canvas is a DIFFERENT refusal — a caller bug, not an empty scene.
+    R2D::DrawList2D dl2;
+    const auto      notACanvas = Desert::UI::RenderCanvas2D( ctx, t.Registry, t.PanelA, dl2, kViewport );
+    EXPECT_FALSE( notACanvas.IsSuccess() );
+    EXPECT_NE( notACanvas.GetError(), unnamed.GetError() )
+         << "'you named nothing' and 'you named a panel' came back as the same sentence";
+
+    // And the resolver refuses to break the tie rather than handing back the first.
+    EXPECT_EQ( Desert::UI::CanvasCount( t.Registry ), 2u );
+    EXPECT_FALSE( Desert::UI::SoleCanvas( t.Registry ).IsSuccess() )
+         << "SoleCanvas elected a winner out of two canvases — the exact behaviour this task removed";
+
+    entt::registry empty;
+    EXPECT_EQ( Desert::UI::CanvasCount( empty ), 0u );
+    EXPECT_FALSE( Desert::UI::SoleCanvas( empty ).IsSuccess() );
+}
+
+// --- (22) CanvasOf derives the answer instead of guessing it --------------------------------------------
+//
+// This is what the editor asks: an element already names its canvas by being inside it. It is exact, and it
+// is the reason the viewport no longer needs an election at all when something is selected.
+TEST( UICanvasSelection, CanvasOfWalksUpToTheCanvasTheElementIsActuallyIn )
+{
+    TwoCanvases t;
+
+    EXPECT_EQ( Desert::UI::CanvasOf( t.Registry, t.PanelB ), t.CanvasB );
+    EXPECT_EQ( Desert::UI::CanvasOf( t.Registry, t.PanelA ), t.CanvasA );
+    EXPECT_EQ( Desert::UI::CanvasOf( t.Registry, t.CanvasB ), t.CanvasB ) << "a canvas is its own canvas";
+
+    const entt::entity orphan = t.Registry.create();
+    EXPECT_TRUE( Desert::UI::CanvasOf( t.Registry, orphan ) == entt::null );
+    EXPECT_TRUE( Desert::UI::CanvasOf( t.Registry, entt::null ) == entt::null );
+
+    // A parent cycle is authorable (the hierarchy panel reparents), and this must return rather than hang.
+    const entt::entity a = t.Registry.create(), b = t.Registry.create();
+    t.Registry.emplace<ECS::RelationshipComponent>( a ).Parent = b;
+    t.Registry.emplace<ECS::RelationshipComponent>( b ).Parent = a;
+    EXPECT_TRUE( Desert::UI::CanvasOf( t.Registry, a ) == entt::null );
 }
 
 int main( int argc, char** argv )

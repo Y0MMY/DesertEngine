@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <optional>
 #include <chrono>
+#include <cstdint>
 #include <cmath>
 #include <limits>
 #include <unordered_map>
@@ -387,10 +388,11 @@ namespace Desert::UI
         // permission and never regain it, so no child can re-enable itself inside a disabled dialog.
         //
         // IT IS ONE BOOLEAN AND NOT TWO, and that was measured rather than assumed. The obvious shape is a
-        // pair — may this sub-tree be ELECTED, may it RESPOND — but the second is unreachable: responding
-        // is gated on `e == ctx.Hot`, and an element that may not be elected can never be the hot one. A
-        // mutation that removed the inherited "respond" entirely left every test green, which is what a
-        // field with no observable effect looks like (DC 1.3), so it is not here.
+        // pair — may this sub-tree be ELECTED, may it RESPOND — but the second carries no information the
+        // first does not: reacting to anything, pointer or keyboard, is gated on `interactive` below, and
+        // `interactive` already ANDs in the inherited term through `electsSelf`. A mutation that removed a
+        // separate inherited "respond" left every test green, which is what a field with no observable
+        // effect looks like (DC 1.3), so it is not here.
         struct HitScope
         {
             bool Elect = true; // may anything in here become the hot element (i.e. stop the pointer)?
@@ -403,6 +405,29 @@ namespace Desert::UI
             Rect         Box;   // the dropdown's box rect (screen px)
             float        Scale; // canvas scale for its text
         };
+
+        // Every non-empty UIScreen name in @p e's sub-tree, in draw order.
+        //
+        // WHY A SUB-TREE WALK AND NOT `reg.view<UIScreenComponent>()`: the seed below picks "the first screen
+        // that exists" and re-seeds when the current name does not, and a registry-wide view answers about
+        // the WHOLE SCENE. While only one canvas was ever drawn that was indistinguishable from asking the
+        // canvas; now that the canvas is named, a second canvas's screens would seed and re-seed this one's
+        // context, and a menu canvas could silently drive a HUD canvas's screen machine.
+        template <typename F>
+        void ForEachScreenName( entt::registry& reg, entt::entity e, F&& fn )
+        {
+            if ( !reg.valid( e ) )
+                return;
+            if ( reg.has<ECS::UIScreenComponent>( e ) )
+            {
+                const std::string& n = reg.get<ECS::UIScreenComponent>( e ).Data.Name;
+                if ( !n.empty() )
+                    fn( n );
+            }
+            if ( reg.has<ECS::RelationshipComponent>( e ) )
+                for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
+                    ForEachScreenName( reg, c, fn );
+        }
 
         // Keyboard-focusable controls (Tab cycles between them; Enter activates the focused one).
         bool IsFocusable( entt::registry& reg, entt::entity e )
@@ -1143,12 +1168,30 @@ namespace Desert::UI
             // modal dialog, which must swallow the click rather than let it reach what is behind them.
             const bool electsSelf =
                  scope.Elect && ( hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::Blocking );
-            // Only this element's own value: an inherited term would be unreachable, because responding
-            // needs `e == ctx.Hot` and the line above is already what decides whether it can be Hot.
+            // This element's own value only; the inherited half arrives through `electsSelf` above and is
+            // ANDed in by `interactive` below.
             const bool responds = hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::ChildrenOnly;
 
+            // ONE PREDICATE FOR BOTH INPUT PATHS, and it is the whole point of this line existing.
+            //
+            // У4 shipped the two axes honoured by the POINTER alone: election ran through `scope`, and the
+            // controls compared against `ctx.Hot`. The keyboard reached the same controls by a route that
+            // asked neither — the Tab list took every focusable in the tree, and Enter fired on whatever
+            // `focused` held — so a button inside a Blocking panel was still tabbable and still fired. That
+            // is precisely the greyed-out modal the fourth enum value was added for, operable by keyboard.
+            //
+            // So "may this element be interacted with" is decided ONCE, here, and the pointer sites (`hot`)
+            // and the keyboard sites (the focus list, Enter, the input field's typing) all read this same
+            // value. Two predicates that must agree is the defect shape this project keeps paying for; one
+            // predicate cannot disagree with itself.
+            //
+            // It also closes a one-frame hole the pointer had on its own: `ctx.Hot` is LAST frame's winner,
+            // so an element whose ancestor became Blocking since then was still `responds && e == ctx.Hot`
+            // for one frame. ANDing this frame's `electsSelf` in is what makes the permission current.
+            const bool interactive = electsSelf && responds;
+
             // Blocking and None both close the sub-tree to the pointer; they differ only in whether the
-            // element itself stops it, which is the line above.
+            // element itself stops it, which is `electsSelf` above.
             const HitScope childScope{
                  scope.Elect && ( hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::ChildrenOnly ) };
 
@@ -1165,8 +1208,9 @@ namespace Desert::UI
                     ctx.HotNext     = e;
                     ctx.HotNextRect = rect;
                 }
-                // This element is what the pointer is over (resolved last frame) AND it responds.
-                const bool hot = responds && e == ctx.Hot;
+                // This element is what the pointer is over (resolved last frame) AND it may be interacted
+                // with at all — the same predicate the keyboard sites below read.
+                const bool hot = interactive && e == ctx.Hot;
 
                 // A drop target outlines itself while a drag it would accept is in flight.
                 if ( ctx.Drag.Active && reg.has<ECS::UIDropTargetComponent>( e ) )
@@ -1211,7 +1255,11 @@ namespace Desert::UI
                                           glm::vec4( b.SelectedAccent, 1.0f ), barW * 0.5f );
                     }
 
-                    const bool isFocused = focused && *focused == e;
+                    // `focused` is the HOST's, and it survives between frames — so a control that held focus
+                    // while it was reachable keeps holding it after an ancestor turns Blocking. Gating the
+                    // question itself (rather than the Enter below) is what makes that stale focus inert in
+                    // every direction at once: no activation, no focus ring, no caret.
+                    const bool isFocused = interactive && focused && *focused == e;
                     if ( outClicked && input && !b.Disabled &&
                          ( ( hover && input->MouseReleased && !ctx.Drag.Active ) ||
                            ( isFocused && input->Submit ) ) )
@@ -1336,7 +1384,7 @@ namespace Desert::UI
                         dl.AddRectFilled( { mn.x + pad, mn.y + pad }, { mx.x - pad, mx.y - pad },
                                           glm::vec4( tg.CheckColor, 1.0f ), r * 0.5f );
                     }
-                    const bool isFocused = focused && *focused == e;
+                    const bool isFocused = interactive && focused && *focused == e;
                     if ( input && ( ( hover && input->MouseReleased ) || ( isFocused && input->Submit ) ) )
                         tg.Value = !tg.Value;
                 }
@@ -1366,7 +1414,7 @@ namespace Desert::UI
                 else if ( reg.has<ECS::UIInputFieldComponent>( e ) )
                 {
                     auto&      f         = reg.get<ECS::UIInputFieldComponent>( e ).Data;
-                    const bool isFocused = focused && *focused == e;
+                    const bool isFocused = interactive && focused && *focused == e;
                     const bool hover     = input && hot;
 
                     dl.AddRectFilled( mn, mx, Tinted( ctx, glm::vec4( f.Background, 1.0f ) ),
@@ -1425,7 +1473,7 @@ namespace Desert::UI
                                           { ax, ay + aw * 0.7f }, glm::vec4( d.TextColor, 1.0f ) );
 
                     const bool hover     = input && hot;
-                    const bool isFocused = focused && *focused == e;
+                    const bool isFocused = interactive && focused && *focused == e;
                     if ( input && ( ( hover && input->MouseReleased ) || ( isFocused && input->Submit ) ) )
                         d.Open = !d.Open;
                     if ( d.Open && popups )
@@ -1464,7 +1512,11 @@ namespace Desert::UI
 
                 // Keyboard focus: record this control for Tab-cycling, and draw a focus ring when it holds
                 // focus (InputField draws its own coloured border, so skip the generic ring there).
-                if ( IsFocusable( reg, e ) )
+                //
+                // GATED BY THE SAME PREDICATE THE POINTER USES. An ungated list is what let Tab walk into a
+                // Blocking panel and hand Enter a target the mouse could never have reached; it is also why
+                // Tab now steps OVER such a control rather than sticking on it.
+                if ( interactive && IsFocusable( reg, e ) )
                 {
                     if ( focusables )
                         focusables->push_back( e );
@@ -1490,7 +1542,7 @@ namespace Desert::UI
 
                     const float contentPx = sv.ContentHeight * scale;
                     scrollMaxPx           = std::max( 0.0f, contentPx - rect.H );
-                    const bool hover      = input && responds && e == ctx.Hot;
+                    const bool hover      = input && interactive && e == ctx.Hot;
                     if ( hover && input->ScrollDelta != 0.0f )
                         sv.ScrollY -= input->ScrollDelta * 30.0f; // 30 design px per wheel notch
                     const float maxScrollDesign = scale > 0.0f ? scrollMaxPx / scale : 0.0f;
@@ -1585,10 +1637,23 @@ namespace Desert::UI
         }
     } // namespace
 
-    bool RenderCanvas2D( UICanvasContext& ctx, entt::registry& reg, Graphic::Render2D::DrawList2D& dl,
-                         const Rect& viewportPx, const glm::mat4* worldViewProj, const UIInput* input,
-                         std::string* outClicked, entt::entity* focused, std::vector<std::string>* outMessages )
+    Common::BoolResultStr RenderCanvas2D( UICanvasContext& ctx, entt::registry& reg, entt::entity canvasEntity,
+                                          Graphic::Render2D::DrawList2D& dl, const Rect& viewportPx,
+                                          const glm::mat4* worldViewProj, const UIInput* input,
+                                          std::string* outClicked, entt::entity* focused,
+                                          std::vector<std::string>* outMessages )
     {
+        // The canvas is the caller's answer, checked before anything else touches the context. Electing one
+        // here — which is what this function did, `*reg.view<UICanvasComponent>().begin()` — meant a scene's
+        // second canvas was drawn by nothing and reported by nothing.
+        if ( canvasEntity == entt::null || !reg.valid( canvasEntity ) )
+            return Common::MakeFormattedError( "[UI] RenderCanvas2D was given no canvas to draw (entity {})",
+                                               static_cast<std::uint32_t>( canvasEntity ) );
+        if ( !reg.has<ECS::UICanvasComponent>( canvasEntity ) )
+            return Common::MakeFormattedError(
+                 "[UI] RenderCanvas2D was given entity {} as a canvas, but it carries no UICanvasComponent",
+                 static_cast<std::uint32_t>( canvasEntity ) );
+
         // This view is now looking at another scene. Entity ids are unique only inside a registry, so every
         // per-entity clock the context holds would answer to ids that mean something else here — drop them.
         if ( ctx.Registry != &reg )
@@ -1611,14 +1676,9 @@ namespace Desert::UI
         if ( ctx.Hot != entt::null && !reg.valid( ctx.Hot ) )
             ctx.Hot = entt::null;
 
-        auto canvasView = reg.view<ECS::UICanvasComponent>();
-        if ( canvasView.begin() == canvasView.end() )
-            return false;
-
-        const entt::entity canvasEntity = *canvasView.begin();
-        const auto&        canvasData   = reg.get<ECS::UICanvasComponent>( canvasEntity ).Data;
+        const auto& canvasData = reg.get<ECS::UICanvasComponent>( canvasEntity ).Data;
         if ( !canvasData.Visible )
-            return false;
+            return Common::MakeSuccess( false ); // a canvas that asked not to be drawn, not a failure
 
         Rect  canvasRect;
         float scale;
@@ -1630,7 +1690,9 @@ namespace Desert::UI
             const glm::vec3 wpos = glm::vec3( reg.get<ECS::TransformComponent>( canvasEntity ).GetTransform()[3] );
             const glm::vec4 clip = ( *worldViewProj ) * glm::vec4( wpos, 1.0f );
             if ( clip.w <= 0.0001f )
-                return true; // behind the camera — a canvas exists, just nothing to draw
+                // Behind the camera: the canvas is real and was asked for correctly, it simply has no pixels
+                // this frame. That is success(false), not an error and not success(true).
+                return Common::MakeSuccess( false );
             const float sx = viewportPx.X + ( clip.x / clip.w * 0.5f + 0.5f ) * viewportPx.W;
             const float sy = viewportPx.Y + ( 1.0f - ( clip.y / clip.w * 0.5f + 0.5f ) ) * viewportPx.H;
             const float k  = canvasData.WorldScale / clip.w;
@@ -1696,16 +1758,14 @@ namespace Desert::UI
             // another scene would hide every screen in this one.
             std::string firstScreen;
             bool        currentExists = false;
-            for ( auto se : reg.view<ECS::UIScreenComponent>() )
-            {
-                const std::string& n = reg.get<ECS::UIScreenComponent>( se ).Data.Name;
-                if ( n.empty() )
-                    continue;
-                if ( firstScreen.empty() )
-                    firstScreen = n;
-                if ( n == ctx.Screen )
-                    currentExists = true;
-            }
+            ForEachScreenName( reg, canvasEntity,
+                               [&]( const std::string& n )
+                               {
+                                   if ( firstScreen.empty() )
+                                       firstScreen = n;
+                                   if ( n == ctx.Screen )
+                                       currentExists = true;
+                               } );
             if ( !firstScreen.empty() && !currentExists )
             {
                 ctx.Screen = firstScreen;
@@ -2003,6 +2063,6 @@ namespace Desert::UI
             }
         }
 
-        return true;
+        return Common::MakeSuccess( true );
     }
 } // namespace Desert::UI

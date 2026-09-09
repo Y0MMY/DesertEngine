@@ -17,12 +17,11 @@
 // created in the viewport are the same entity by construction rather than by careful copying.
 namespace Desert::Editor
 {
-    // The scene's canvas (the first one, which is the one the renderer draws), or entt::null.
-    inline entt::entity FindUICanvas( entt::registry& reg )
-    {
-        auto view = reg.view<ECS::UICanvasComponent>();
-        return view.begin() == view.end() ? entt::null : *view.begin();
-    }
+    // FindUICanvas USED TO LIVE HERE, and it was the third copy of `*reg.view<UICanvasComponent>().begin()`
+    // — "the scene's canvas (the first one, which is the one the renderer draws)". Its own comment recorded
+    // the coincidence as a rule. It is gone: ask ::Desert::UI::CanvasOf for the canvas an element belongs to,
+    // or ::Desert::UI::SoleCanvas when there is genuinely nothing else to go on, and get a named refusal
+    // instead of a winner when the scene has more than one.
 
     // Create a UI child entity (a UILayout plus @p ElementComponent) parented to @p parent, and return its
     // handle so the caller can select it. The UILayout is not optional: it is the rect the renderer resolves

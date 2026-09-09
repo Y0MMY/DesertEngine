@@ -78,9 +78,10 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::AudioSourceComponent, Data, 
 // Particle Emitter is a CUSTOM entry: the reflected fields plus a transport (play / pause / restart),
 // because "is it emitting right now" is a state you drive, not a value you type. See MakeEmitterEntry.
 // UI Canvas is a CUSTOM entry: the reflected fields PLUS "Open in UI Editor", which is what the UI Editor
-// becoming a document (U7-2) bought. The window used to be a tool that drew FindUICanvas(registry) — the
-// first canvas in the scene — so a button here could only ever have said "reveal that window", never "edit
-// THIS canvas". See MakeUICanvasEntry.
+// becoming a document (U7-2) bought. The window used to be a tool that drew the FIRST canvas in the scene,
+// so a button here could only ever have said "reveal that window", never "edit THIS canvas". Ю1 removed the
+// last of that: the renderer itself takes the canvas as an argument, so the window draws the canvas the
+// button names. See MakeUICanvasEntry.
 // UI Layout is a CUSTOM entry (not the reflected one-liner) so the Details panel gets Unity-style anchor
 // presets ("Fill / Match Parent" + a 4x4 grid) above the raw anchor/offset fields. See MakeUILayoutEntry.
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIPanelComponent, Data, "UIPanelData", "UI Panel" )

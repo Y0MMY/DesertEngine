@@ -4,6 +4,9 @@
 #include <Engine/UI/UILayout.hpp>
 #include <Engine/Graphic/Render2D/DrawList2D.hpp>
 
+#include <Common/Core/Core.hpp>
+#include <Common/Core/ResultStr.hpp>
+
 #include <entt/entt.hpp>
 
 #include <string>
@@ -32,11 +35,19 @@ namespace Desert::UI
         bool        Submit    = false;    // Enter pressed: activate the focused control (button/toggle/...)
     };
 
-    // Emit the scene's visible canvas into @p dl in pixel coordinates within @p viewportPx. When the canvas is
+    // Emit @p canvas into @p dl in pixel coordinates within @p viewportPx. When the canvas is
     // WorldSpace, @p worldViewProj (camera projection*view) billboards + distance-scales it to the screen;
     // pass nullptr for screen-space-only hosts. @p input drives button hover/press; a click on release writes
-    // the button's encoded action to @p outClicked (see the runtime dispatcher). Returns false when there is
-    // no visible canvas to draw.
+    // the button's encoded action to @p outClicked (see the runtime dispatcher).
+    //
+    // @p canvas IS ASKED, NEVER GUESSED. This used to take only the registry and elect
+    // `*reg.view<UICanvasComponent>().begin()` — entt's iteration order — so a scene's second canvas was
+    // never drawn by anything and nothing said so. See UICanvasLayout.hpp for the three ways to obtain one
+    // (CanvasOf / CanvasCount / SoleCanvas); none of them can silently pick a winner.
+    //
+    // The result separates the three outcomes a bool could not: an ERROR means @p canvas is not a canvas of
+    // @p reg (a caller bug, named), success(false) means the canvas exists but drew nothing this frame (it
+    // is not Visible, or a WorldSpace canvas is behind the camera), success(true) means it was drawn.
     // @p outMessages (optional) collects EVERY message the canvas fired this frame — pointer enter/exit,
     // press/release and drops — since more than one can happen in a single frame, unlike @p outClicked.
     // Without it those messages fall back to @p outClicked when it is still empty.
@@ -46,8 +57,10 @@ namespace Desert::UI
     // after frame; see UICanvasContext.hpp for why one process-wide set of that state was a defect rather
     // than a simplification. Two views (two scene documents, or a viewport and the UI Editor preview) each
     // pass their own, and cannot then disturb each other.
-    bool RenderCanvas2D( UICanvasContext& ctx, entt::registry& reg, Graphic::Render2D::DrawList2D& dl,
-                         const Rect& viewportPx, const glm::mat4* worldViewProj = nullptr,
-                         const UIInput* input = nullptr, std::string* outClicked = nullptr,
-                         entt::entity* focused = nullptr, std::vector<std::string>* outMessages = nullptr );
+    NO_DISCARD Common::BoolResultStr
+               RenderCanvas2D( UICanvasContext& ctx, entt::registry& reg, entt::entity canvas,
+                               Graphic::Render2D::DrawList2D& dl, const Rect& viewportPx,
+                               const glm::mat4* worldViewProj = nullptr, const UIInput* input = nullptr,
+                               std::string* outClicked = nullptr, entt::entity* focused = nullptr,
+                               std::vector<std::string>* outMessages = nullptr );
 } // namespace Desert::UI

@@ -30,5 +30,10 @@ namespace Desert::Editor::Render
         // playheads — the UI Editor panel's preview deliberately does not, or a clip would advance twice a
         // frame.
         ::Desert::UI::UICanvasContext m_UICanvas;
+
+        // The last reason this pass had no canvas to draw, so the reason is logged when it CHANGES rather
+        // than once per frame. A scene with no UI at all is the common case; a refusal at frame rate would
+        // bury everything else in the log and get the whole message ignored.
+        std::string m_CanvasRefusal;
     };
 } // namespace Desert::Editor::Render

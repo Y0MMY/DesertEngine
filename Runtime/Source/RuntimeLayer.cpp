@@ -42,6 +42,7 @@
 #include <Engine/Graphic/Render2D/Render2D.hpp>
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 #include <Engine/Graphic/Materials/Properties/Texture2DProperty.hpp>
+#include <Engine/UI/UICanvasLayout.hpp>
 #include <Engine/UI/UICanvasRenderer2D.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Runtime/Services/Shader/ShaderService.hpp>
@@ -381,8 +382,29 @@ namespace Desert::Player
                 std::vector<std::string> uiMessages;
                 // The player has exactly one view, but its canvas state still belongs to that view rather
                 // than to the process — a scene change rebinds it, and nothing else can reach it.
-                UI::RenderCanvas2D( m_UICanvas, m_Scene->GetRegistry(), dl, UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr,
-                                    &input, &clicked, &m_FocusedUI, &uiMessages );
+                //
+                // WHICH CANVAS: the game has no selection and no document, so a level with one canvas has the
+                // only answer available and a level with two has none. Drawing "the first" was what shipped a
+                // level whose second canvas — its pause menu, its HUD, whichever entt ordered later — was
+                // never drawn and never mentioned. The refusal is logged when it CHANGES, not per frame.
+                const auto canvas = UI::SoleCanvas( m_Scene->GetRegistry() );
+                if ( !canvas )
+                {
+                    if ( m_CanvasRefusal != canvas.GetError() )
+                    {
+                        m_CanvasRefusal = canvas.GetError();
+                        LOG_WARN( "[Runtime] {}", m_CanvasRefusal );
+                    }
+                }
+                else
+                {
+                    m_CanvasRefusal.clear();
+                    if ( const auto drawn = UI::RenderCanvas2D(
+                              m_UICanvas, m_Scene->GetRegistry(), canvas.GetValue(), dl,
+                              UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, &input, &clicked, &m_FocusedUI, &uiMessages );
+                         !drawn )
+                        LOG_ERROR( "[Runtime] {}", drawn.GetError() );
+                }
                 // Queue them for gameplay: ScriptSystem drains this and calls OnUIMessage on every script.
                 for ( const std::string& msg : uiMessages )
                     UI::UIMessageQueue::Get().Push( msg );

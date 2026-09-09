@@ -1,6 +1,7 @@
 #include "EditorUIPass.hpp"
 
 #include <Engine/Graphic/Renderer.hpp>
+#include <Engine/UI/UICanvasLayout.hpp>
 #include <Engine/UI/UICanvasRenderer2D.hpp>
 #include <Engine/UI/UIDataStore.hpp>
 
@@ -75,13 +76,33 @@ namespace Desert::Editor::Render
             }
 
             std::vector<std::string> uiMessages;
+            // WHICH CANVAS: the viewport shows the level, and a level with one canvas has one answer. With
+            // several it has none — this pass has no selection and no document to derive one from — so it
+            // says so once instead of drawing whichever entt hands out first, which is what it did before.
             // m_UICanvas is this VIEW's canvas state — one per EditorUIPass, and the editor builds one pass
             // per open scene document, so two viewports no longer walk into each other's hover clocks, hot
             // element or screen stack.
-            UI::RenderCanvas2D( m_UICanvas, scene->GetRegistry(), m_Render2D.GetDrawList(),
-                                UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, feed ? &input : nullptr,
-                                feed ? &clicked : nullptr, feed ? &pv.Focused : nullptr,
-                                feed ? &uiMessages : nullptr );
+            const auto canvas = UI::SoleCanvas( scene->GetRegistry() );
+            if ( !canvas )
+            {
+                // Once per distinct reason, not once per frame: a scene with no canvas at all is the common
+                // case, and a refusal written at frame rate buries the log and gets the message ignored.
+                if ( m_CanvasRefusal != canvas.GetError() )
+                {
+                    m_CanvasRefusal = canvas.GetError();
+                    LOG_WARN( "[UI Preview] {}", m_CanvasRefusal );
+                }
+            }
+            else
+            {
+                m_CanvasRefusal.clear();
+                if ( const auto drawn = UI::RenderCanvas2D(
+                          m_UICanvas, scene->GetRegistry(), canvas.GetValue(), m_Render2D.GetDrawList(),
+                          UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, feed ? &input : nullptr, feed ? &clicked : nullptr,
+                          feed ? &pv.Focused : nullptr, feed ? &uiMessages : nullptr );
+                     !drawn )
+                    LOG_ERROR( "[UI Preview] {}", drawn.GetError() );
+            }
             m_Render2D.Flush();
 
             if ( auto* renderer = scene->GetSceneRenderer() )

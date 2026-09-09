@@ -77,6 +77,10 @@ namespace Desert::Player
         // old registry never answer for the new one.
         UI::UICanvasContext m_UICanvas;
 
+        // The last reason the frame had no canvas to draw, so it is logged when it CHANGES rather than every
+        // frame. A game with no UI at all is legitimate and must not be told about it sixty times a second.
+        std::string m_CanvasRefusal;
+
         Common::BoolResultStr InitPresent( const std::shared_ptr<Graphic::Framebuffer>& swapFb );
 
         // Scene::Resize destroys GPU resources — deferred to the top of OnUpdate (same rule as the
