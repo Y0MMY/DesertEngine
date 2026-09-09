@@ -82,6 +82,16 @@ namespace Desert::Runtime
         // material referencing it silently falls back to the standard one and the artist is told nothing.
         // It is registered and unusable, and it says so once, here, naming itself — the per-stage error
         // above names a file and a line, which is not the same as naming the shader a material asks for.
+        //
+        // "WILL NOT DRAW" IS A PROMISE, AND UNTIL Г21 THIS SERVICE WAS THE ONLY PLACE THAT MADE IT.
+        // GetByName() hands this object to anyone who asks, and what happened next was neither a skipped
+        // draw nor a refusal: the compute path read the empty stage list at [0] and the process died,
+        // and the graphics path bound VK_NULL_HANDLE at every submit entry. Three sites keep the promise
+        // now, and they are named here because a promise whose keeper is not written down is how this one
+        // went unkept for the life of the engine:
+        //   * ComputePipeline::Create              refuses to build, and its caller sees the reason;
+        //   * VulkanPipeline::Invalidate           refuses to build, leaving the handle null;
+        //   * VulkanRendererAPI::BindGraphicsPipeline  skips every draw through that null handle.
         if ( !shader->IsCompiled() )
             LOG_ERROR( "[ShaderService] '{}' registered but has no compiled stages — every material using "
                        "it will not draw until it compiles ({}).",

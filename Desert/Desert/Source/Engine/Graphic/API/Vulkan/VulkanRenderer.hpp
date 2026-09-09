@@ -6,6 +6,9 @@
 
 #include <vulkan/vulkan.h>
 
+#include <string>
+#include <unordered_set>
+
 namespace Desert::Graphic::API::Vulkan
 {
     class VulkanRendererAPI : public RendererAPI
@@ -82,8 +85,29 @@ namespace Desert::Graphic::API::Vulkan
         void ClearAttachments( const std::vector<VkClearValue>&    clearValues,
                                const std::shared_ptr<Framebuffer>& framebuffer );
 
+        /**
+         * Binds @p pipeline for graphics, or refuses by name and returns false.
+         *
+         * WHAT IT MAKES TRUE. ShaderService::Register keeps a shader that failed to compile under its
+         * NAME on purpose, and tells the artist "every material using it will not draw until it
+         * compiles". VulkanPipeline::Invalidate honours the first half — it refuses to build and leaves
+         * the handle null — but the second half was nobody's: all six submit paths below then called
+         * `vkCmdBindPipeline( ..., VK_NULL_HANDLE )`, which is a validation error and undefined
+         * behaviour on the draw that follows. "Will not draw" was a sentence the tree did not keep.
+         * This is the one gate every graphics bind in the engine goes through, so it is where the
+         * sentence becomes true.
+         *
+         * Latched by debug name because this is asked once per draw call: a broken shader would
+         * otherwise write the same line thousands of times a second and the log would stop being read.
+         */
+        NO_DISCARD bool BindGraphicsPipeline( const GraphicsPipeline* pipeline );
+
     private:
         VkCommandBuffer m_CurrentCommandBuffer = nullptr;
+
+        /// Debug names already reported by BindGraphicsPipeline. Written only from the render thread's
+        /// recording path, which is the only caller of every submit entry point above.
+        std::unordered_set<std::string> m_WarnedUnbuiltPipelines;
 
         /// Owned outright rather than reached through a global: there is one renderer API and the query
         /// pool's lifetime is exactly its lifetime. The profiling macros find it through the sink the

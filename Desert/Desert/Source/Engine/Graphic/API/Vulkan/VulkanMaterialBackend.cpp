@@ -26,8 +26,26 @@ namespace Desert::Graphic::API::Vulkan
         m_Layouts          = m_VulkanShader->GetAllDescriptorSetLayouts();
         m_ShaderGeneration = m_VulkanShader->GetReloadGeneration();
 
-        CreateDescriptorPool();
-        AllocateDescriptorSets();
+        // A SHADER WITH NO LAYOUTS HAS NOTHING TO ALLOCATE FOR, AND ASKING ANYWAY IS TWENTY VALIDATION
+        // ERRORS. That is what a shader whose first compile failed carries: no stages, so no reflection,
+        // so no set layouts — and the two calls below then made a pool with `maxSets = 0` and ten
+        // `vkAllocateDescriptorSets` with `descriptorSetCount = 0`, one per (frame x renderer slot).
+        // Measured on the live editor with one broken shader: 20 of the run's 24 validation errors came
+        // from here, drowning the two that said what had actually gone wrong. The backend stays valid and
+        // EMPTY — HasDescriptorSets() already answers false for it, which is the state every consumer
+        // reads as "nothing to bind". Same family as the crash Г21 is about: a container derived from a
+        // shader that carries nothing, used as though it did.
+        if ( m_Layouts.empty() )
+        {
+            LOG_ERROR( "[Material] shader '{}' publishes no descriptor set layouts (it has no compiled "
+                       "stages) — no descriptor pool is created and nothing binds through this material.",
+                       m_VulkanShader ? m_VulkanShader->GetName() : std::string( "<null>" ) );
+        }
+        else
+        {
+            CreateDescriptorPool();
+            AllocateDescriptorSets();
+        }
 
         // Create a dummy buffer to initialize unused bindings
         VmaAllocator allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
