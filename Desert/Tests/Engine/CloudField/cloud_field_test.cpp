@@ -2400,6 +2400,75 @@ TEST( CloudFieldErosion, TheEyeLooksThroughMoreCloudThanTheErosionVariesOver )
             "and the layer is a smooth lump field whatever the Detail sliders say";
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+// A GRAPH'S SLOT NUMBER — O1-H
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+TEST( CloudField, AGraphsSlotIsRoundedAndClampedIntoOneOfTheLayersFourVolumes )
+{
+    // THE ONE PIECE OF ARITHMETIC THE Cloud Noise Volume NODE ADDS, and it is here because
+    // Common/CloudMediumDefault.glslh is compiled as C++ by this suite's reference — the medium include
+    // is reached through Common/CloudField.glslh above, so its functions are ordinary functions here.
+    //
+    // ROUNDING AND NOT TRUNCATION IS THE WHOLE POINT. The Volume palette has one numeric pin type, so a
+    // slot an artist computed arrives as a float; a slot that travelled through Lerp (Float) arrives as
+    // 0.9999998, and truncated that is volume 0. The symptom would be "my second cloud type stopped
+    // eroding" with nothing in any log, in a graph that reads correctly on the canvas.
+    EXPECT_EQ( CloudNoiseSlotOf( 0.0f ), 0 );
+    EXPECT_EQ( CloudNoiseSlotOf( 1.0f ), 1 );
+    EXPECT_EQ( CloudNoiseSlotOf( 2.0f ), 2 );
+    EXPECT_EQ( CloudNoiseSlotOf( 3.0f ), 3 );
+
+    EXPECT_EQ( CloudNoiseSlotOf( 0.999999f ), 1 ) << "a slot carried through a Lerp landed one volume low";
+    EXPECT_EQ( CloudNoiseSlotOf( 2.000001f ), 2 );
+    EXPECT_EQ( CloudNoiseSlotOf( 1.5f ), 2 ) << "the halfway case rounds up, as floor(x + 0.5) does";
+
+    // CLAMPED ON BOTH SIDES, because the fetch is a four-way select whose `else` branch is volume 0: an
+    // index of 7 would read the FIRST volume and look exactly like a slot that was ignored.
+    EXPECT_EQ( CloudNoiseSlotOf( -1.0f ), 0 );
+    EXPECT_EQ( CloudNoiseSlotOf( 99.0f ), CLOUD_SPECIES_SLOTS - 1 );
+    EXPECT_EQ( CloudNoiseSlotOf( static_cast<float>( CLOUD_SPECIES_SLOTS ) ), CLOUD_SPECIES_SLOTS - 1 );
+}
+
+TEST( CloudField, TheShippedErosionAndAGraphReadTheVolumeAtTheSameCOORDINATE )
+{
+    // THE RELATION THE EXTRACTION EXISTS FOR. The Cloud Noise Volume node's unwired coordinate is
+    // CloudDefaultNoiseCoordinate, and the shipped density chain reads its own volume at the same call —
+    // one function, so "the same volume, eroded differently" starts from the same place the engine's own
+    // erosion starts from. Two copies of this arithmetic is what stood here before O1-H, and a drift
+    // between them would move an authored medium off the structure it was authored against with no
+    // symptom but a picture that is subtly wrong.
+    CloudFieldParams params{};
+    params.DetailTileKm = 0.75f;
+    params.WindOffsetKm = vec3( 3.0f, -1.0f, 7.0f );
+
+    const vec3 positionKm( 11.0f, 2.5f, -4.0f );
+    const vec3 coordinate = CloudDefaultNoiseCoordinate( params, positionKm );
+    const vec3 windPos    = CloudDefaultWindPositionKm( params, positionKm );
+
+    EXPECT_FLOAT_EQ( windPos.x, positionKm.x - params.WindOffsetKm.x );
+    EXPECT_FLOAT_EQ( windPos.y, positionKm.y - params.WindOffsetKm.y );
+    EXPECT_FLOAT_EQ( windPos.z, positionKm.z - params.WindOffsetKm.z );
+
+    EXPECT_FLOAT_EQ( coordinate.x, windPos.x * CLOUD_DETAIL_FREQ_X / params.DetailTileKm );
+    EXPECT_FLOAT_EQ( coordinate.y, windPos.y * CLOUD_DETAIL_FREQ_Y / params.DetailTileKm );
+    EXPECT_FLOAT_EQ( coordinate.z, windPos.z * CLOUD_DETAIL_FREQ_Z / params.DetailTileKm );
+
+    // ANISOTROPIC, AND THE ANISOTROPY IS THE POINT — a cube-sampled octave gives a torn cloud edge the
+    // proportions of gravel. Asserted as an ordering rather than as three constants, so retuning the
+    // triple is allowed and flattening it is not.
+    EXPECT_LT( CLOUD_DETAIL_FREQ_Y, CLOUD_DETAIL_FREQ_X );
+    EXPECT_GT( CLOUD_DETAIL_FREQ_Z, CLOUD_DETAIL_FREQ_X );
+
+    // A TILE OF ZERO IS A DIVISION BY ZERO, and the material's own slider can reach it. The floor is in
+    // the function rather than in each caller.
+    params.DetailTileKm    = 0.0f;
+    const vec3 clampedTile = CloudDefaultNoiseCoordinate( params, positionKm );
+    EXPECT_TRUE( std::isfinite( clampedTile.x ) && std::isfinite( clampedTile.y ) &&
+                 std::isfinite( clampedTile.z ) )
+         << "a Detail Tile Size of zero produced a non-finite noise coordinate";
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );

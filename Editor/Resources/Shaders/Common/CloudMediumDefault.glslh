@@ -21,6 +21,53 @@
 #define CLOUD_MEDIUM_DEFAULT_GLSLH
 
 
+// The sample position in the frame the WEATHER moves in — the layer's accumulated wind displacement
+// taken off the world position.
+//
+// A FUNCTION AND NOT TWO COPIES OF ONE SUBTRACTION. It stood written out in both places below, and the
+// pair is the shape this subsystem has already paid for once: a graph that wants structure to travel
+// with the weather and the shipped erosion that already does must be reading the SAME frame, or an
+// authored medium built on `WindPositionKm` drifts against the erosion it is modifying.
+vec3 CloudDefaultWindPositionKm( CloudFieldParams params, vec3 positionKm )
+{
+    return vec3( positionKm.x - params.WindOffsetKm.x, positionKm.y - params.WindOffsetKm.y,
+                 positionKm.z - params.WindOffsetKm.z );
+}
+
+// WHERE THE SHIPPED EROSION READS ITS VOLUME — the texture coordinate, in tiles, that the density chain
+// below hands CLOUD_SAMPLE_NOISE.
+//
+// It is a function because it is the graph's starting point and not only the chain's. "The same volume,
+// eroded differently" is the whole reason a medium can name a `.dcnv` at all, and the cheapest form of
+// "differently" is a different coordinate — so the Cloud Noise Volume node's unwired coordinate is this
+// expression, exactly as an unwired Volume Output pin is the shipped default. An artist reproducing it
+// by hand would need three frequency constants the palette does not expose and a reciprocal it has no
+// node for.
+//
+// ANISOTROPIC, and it was not. The erosion was the one octave here still sampled as a cube, which gives a
+// torn cloud edge the proportions of gravel; the graph has anisotropy on all three of its octaves. This
+// one takes the INVERTED triple — vertical period longer than horizontal — so the wisps it cuts are
+// taller than they are wide, which is what a shred of cloud being carried upward looks like.
+vec3 CloudDefaultNoiseCoordinate( CloudFieldParams params, vec3 positionKm )
+{
+    vec3  windPos = CloudDefaultWindPositionKm( params, positionKm );
+    float tile    = max( params.DetailTileKm, 1e-4f );
+    return vec3( windPos.x * CLOUD_DETAIL_FREQ_X / tile, windPos.y * CLOUD_DETAIL_FREQ_Y / tile,
+                 windPos.z * CLOUD_DETAIL_FREQ_Z / tile );
+}
+
+// A graph's slot number, made safe to hand CLOUD_SAMPLE_NOISE.
+//
+// THE PALETTE HAS ONE NUMERIC PIN TYPE AND IT IS float, so a slot an artist computed arrives as one —
+// and the fetch is a four-way select on an int. Rounding rather than truncating is what makes a value
+// carried through a `mix` land on the slot the author meant instead of the one below it; the clamp is
+// what stops a slot outside the layer's four from silently reading volume 0, which is the fetch's own
+// `else` branch and reads as "my second cloud type is not eroding".
+int CloudNoiseSlotOf( float slot )
+{
+    return int( clamp( floor( slot + 0.5f ), 0.0f, float( CLOUD_SPECIES_SLOTS - 1 ) ) );
+}
+
 // The up-rez: turn the low-frequency profile into something with a cloud's edge.
 //
 // The erosion is a REMAP, not a subtraction (deck p.120, `ValueErosion`). The difference shows at the
@@ -37,17 +84,7 @@ float CloudDefaultDensity( CloudFieldParams params, CloudFieldSample field, vec3
     if ( field.Profile <= 0.0f )
         return 0.0f;
 
-    vec3 windPos = vec3( positionKm.x - params.WindOffsetKm.x, positionKm.y - params.WindOffsetKm.y,
-                         positionKm.z - params.WindOffsetKm.z );
-
-    // ANISOTROPIC, and it was not. The erosion was the one octave here still sampled as a cube, which
-    // gives a torn cloud edge the proportions of gravel; the graph has anisotropy on all three of its
-    // octaves. This one takes the INVERTED triple — vertical period longer than horizontal — so the wisps
-    // it cuts are taller than they are wide, which is what a shred of cloud being carried upward looks
-    // like.
-    float tile      = max( params.DetailTileKm, 1e-4f );
-    vec3  detailPos = vec3( windPos.x * CLOUD_DETAIL_FREQ_X / tile, windPos.y * CLOUD_DETAIL_FREQ_Y / tile,
-                            windPos.z * CLOUD_DETAIL_FREQ_Z / tile );
+    vec3 detailPos = CloudDefaultNoiseCoordinate( params, positionKm );
 
     // THE VOLUME IS THE WINNING SPECIES', not the layer's. Until this argument existed there was one
     // `sampler3D` on the march and a Cirrus standing beside a Cumulus was cut from the cumulus' volume —
@@ -172,6 +209,21 @@ struct CloudGraphSample
     // the thing Epic calls ShadowSampleDistance: `mix( expensive, cheap, ShadowRay )` in the Density or
     // Extinction output buys back the ten-to-thirty samples a shadow quadrature spends per lit sample.
     float ShadowRay;
+
+    // WHICH OF THE LAYER'S FOUR `.dcnv` VOLUMES THE WINNING SPECIES' EDGE IS CUT FROM, 0..3.
+    //
+    // WITHOUT IT AN AUTHORED MEDIUM CANNOT SAY "THE SAME VOLUME, ERODED DIFFERENTLY". A graph that writes
+    // its own density could call CloudDefaultDensity and inherit the shipped erosion whole, or build a
+    // field out of nothing — but the whole population of sculpted noise volumes a project owns was
+    // unreachable from a canvas, because the one number that names them travelled only inside this file.
+    // Handed out here it goes into the Cloud Noise Volume node, which is the other half: a member with no
+    // node to consume it would be an integer an artist can wire nowhere, which is the dead knob the
+    // contract refuses in the same breath as a stub.
+    //
+    // float AND NOT int, because this palette has one numeric pin type and a second one would exist for
+    // this single value. CloudNoiseSlotOf above converts it back, rounding and clamping, so a slot that
+    // survived a Lerp still names the volume the author meant.
+    float NoiseSlot;
 };
 
 CloudGraphSample CloudGraphSampleAt( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )
@@ -179,11 +231,10 @@ CloudGraphSample CloudGraphSampleAt( CloudFieldParams params, CloudFieldSample f
     CloudGraphSample s;
     s.PositionKm = positionKm;
     // THE WIND-SHIFTED POSITION, which is the frame the modelling volume was BAKED in — the same
-    // subtraction the density chain above makes on its own way into the noise. A graph that wants
-    // structure to travel with the weather uses this one; a graph that wants it nailed to the world uses
-    // PositionKm.
-    s.WindPositionKm = vec3( positionKm.x - params.WindOffsetKm.x, positionKm.y - params.WindOffsetKm.y,
-                             positionKm.z - params.WindOffsetKm.z );
+    // subtraction the density chain above makes on its own way into the noise, and now literally the same
+    // function. A graph that wants structure to travel with the weather uses this one; a graph that wants
+    // it nailed to the world uses PositionKm.
+    s.WindPositionKm   = CloudDefaultWindPositionKm( params, positionKm );
     s.Profile          = field.Profile;
     s.DetailType       = field.DetailType;
     s.DetailFactor     = field.DetailFactor;
@@ -193,6 +244,9 @@ CloudGraphSample CloudGraphSampleAt( CloudFieldParams params, CloudFieldSample f
     // reachable at all: the caller's own params carry it, so a graph can tell a shadow quadrature from
     // the eye without any of the five entry points growing an argument.
     s.ShadowRay = params.ShadowRay;
+    // WIDENED, NOT CONVERTED FOR CONVENIENCE. The producer decided this index; nothing here may reinterpret
+    // it, so the only arithmetic is the widening that lets it travel on a Float pin.
+    s.NoiseSlot = float( field.NoiseSlot );
     return s;
 }
 

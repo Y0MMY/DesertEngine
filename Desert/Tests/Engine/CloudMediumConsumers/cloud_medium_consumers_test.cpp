@@ -190,6 +190,13 @@ TEST( CloudMediumConsumers, EveryMediumEntryPointIsDefinedOnceAndInTheSubstituta
          // with the node catalogue by hand.
          { "struct CloudGraphSample", kMediumDefaults },
          { "CloudGraphSample CloudGraphSampleAt(", kMediumDefaults },
+         // WHAT THE Cloud Noise Volume NODE COMPILES TO CALLS. Its unwired coordinate is the shipped
+         // erosion's own texture position and its wired slot goes through the conversion, so both have to
+         // live where an authored medium can still reach them — a copy of either in the substituted half
+         // is a graph that compiles until somebody authors one, and then does not.
+         { "vec3 CloudDefaultWindPositionKm(", kMediumDefaults },
+         { "vec3 CloudDefaultNoiseCoordinate(", kMediumDefaults },
+         { "int CloudNoiseSlotOf(", kMediumDefaults },
     };
 
     for ( const auto& [signature, home] : entryPoints )

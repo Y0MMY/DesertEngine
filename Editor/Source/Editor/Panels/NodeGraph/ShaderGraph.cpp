@@ -105,7 +105,32 @@ namespace Desert::Editor::ShaderGraph
                 // transmittance. APPENDED, because a saved .dgraph stores pins positionally. It is legal
                 // in the two outputs a shadow march actually calls and refused in the other three, where
                 // it could only ever be the constant zero; ShadowRayScopes() below is that register.
-                { "ShadowRay", ValueType::Float } },
+                { "ShadowRay", ValueType::Float },
+                // WHICH `.dcnv` THE WINNING SPECIES' EDGE IS CUT FROM. APPENDED for the same reason
+                // ShadowRay was. It is what makes the population of sculpted noise volumes a project owns
+                // reachable from a canvas at all, and it ships in the same change as the node that
+                // consumes it — on its own it would be an index an artist can wire nowhere.
+                { "NoiseSlot", ValueType::Float } },
+              false, false, false, VOLUME },
+            // THE LAYER'S OWN NOISE VOLUME, sampled where and at whichever slot the graph says.
+            //
+            // NOT THE MEDIUM TEXTURE NODE WITH A THIRD COORDINATE. That one samples an image the MATERIAL
+            // carries and pays a descriptor for in all four consumers; this one samples a `.dcnv` the SCENE
+            // has already bound for the species standing at this sample, so it costs no binding, no
+            // property and no runtime plumbing at all. Without it a graph writing its own density may
+            // inherit the shipped erosion whole or invent a field from nothing and nothing in between —
+            // and "the same volume, eroded differently" is exactly the in-between.
+            //
+            // BOTH INPUTS UNWIRED IS THE SHIPPED FETCH, the same convention an unwired Volume Output pin
+            // follows: the slot is the winner's own and the coordinate is the one the shipped chain reads
+            // at. Four Float outputs and no vec4 one, because this domain has no vec4 sink anywhere, so an
+            // RGBA pin here could be wired nowhere — the dead-knob refusal Vec3Param was introduced for.
+            { "CloudNoise", "Cloud Noise Volume", RGBA( 70, 110, 160, 255 ),
+              { { "Slot", ValueType::Float }, { "Coordinate", ValueType::Vec3 } },
+              { { "WispyCoarse", ValueType::Float },
+                { "WispyFine", ValueType::Float },
+                { "BillowyCoarse", ValueType::Float },
+                { "BillowyFine", ValueType::Float } },
               false, false, false, VOLUME },
             // The layer's own two lighting values, each legal ONLY in the output it belongs to — see the
             // reachability rule in the compiler. They exist so a graph can MODIFY what the layer decided
@@ -426,6 +451,18 @@ namespace Desert::Editor::ShaderGraph
                                     Lit( v[3] ) );
             }
 
+            /// Does the artist's canvas actually feed this input?
+            ///
+            /// Asked because for one node the FALLBACK is not a constant but a call, and the two have to
+            /// be told apart before either is written: the Cloud Noise Volume node's unwired slot is
+            /// `field.NoiseSlot`, an int straight off the producer, while a wired one is a float that has
+            /// to be rounded and clamped back into an index. Deriving that from the returned string would
+            /// be a comparison against text this function is free to change.
+            bool IsLinked( const Node& node, size_t inputIndex ) const
+            {
+                return linkIntoPin.count( node.Inputs[inputIndex].Id ) != 0;
+            }
+
             // Expression feeding @p inputPin of @p node, or the type's default when unlinked.
             std::string InputExpr( const Node& node, size_t inputIndex, const char* fallback )
             {
@@ -449,9 +486,10 @@ namespace Desert::Editor::ShaderGraph
                     return var + ".r";
 
                 // The Cloud Sample node hands out one struct member per output pin, and Split (Vector 3)
-                // one component per pin. Both are "one variable, several fields", so the pin's INDEX
-                // picks the suffix rather than the node emitting seven statements nobody reads.
-                if ( src->Kind == "CloudSample" || src->Kind == "SplitVec3" )
+                // and Cloud Noise Volume one component per pin. All three are "one variable, several
+                // fields", so the pin's INDEX picks the suffix rather than the node emitting seven
+                // statements nobody reads.
+                if ( src->Kind == "CloudSample" || src->Kind == "SplitVec3" || src->Kind == "CloudNoise" )
                 {
                     for ( size_t i = 0; i < src->Outputs.size(); ++i )
                     {
@@ -459,6 +497,14 @@ namespace Desert::Editor::ShaderGraph
                             continue;
                         if ( src->Kind == "SplitVec3" )
                             return var + "." + std::string( 1, "xyz"[i] );
+                        // THE PIN'S INDEX IS THE VOLUME'S CHANNEL INDEX, and the channels are what
+                        // Assets::CloudNoiseChannel says they are (the deck's own order, p.96): curly
+                        // alligator low and high, then alligator low and high. The pin NAMES carry that
+                        // meaning and a test in Desert/Tests/Editor/ShaderGraphCompiler reads them back
+                        // out of CloudNoiseVolume.cpp, so a renamed channel is red here rather than a
+                        // graph quietly reading the wrong frequency.
+                        if ( src->Kind == "CloudNoise" )
+                            return var + "." + std::string( 1, "xyzw"[i] );
 
                         // ONE PIN OF THIS NODE IS SCOPE-LIMITED, and by the same rule as Layer Albedo and
                         // Layer Occlusion above: it is emitted into five functions and it only MEANS
@@ -540,6 +586,26 @@ namespace Desert::Editor::ShaderGraph
                     decl = std::format( "CloudGraphSample {} = CloudGraphSampleAt( params, field, "
                                         "positionKm );",
                                         var );
+                else if ( node.Kind == "CloudNoise" )
+                {
+                    // THE SLOT IS AN int ON THE OTHER SIDE OF THE MACRO and a float on this one, because
+                    // the palette has a single numeric pin type and a second one would exist for this one
+                    // value. Unwired it is the producer's own index, passed straight through with no
+                    // arithmetic at all; wired it goes through CloudNoiseSlotOf, which rounds and clamps —
+                    // truncation would push a slot carried through a Lerp down to the volume below it, and
+                    // an out-of-range index would take the fetch's `else` branch and read as "my second
+                    // cloud type stopped eroding".
+                    const std::string slot =
+                         IsLinked( node, 0 ) ? std::format( "CloudNoiseSlotOf( {} )", InputExpr( node, 0, "0.0" ) )
+                                             : std::string( "field.NoiseSlot" );
+                    // The macro, not a sampler: Common/CloudField.glslh keeps every fetch behind one so
+                    // its maths can also be compiled as C++, and the medium is substituted INSIDE those
+                    // guards — so CLOUD_SAMPLE_NOISE is defined at this point in all four consumers and a
+                    // sampler named here would be a fifth declaration of volumes the scene already bound.
+                    decl =
+                         std::format( "vec4 {} = CLOUD_SAMPLE_NOISE( {}, {} );", var, slot,
+                                      InputExpr( node, 1, "CloudDefaultNoiseCoordinate( params, positionKm )" ) );
+                }
                 else if ( node.Kind == "DefaultDensity" )
                     decl = std::format( "float {} = CloudDefaultDensity( params, field, positionKm );", var );
                 else if ( node.Kind == "DefaultExtinctionFactor" )

@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -909,9 +910,15 @@ TEST( ShaderGraphVolumeDomain, EveryVolumeNodeHasACompilerRule )
 //
 // MEASURED WHEN THIS WAS WRITTEN, over the shipped tree: the medium-only material values are
 // DetailStrength and DetailTileKm, and both are readable; the medium-only producer outputs are
-// DensityScale, DetailFactor, DetailType, ExtinctionFactor and NoiseSlot, and four of the five are pins
-// of the Cloud Sample node. The fifth has a row below, because an exception with no reason is
-// unreadable in a month.
+// DensityScale, DetailFactor, DetailType, ExtinctionFactor and NoiseSlot, and four of the five were pins
+// of the Cloud Sample node. The fifth had the register's one row.
+//
+// THE REGISTER IS NOW EMPTY, AND IT EMPTIED THE ONLY WAY ITS OWN ROW ALLOWED. NoiseSlot's excuse was not
+// "this is fine" but "the member alone would be a pin wired nowhere — it is a node plus a member,
+// decided together". O1-H added the node (Cloud Noise Volume) and the member in one change, so the row
+// was DELETED rather than edited. What survives is the shape: the two directions below still demand that
+// every medium-only value be readable, and the third demands that a row still describe the tree — now
+// including the direction that catches an excuse outliving its gap.
 namespace
 {
     /// A value only the shipped medium reads that a graph CANNOT read back, and why that is where it
@@ -922,24 +929,12 @@ namespace
         const char* Reason;
     };
 
-    // A `std::array` AND NOT A C ARRAY, because this register is meant to reach zero rows: the day the
-    // palette gains a node that samples a volume by slot, the row below is deleted and nothing takes its
-    // place. A zero-length C array is a GNU extension clang accepts and MSVC refuses outright (C2466),
-    // and that exact shape reached `dev` twice in one day from two censuses whose goal was an empty
-    // register. A type has to be able to express its own structure's success.
-    // clang-format off
-    constexpr std::array<MediumOnlyNotReadable, 1> kMediumOnlyNotReadable = { {
-        { "NoiseSlot",
-          "the WINNING SPECIES' noise volume, as an index into the layer's four `.dcnv` slots. It is the "
-          "one thing a graph that writes its own density cannot get at: it may call CloudDefaultDensity "
-          "and inherit the authored erosion whole, or build a field from nothing, but it cannot say 'the "
-          "same volume, eroded differently'. Adding the member alone would NOT fix that and would break "
-          "§1.3 in the other direction — the palette has no node that samples a volume by slot, so the "
-          "pin would be an integer an artist can wire nowhere. It is a node in the catalogue plus this "
-          "member, decided together, and that is a task rather than a line. Recorded here so the gap is "
-          "a row somebody has to read instead of a silence." },
-    } };
-    // clang-format on
+    // A `std::array` AND NOT A C ARRAY, because this register was designed to reach zero rows and HAS.
+    // A zero-length C array is a GNU extension clang accepts and MSVC refuses outright (C2466), and that
+    // exact shape reached `dev` twice in one day from two censuses whose goal was an empty register — so
+    // the day the goal was met would have been the day the file stopped compiling on Windows. A type has
+    // to be able to express its own structure's success, and this is what that success looks like.
+    constexpr std::array<MediumOnlyNotReadable, 0> kMediumOnlyNotReadable = {};
 
     /// Every member access `receiver.<Ident>` in @p code, comments removed first — prose about a member
     /// is not a read of it, and this file's neighbours discuss these members at length.
@@ -1018,6 +1013,33 @@ namespace
         return std::any_of( std::begin( kMediumOnlyNotReadable ), std::end( kMediumOnlyNotReadable ),
                             [&member]( const MediumOnlyNotReadable& row ) { return member == row.Member; } );
     }
+
+    /// The body of `struct CloudGraphSample`, straight out of the header a graph is compiled against.
+    std::string CloudGraphSampleBody()
+    {
+        const std::string header =
+             ReadAll( RepoRoot() / "Editor/Resources/Shaders/Common/CloudMediumDefault.glslh" );
+        const std::size_t open = header.find( "struct CloudGraphSample" );
+        if ( open == std::string::npos )
+            return {};
+        const std::size_t begin = header.find( '{', open );
+        const std::size_t end   = header.find( '}', begin );
+        if ( begin == std::string::npos || end == std::string::npos )
+            return {};
+        return header.substr( begin, end - begin );
+    }
+
+    /// Can a graph read @p member back — as a pin of the Cloud Sample node, or as a row of the
+    /// material-parameter register? One function, because the register's rows and the two directions
+    /// below have to agree on what "readable" means or an excuse can outlive its gap by disagreeing.
+    bool IsReadableBack( const std::string& member )
+    {
+        if ( CloudGraphSampleBody().find( " " + member + ";" ) != std::string::npos )
+            return true;
+        return std::any_of( SG::VolumeParams().begin(), SG::VolumeParams().end(),
+                            [&member]( const SG::VolumeParam& row )
+                            { return std::string( row.Expression ) == "params." + member; } );
+    }
 } // namespace
 
 TEST( ShaderGraphVolumeDomain, EveryMaterialValueOnlyTheShippedMediumReadsCanBeReadBackByAGraph )
@@ -1050,13 +1072,8 @@ TEST( ShaderGraphVolumeDomain, EveryProducerOutputOnlyTheShippedMediumReadsIsAPi
     // The Cloud Sample node's pins ARE the members of CloudGraphSample, which is why the struct is read
     // out of the header rather than mirrored here: a pin renamed without renaming the member is a GLSL
     // error naming the member, and this assertion is its census.
-    const std::string header = ReadAll( RepoRoot() / "Editor/Resources/Shaders/Common/CloudMediumDefault.glslh" );
-    const std::size_t open   = header.find( "struct CloudGraphSample" );
-    ASSERT_NE( open, std::string::npos ) << "CloudGraphSample is gone, so a graph is handed nothing";
-    const std::size_t begin = header.find( '{', open );
-    const std::size_t end   = header.find( '}', begin );
-    ASSERT_NE( end, std::string::npos );
-    const std::string body = header.substr( begin, end - begin );
+    const std::string body = CloudGraphSampleBody();
+    ASSERT_FALSE( body.empty() ) << "CloudGraphSample is gone, so a graph is handed nothing";
 
     for ( const std::string& member : only )
     {
@@ -1086,7 +1103,316 @@ TEST( ShaderGraphVolumeDomain, EveryRowExcusingAnUnreadableValueStillDescribesTh
              << "' is excused as a value only the shipped medium reads, and something else in the shader "
                 "tree reads it too — or nothing does. Either way the row no longer describes this tree; "
                 "delete it.";
+
+        // THE DIRECTION THIS REGISTER DID NOT HAVE, and it is the one that fires on the day the gap is
+        // CLOSED. Until O1-H the two checks above passed happily over a row whose member had since become
+        // readable: the value was still medium-only, the reason was still non-empty, and nothing anywhere
+        // asked whether the excuse was still needed. An excuse that outlives its gap is worse than no
+        // register, because the next person reads it as a decision that was taken rather than as a line
+        // somebody forgot to delete.
+        EXPECT_FALSE( IsReadableBack( row.Member ) )
+             << "'" << row.Member
+             << "' is excused here as something a graph cannot read back, and a graph CAN read it back "
+                "now — it is a pin of the Cloud Sample node or a row of ShaderGraph::VolumeParams(). The "
+                "row is spent. DELETE it; do not edit its reason.";
     }
+
+    // Printed and never asserted: a register designed to reach zero is one whose SIZE is the finding, and
+    // a number asserted here is a number somebody adjusts instead of closing the gap it stands for.
+    std::printf( "[ShaderGraphVolumeDomain] %zu medium-only value(s) a graph still cannot read back\n",
+                 kMediumOnlyNotReadable.size() );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+// THE NOISE VOLUME, BY SLOT — what closed the register above
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// O1-H. `.dcnv` volumes are a whole population of authored content — the shipped Cirrus names one twice
+// as fine as the default — and until this node existed a graph could not touch one: the only number that
+// names them lived inside the shipped density chain, and replacing that chain threw the number away with
+// it. The node and the CloudGraphSample member ship together, because either alone is a §1.3 refusal in
+// one direction or the other: a member with no node is an index wired nowhere, a node with no member can
+// only ever be given a constant.
+namespace
+{
+    /// The four channel meanings, in channel order, READ OUT OF THE ENGINE'S OWN enum rather than typed
+    /// here. This suite does not link the engine (see its premake5.lua — the graph compiler and the
+    /// DShader parser are compiled straight in and nothing else), so the switch is read as text; the
+    /// point is the same either way, that a channel renamed at the source turns a pin name red here
+    /// instead of leaving a graph reading a frequency it did not ask for.
+    std::vector<std::string> NoiseChannelMeanings()
+    {
+        const std::string source =
+             ReadAll( RepoRoot() / "Desert/Desert/Source/Engine/Assets/CloudNoiseVolume.cpp" );
+        const std::size_t begin = source.find( "CloudNoiseChannelName(" );
+        if ( begin == std::string::npos )
+            return {};
+        const std::size_t end = source.find( "return \"unknown\"", begin );
+        if ( end == std::string::npos )
+            return {};
+
+        std::vector<std::string> meanings;
+        for ( std::size_t at = source.find( "return \"", begin ); at != std::string::npos && at < end;
+              at             = source.find( "return \"", at + 1 ) )
+        {
+            const std::size_t open  = at + 8;
+            const std::size_t close = source.find( '"', open );
+            if ( close == std::string::npos )
+                break;
+            std::string meaning = source.substr( open, close - open );
+            std::transform( meaning.begin(), meaning.end(), meaning.begin(),
+                            []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+            meanings.push_back( meaning );
+        }
+        return meanings;
+    }
+
+    /// "BillowyCoarse" -> { "billowy", "coarse" }.
+    std::vector<std::string> WordsOf( const std::string& camel )
+    {
+        std::vector<std::string> words;
+        for ( char c : camel )
+        {
+            if ( std::isupper( static_cast<unsigned char>( c ) ) != 0 || words.empty() )
+                words.emplace_back();
+            words.back() += static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
+        }
+        return words;
+    }
+
+    const SG::NodeSpec& SpecOf( const char* kind )
+    {
+        const SG::NodeSpec* spec = SG::FindSpec( kind );
+        EXPECT_NE( spec, nullptr ) << kind << " is not in the catalogue";
+        static SG::NodeSpec s_Empty{};
+        return spec ? *spec : s_Empty;
+    }
+
+    /// A Volume graph whose Density is the shipped density multiplied by one channel of a noise fetch.
+    /// @p slotSource picks where the slot comes from: nothing (the node's own default), the Cloud Sample
+    /// node's NoiseSlot pin, or a constant.
+    enum class SlotSource
+    {
+        Unwired,
+        FromSample,
+        Constant
+    };
+
+    SG::Document ErodedDifferentlyDoc( SlotSource slotSource, float constantSlot, const char* channel )
+    {
+        SG::Document doc = EmptyVolumeDoc();
+
+        const uint64_t densityPin = NodeOfKind( doc, "VolumeOutput" )
+                                         .Inputs[IndexOfInput( NodeOfKind( doc, "VolumeOutput" ), "Density" )]
+                                         .Id;
+
+        auto           shipped    = SG::MakeNode( doc, "DefaultDensity" );
+        const uint64_t shippedOut = shipped.Outputs[0].Id;
+        doc.Nodes.push_back( std::move( shipped ) );
+
+        auto     noise        = SG::MakeNode( doc, "CloudNoise" );
+        uint64_t noiseChannel = 0;
+        for ( const auto& pin : noise.Outputs )
+            if ( pin.Name == channel )
+                noiseChannel = pin.Id;
+        EXPECT_NE( noiseChannel, 0u ) << "the Cloud Noise Volume node has no '" << channel << "' output";
+        const uint64_t noiseSlotIn = noise.Inputs[0].Id;
+        doc.Nodes.push_back( std::move( noise ) );
+
+        if ( slotSource == SlotSource::FromSample )
+        {
+            SG::Node& sample  = NodeOfKind( doc, "CloudSample" );
+            uint64_t  slotOut = 0;
+            for ( const auto& pin : sample.Outputs )
+                if ( pin.Name == "NoiseSlot" )
+                    slotOut = pin.Id;
+            EXPECT_NE( slotOut, 0u ) << "the Cloud Sample node has no 'NoiseSlot' output";
+            doc.Links.push_back( { doc.NextId++, slotOut, noiseSlotIn } );
+        }
+        else if ( slotSource == SlotSource::Constant )
+        {
+            auto value         = SG::MakeNode( doc, "FloatConst" );
+            value.Value        = { constantSlot, 0.0f, 0.0f, 0.0f };
+            const uint64_t out = value.Outputs[0].Id;
+            doc.Nodes.push_back( std::move( value ) );
+            doc.Links.push_back( { doc.NextId++, out, noiseSlotIn } );
+        }
+
+        auto           mul  = SG::MakeNode( doc, "MultiplyFloat" );
+        const uint64_t mulA = mul.Inputs[0].Id;
+        const uint64_t mulB = mul.Inputs[1].Id;
+        const uint64_t mulO = mul.Outputs[0].Id;
+        doc.Nodes.push_back( std::move( mul ) );
+
+        doc.Links.push_back( { doc.NextId++, shippedOut, mulA } );
+        doc.Links.push_back( { doc.NextId++, noiseChannel, mulB } );
+        doc.Links.push_back( { doc.NextId++, mulO, densityPin } );
+        return doc;
+    }
+} // namespace
+
+TEST( ShaderGraphVolumeDomain, TheCloudNoiseNodesPinsAreTheVolumesOwnFourChannelsInOrder )
+{
+    // THE PIN INDEX IS THE COMPONENT INDEX — the emitter turns output i into `.xyzw[i]` and consults no
+    // table — so the pin NAMES are the only thing that tells an artist which frequency they are wiring.
+    // A name that disagrees with the volume is not a compile error anywhere: it is a graph that reads the
+    // billowy octave while the canvas says wispy, forever.
+    const std::vector<std::string> meanings = NoiseChannelMeanings();
+    ASSERT_EQ( meanings.size(), 4u )
+         << "Assets::CloudNoiseChannelName no longer names four channels, so this relation read nothing";
+
+    const SG::NodeSpec& spec = SpecOf( "CloudNoise" );
+    ASSERT_EQ( spec.Outputs.size(), meanings.size() )
+         << "the Cloud Noise Volume node offers " << spec.Outputs.size() << " channel(s) and a `.dcnv` has "
+         << meanings.size();
+
+    for ( std::size_t i = 0; i < meanings.size(); ++i )
+    {
+        EXPECT_EQ( spec.Outputs[i].Type, SG::ValueType::Float )
+             << spec.Outputs[i].Name
+             << ": a vec4 pin here could be wired nowhere — this domain has no vec4 sink at all.";
+        for ( const std::string& word : WordsOf( spec.Outputs[i].Name ) )
+            EXPECT_NE( meanings[i].find( word ), std::string::npos )
+                 << "pin " << i << " is called '" << spec.Outputs[i].Name << "', and channel " << i
+                 << " of a `.dcnv` is '" << meanings[i] << "'. The word '" << word
+                 << "' is not in it, so the canvas and the volume disagree "
+                    "about which frequency this pin carries.";
+    }
+
+    // AND THE PIN'S POSITION IS THE COMPONENT IT READS. The two halves of the naming only mean anything
+    // together: a correctly named pin list wired to the wrong component reads the billowy octave from a
+    // pin the canvas calls wispy, and nothing in GLSL or in the frame says so out loud.
+    for ( std::size_t i = 0; i < meanings.size(); ++i )
+    {
+        const auto compiled =
+             SG::CompileToDShader( ErodedDifferentlyDoc( SlotSource::Unwired, 0.0f, spec.Outputs[i].Name ) );
+        ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+
+        const std::string component = std::string( 1, "xyzw"[i] );
+        EXPECT_NE( compiled.GetValue().find( "* n2." + component + ";" ), std::string::npos )
+             << "pin " << i << " ('" << spec.Outputs[i].Name << "') does not read component ." << component
+             << " of the fetch:\n"
+             << compiled.GetValue();
+    }
+}
+
+TEST( ShaderGraphVolumeDomain, AnUnwiredCloudNoiseNodeIsExactlyTheShippedFetch )
+{
+    // THE SAME CONVENTION AN UNWIRED VOLUME OUTPUT PIN FOLLOWS, and it is what makes the node a starting
+    // point rather than a form to fill in: the slot is the winning species' own and the coordinate is the
+    // one the shipped erosion reads at. An artist reproducing that coordinate by hand would need three
+    // frequency constants the palette does not expose and a reciprocal it has no node for.
+    const auto compiled = SG::CompileToDShader( ErodedDifferentlyDoc( SlotSource::Unwired, 0.0f, "BillowyFine" ) );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    const std::string& text = compiled.GetValue();
+
+    EXPECT_NE( text.find( "CLOUD_SAMPLE_NOISE( field.NoiseSlot, "
+                          "CloudDefaultNoiseCoordinate( params, positionKm ) )" ),
+               std::string::npos )
+         << "an unwired Cloud Noise Volume node did not compile to the shipped fetch:\n"
+         << text;
+
+    // AND NO CONVERSION AT ALL ON THAT PATH. field.NoiseSlot is already the int the macro wants; putting
+    // it through the float pin type and back would be arithmetic on an index nobody asked for.
+    EXPECT_EQ( text.find( "CloudNoiseSlotOf" ), std::string::npos ) << text;
+}
+
+TEST( ShaderGraphVolumeDomain, AWiredSlotIsRoundedAndClampedBackIntoAnIndex )
+{
+    const auto compiled =
+         SG::CompileToDShader( ErodedDifferentlyDoc( SlotSource::FromSample, 0.0f, "BillowyCoarse" ) );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    const std::string& text = compiled.GetValue();
+
+    // THE PALETTE HAS ONE NUMERIC PIN TYPE. A slot that travelled through it is a float, and a float that
+    // travelled through a Lerp is 0.999998 — truncated that is volume 0, which reads as "my second cloud
+    // type stopped eroding" and has no other symptom. The conversion is one named function so the rule
+    // has one home.
+    const std::size_t at = text.find( "CLOUD_SAMPLE_NOISE( CloudNoiseSlotOf( " );
+    ASSERT_NE( at, std::string::npos ) << "a wired slot did not go through the conversion:\n" << text;
+    EXPECT_NE( text.find( ".NoiseSlot )", at ), std::string::npos )
+         << "the wired slot is not the Cloud Sample node's own:\n"
+         << text;
+}
+
+TEST( ShaderGraphVolumeDomain, TheCloudNoiseNodeIsLegalInEveryOutputOfTheContract )
+{
+    // A SCOPE CLAIM, AND SCOPE IS WHAT THIS DOMAIN HAS BEEN WRONG ABOUT TWICE (O1_DESIGN §12.3 against
+    // §13.1). Two Volume nodes are legal in exactly one output each because the value they name is an
+    // ARGUMENT of one medium function; this one names `params`, `field` and `positionKm`, which all five
+    // signatures carry, so it must be legal in all five — asserted rather than assumed, because the day
+    // that stops being true the failure is generated GLSL naming an undeclared variable.
+    for ( const auto& pin : SpecOf( "VolumeOutput" ).Inputs )
+    {
+        SG::Document doc = EmptyVolumeDoc();
+
+        auto           noise    = SG::MakeNode( doc, "CloudNoise" );
+        const uint64_t noiseOut = noise.Outputs[0].Id;
+        doc.Nodes.push_back( std::move( noise ) );
+
+        uint64_t source = noiseOut;
+        if ( pin.Type == SG::ValueType::Vec3 )
+        {
+            // The three-component outputs need a vec3, and the domain builds one by scaling a constant —
+            // there is no make-vec3 node and this is how a graph reaches an albedo from a float today.
+            auto           white  = SG::MakeNode( doc, "Vec3Const" );
+            const uint64_t whiteO = white.Outputs[0].Id;
+            doc.Nodes.push_back( std::move( white ) );
+
+            auto           scale  = SG::MakeNode( doc, "ScaleVec3" );
+            const uint64_t scaleA = scale.Inputs[0].Id;
+            const uint64_t scaleB = scale.Inputs[1].Id;
+            source                = scale.Outputs[0].Id;
+            doc.Nodes.push_back( std::move( scale ) );
+
+            doc.Links.push_back( { doc.NextId++, whiteO, scaleA } );
+            doc.Links.push_back( { doc.NextId++, noiseOut, scaleB } );
+        }
+
+        SG::Node& out = NodeOfKind( doc, "VolumeOutput" );
+        doc.Links.push_back( { doc.NextId++, source, out.Inputs[IndexOfInput( out, pin.Name )].Id } );
+
+        const auto compiled = SG::CompileToDShader( doc );
+        EXPECT_TRUE( compiled.IsSuccess() ) << "the Cloud Noise Volume node is refused in the '" << pin.Name
+                                            << "' output: " << compiled.GetError();
+    }
+}
+
+// The three media O1-H's acceptance is taken with, printed so the frames are shot against the EMITTER's
+// own output rather than a hand-written imitation of it. The first is the control that must not move the
+// frame at all; the other two differ ONLY in where the slot comes from, which is what makes the pair a
+// measurement of the slot rather than of the node.
+//   ./ShaderGraphCompiler --gtest_also_run_disabled_tests --gtest_filter=*DumpErodedDifferently*
+TEST( ShaderGraphVolumeDomain, DISABLED_DumpErodedDifferentlyFromTheWinnersSlot )
+{
+    SG::Document doc    = ErodedDifferentlyDoc( SlotSource::FromSample, 0.0f, "BillowyCoarse" );
+    doc.Name            = "O1H_SlotFromSample";
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    std::printf( "%s", compiled.GetValue().c_str() );
+}
+
+//   ./ShaderGraphCompiler --gtest_also_run_disabled_tests --gtest_filter=*DumpErodedDifferentlyFromSlotZero*
+TEST( ShaderGraphVolumeDomain, DISABLED_DumpErodedDifferentlyFromSlotZero )
+{
+    SG::Document doc    = ErodedDifferentlyDoc( SlotSource::Constant, 0.0f, "BillowyCoarse" );
+    doc.Name            = "O1H_SlotZero";
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    std::printf( "%s", compiled.GetValue().c_str() );
+}
+
+//   ./ShaderGraphCompiler --gtest_also_run_disabled_tests --gtest_filter=*DumpErodedDifferentlyFromSlotOne*
+TEST( ShaderGraphVolumeDomain, DISABLED_DumpErodedDifferentlyFromSlotOne )
+{
+    // THE PAIR THAT MEASURES THE SLOT AND NOTHING ELSE. This medium and the one above differ in exactly
+    // one literal, so a frame that moves between them moved because the fetch read a DIFFERENT `.dcnv` —
+    // which is the whole claim of this task and the one thing the node's existence alone cannot show.
+    SG::Document doc    = ErodedDifferentlyDoc( SlotSource::Constant, 1.0f, "BillowyCoarse" );
+    doc.Name            = "O1H_SlotOne";
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    std::printf( "%s", compiled.GetValue().c_str() );
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════

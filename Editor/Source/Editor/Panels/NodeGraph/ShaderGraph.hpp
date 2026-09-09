@@ -67,9 +67,10 @@ namespace Desert::Editor
             int         Type = 0; // ValueType (int for reflection-friendly serialization)
         };
 
-        // Node semantics are identified by Kind (see NodeSpecs in ShaderGraph.cpp):
-        //   SurfaceOutput | PostProcessOutput | SceneColor | TextureSample | ColorParam | FloatParam |
-        //   ColorConst | FloatConst | UV | TileUV | Multiply | Scale | Add | Lerp | OneMinus | MultiplyFloat
+        // Node semantics are identified by Kind. THE CATALOGUE IS Specs() IN ShaderGraph.cpp AND IS NOT
+        // REPEATED HERE: the list that stood in these lines named sixteen kinds while the table held
+        // thirty-seven, so anyone reading it learnt that the Volume domain did not exist. One list, in
+        // the file that also holds the pins and the domain mask.
         struct Node
         {
             uint64_t             Id = 0;
