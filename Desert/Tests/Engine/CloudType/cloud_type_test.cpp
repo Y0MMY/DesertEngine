@@ -21,6 +21,10 @@
 #include <Engine/Assets/CloudProceduralVolume.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 
+// The BAKE's half of the layer's shell, so that it and the packer's half can be asserted equal in one
+// place. They are two independent calls of CloudTypeSetEnvelopeKm and nothing but a test makes them agree.
+#include <Engine/Graphic/Clouds/CloudMaterialBake.hpp>
+
 #include <Engine/Assets/CloudNoiseVolume.hpp>
 #include <Engine/Assets/CloudTypeData.hpp>
 #include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
@@ -36,6 +40,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -1168,6 +1173,246 @@ TEST( CloudTypeLibrary, TheReBasedTypesKeepTheCutDepthTheirFilesWereAuthoredAt )
                 "above is the number that was actually changed, and it is a re-art-direction that needs its "
                 "own frames.";
     }
+}
+
+// ===================================================================================================
+// О11 — THE SCENE'S OWN LIFT OF ITS DECK
+//
+// A type's altitudes belong to the TYPE, so raising them raises that cloud in every scene that loads the
+// file. The owner asked for one scene's deck to sit higher, which is a thing this engine could not say at
+// all: the shell was the union of the types' bands and nothing else could reach it.
+//
+// What was added is a DISPLACEMENT, not a second altitude, and the difference is the whole of the design.
+// An absolute Layer Bottom on the component — which is what Unreal exposes, because Unreal's cloud types
+// carry no altitudes — would be a second author for a value the types already own, and the symptom of the
+// two disagreeing is not an error but a tower sliced off by a ceiling nobody remembers setting. A
+// displacement cannot disagree with an altitude: it is a different quantity, and the two compose.
+//
+// These tests assert the composition, and one of them asserts the NAIVE version is wrong, because that is
+// the trap the design exists to avoid and a comment saying so is not the code that says so.
+// ===================================================================================================
+
+namespace
+{
+    // The nine shipped files. Spelled out again here because this suite has never had one statement of
+    // the list — the same nine names are written out seven times above, which is a census that can drift
+    // from itself and is worth one task of its own. These tests use one list rather than adding an
+    // eighth spelling to the pile.
+    constexpr const char* kShippedLibrary[] = {
+         kCloudTypeStratus,          kCloudTypeCumulusHumilis, kCloudTypeCumulusMediocris,
+         kCloudTypeCumulusCongestus, kCloudTypeCumulonimbus,   kCloudTypeStratocumulus,
+         kCloudTypeAltocumulus,      kCloudTypeCirrus,         kCloudTypeLenticular,
+    };
+
+    /// A layer holding one shipped type, resolved exactly as the renderer's ResolveSpecies would leave it
+    /// before the lift is applied.
+    Desert::ECS::VolumetricCloudData LayerWithLift( float liftKm )
+    {
+        Desert::ECS::VolumetricCloudData data;
+        data.LayerAltitudeOffset = liftKm;
+        return data;
+    }
+
+    /// The bake's own shell and bodies for a set of shapes, through the function the renderer calls.
+    Desert::Assets::CloudProceduralFieldParams BakeParamsFor( const CloudTypeShape* shapes, uint32_t count )
+    {
+        Desert::Assets::CloudProceduralFieldParams params;
+        Desert::Graphic::ApplyCloudMaterialToBakeParams( Desert::Graphic::CloudMaterialValues{},
+                                                         Desert::Graphic::CloudBakeLayerInputs{}, shapes, count,
+                                                         params );
+        return params;
+    }
+
+    /// The march's shell for the same set, through the packer.
+    glm::vec4 MarchLayerFor( const Desert::ECS::VolumetricCloudData& data, const CloudTypeShape* shapes,
+                             uint32_t count )
+    {
+        return Desert::Graphic::PackCloudParams( data, Desert::Graphic::CloudMaterialValues{}, shapes, count,
+                                                 Desert::Graphic::AtmosphereEnv{}, glm::vec3( 0.0f ) )
+             .Layer;
+    }
+} // namespace
+
+// The default is the old behaviour to the BIT, which is the negative control the eighty-four scenes in
+// this repository stand on: not one of them states this field, a missing key leaves it at its default,
+// and the default has to be the number that changes nothing.
+TEST( CloudLayerLift, DefaultIsZeroAndLeavesEverySetByteIdentical )
+{
+    EXPECT_FLOAT_EQ( Desert::ECS::VolumetricCloudData{}.LayerAltitudeOffset, 0.0f );
+
+    for ( const char* name : kShippedLibrary )
+    {
+        const CloudTypeShape authored = LoadShipped( name ).Shape;
+
+        CloudTypeShape lifted = authored;
+        EXPECT_FLOAT_EQ( Desert::Graphic::CloudLiftSpeciesSet( LayerWithLift( 0.0f ), &lifted, 1u ), 0.0f );
+
+        EXPECT_EQ( std::memcmp( &lifted, &authored, sizeof( CloudTypeShape ) ), 0 )
+             << name << " moved at a lift of zero — every scene in the repository would have shifted.";
+    }
+}
+
+// Every altitude in the shape moves by the same amount, so the lift is a TRANSLATION and not a shape
+// edit. The thickness is the assertion that matters: a lift that moved the base without the top would
+// stretch the band, the fixed voxel rows of the modelling volume would be spread over more kilometres,
+// and a stratus deck would stop being expressible by the trilinear fetch — the exact cost the anvil
+// predicate's comment measures for a shell that is not the shell the bake fills.
+TEST( CloudLayerLift, MovesTheWholeBandAndChangesNoThickness )
+{
+    for ( const char* name : kShippedLibrary )
+    {
+        const CloudTypeShape authored = LoadShipped( name ).Shape;
+
+        for ( const float liftKm : { 0.4f, 3.0f, 12.0f } )
+        {
+            CloudTypeShape lifted = authored;
+            EXPECT_FLOAT_EQ( Desert::Graphic::CloudLiftSpeciesSet( LayerWithLift( liftKm ), &lifted, 1u ),
+                             liftKm );
+
+            EXPECT_FLOAT_EQ( lifted.BaseAltitudeKm, authored.BaseAltitudeKm + liftKm ) << name;
+            EXPECT_FLOAT_EQ( lifted.TopAltitudeKm, authored.TopAltitudeKm + liftKm ) << name;
+            EXPECT_FLOAT_EQ( lifted.AnvilAltitudeKm, authored.AnvilAltitudeKm + liftKm ) << name;
+
+            // The band, the canopy's own slab and the anvil predicate all survive the move unchanged.
+            //
+            // NEAR AND NOT EQUAL, with the tolerance measured rather than guessed. A translation in
+            // float is not exact: at the ceiling lift the lenticular's 0.800000 km band comes back as
+            // 0.799999, because 2.6 + 12 and 3.4 + 12 round to neighbouring representables. 2e-5 km is
+            // two centimetres against a band of eight hundred metres, and the modelling volume's own
+            // vertical voxel at that band is 6.25 m — three hundred times coarser than the error.
+            EXPECT_NEAR( lifted.TopAltitudeKm - lifted.BaseAltitudeKm,
+                         authored.TopAltitudeKm - authored.BaseAltitudeKm, 2e-5f )
+                 << name;
+            EXPECT_FLOAT_EQ( lifted.AnvilThicknessKm, authored.AnvilThicknessKm ) << name;
+            EXPECT_EQ( Desert::Graphic::CloudTypeHasAnvil( lifted ),
+                       Desert::Graphic::CloudTypeHasAnvil( authored ) )
+                 << name << " gained or lost its anvil by being moved, which is a shape edit and not a lift.";
+
+            EXPECT_NEAR( Desert::Graphic::CloudTypeTopKm( lifted ),
+                         Desert::Graphic::CloudTypeTopKm( authored ) + liftKm, 2e-5f )
+                 << name;
+        }
+    }
+}
+
+// A `.desce` is a text file and an out-of-range number in one must produce a sky rather than a refusal —
+// the same argument the four placement numbers make in ApplyCloudMaterialToBakeParams. The clamp is the
+// component's own Range, read from the same constant the PROPERTY reads, so the two cannot part.
+TEST( CloudLayerLift, OutOfRangeIsClampedToTheSliderRatherThanRefused )
+{
+    CloudTypeShape shape = LoadShipped( kCloudTypeLenticular ).Shape;
+
+    CloudTypeShape tooHigh = shape;
+    EXPECT_FLOAT_EQ( Desert::Graphic::CloudLiftSpeciesSet( LayerWithLift( 900.0f ), &tooHigh, 1u ),
+                     Desert::ECS::kCloudLayerAltitudeOffsetMaxKm );
+
+    // Below the slider's floor is not a lowering, because the shell is floored at sea level in both the
+    // packer and the bake while the bodies are not — a deck asked to sink would be sliced rather than
+    // moved. The knob is one-directional and says so by refusing to go negative.
+    CloudTypeShape belowFloor = shape;
+    EXPECT_FLOAT_EQ( Desert::Graphic::CloudLiftSpeciesSet( LayerWithLift( -5.0f ), &belowFloor, 1u ), 0.0f );
+    EXPECT_EQ( std::memcmp( &belowFloor, &shape, sizeof( CloudTypeShape ) ), 0 );
+
+    // NaN is a legal float in a text file and an illegal altitude. std::clamp on a NaN returns the low
+    // bound here, which is the one answer that cannot put a cloud anywhere unexpected.
+    CloudTypeShape notANumber = shape;
+    EXPECT_FLOAT_EQ( Desert::Graphic::CloudLiftSpeciesSet(
+                          LayerWithLift( std::numeric_limits<float>::quiet_NaN() ), &notANumber, 1u ),
+                     0.0f );
+    EXPECT_EQ( std::memcmp( &notANumber, &shape, sizeof( CloudTypeShape ) ), 0 );
+}
+
+// THE RELATION, which is what this suite is for. The march's shell and the bake's shell are two
+// independent computations of one quantity — CloudPayload.hpp and CloudMaterialBake.hpp each call
+// CloudTypeSetEnvelopeKm for themselves — and a lift that reached one but not the other would put the
+// volume on a different shell than the ray intersects. That is the "sky was a ceiling" defect, and the
+// only reason it cannot happen here is that BOTH read the same lifted array.
+TEST( CloudLayerLift, TheMarchsShellAndTheBakesShellRiseTogetherByExactlyTheLift )
+{
+    // Two species, deliberately: the envelope is a UNION, and a union of two bands that both moved has to
+    // move without widening. One type would pass while a lift that scaled instead of translated was live.
+    const CloudTypeShape pair[2] = { LoadShipped( kCloudTypeStratocumulus ).Shape,
+                                     LoadShipped( kCloudTypeCumulusCongestus ).Shape };
+
+    CloudTypeShape rest[2] = { pair[0], pair[1] };
+    Desert::Graphic::CloudLiftSpeciesSet( LayerWithLift( 0.0f ), rest, 2u );
+
+    const glm::vec4                                  restMarch = MarchLayerFor( LayerWithLift( 0.0f ), rest, 2u );
+    const Desert::Assets::CloudProceduralFieldParams restBake  = BakeParamsFor( rest, 2u );
+
+    // The shipped pair's envelope, quoted so a change to either file is visible here as a number.
+    EXPECT_FLOAT_EQ( restMarch.y, 0.60f );
+    EXPECT_FLOAT_EQ( restMarch.z, 5.20f ); // 5.80 - 0.60
+
+    for ( const float liftKm : { 1.0f, 3.4f, 12.0f } )
+    {
+        CloudTypeShape lifted[2] = { pair[0], pair[1] };
+        Desert::Graphic::CloudLiftSpeciesSet( LayerWithLift( liftKm ), lifted, 2u );
+
+        const glm::vec4 march = MarchLayerFor( LayerWithLift( liftKm ), lifted, 2u );
+        const Desert::Assets::CloudProceduralFieldParams bake = BakeParamsFor( lifted, 2u );
+
+        EXPECT_FLOAT_EQ( march.y, restMarch.y + liftKm );
+        EXPECT_NEAR( march.z, restMarch.z, 2e-5f ) << "the shell grew instead of rising";
+
+        EXPECT_FLOAT_EQ( bake.LayerBottomKm, restBake.LayerBottomKm + liftKm );
+        EXPECT_NEAR( bake.LayerThicknessKm, restBake.LayerThicknessKm, 2e-5f );
+
+        // The two of them, against each other. This is the assertion a future lift applied in one file
+        // and not the other would fail, and it is why the lift is applied upstream of both.
+        EXPECT_FLOAT_EQ( march.y, bake.LayerBottomKm );
+        EXPECT_FLOAT_EQ( march.z, bake.LayerThicknessKm );
+
+        // AND THE BODIES WITH THEM. The bake places each lump at its species' own absolute altitude and
+        // discards anything outside the shell, so "the shell rose" is only half the claim.
+        ASSERT_EQ( bake.Species.size(), 2u );
+        for ( const Desert::Assets::CloudProceduralSpecies& species : bake.Species )
+        {
+            EXPECT_GE( Desert::Graphic::CloudTypeBaseKm( species.Shape ), bake.LayerBottomKm );
+            EXPECT_LE( Desert::Graphic::CloudTypeTopKm( species.Shape ),
+                       bake.LayerBottomKm + bake.LayerThicknessKm );
+        }
+    }
+}
+
+// WHY THE SHAPES AND NOT THE SHELL, asserted rather than argued. Lifting `LayerBottomKm` alone is the
+// obvious implementation and it empties the sky: the generator rejects every blob whose extent falls
+// outside the shell, and after a shell-only lift EVERY body is below it. Written as a test because the
+// next person to touch this will have the same obvious idea.
+TEST( CloudLayerLift, LiftingTheShellAloneWouldPutEveryBodyOutsideIt )
+{
+    const CloudTypeShape shape = LoadShipped( kCloudTypeLenticular ).Shape;
+
+    Desert::Assets::CloudProceduralFieldParams shellOnly = BakeParamsFor( &shape, 1u );
+    const float                                topKm     = shellOnly.LayerBottomKm + shellOnly.LayerThicknessKm;
+
+    constexpr float kLiftKm = 3.4f; // more than the lenticular's own 0.8 km band, so the miss is total
+    shellOnly.LayerBottomKm += kLiftKm;
+
+    // The species inside the params is the UNLIFTED one, which is exactly what a shell-only lift leaves.
+    ASSERT_EQ( shellOnly.Species.size(), 1u );
+    EXPECT_LE( Desert::Graphic::CloudTypeTopKm( shellOnly.Species[0].Shape ), shellOnly.LayerBottomKm )
+         << "a shell-only lift no longer misses the bodies — if the generator's rejection rule changed, "
+            "this design's reason changed with it.";
+
+    EXPECT_LT( topKm, shellOnly.LayerBottomKm );
+}
+
+// A knob that reaches the parameters and not the CACHE is a knob that does nothing until something else
+// happens to invalidate it, which is the least diagnosable kind of dead. The renderer's own rebake
+// decision is asked here, unchanged.
+TEST( CloudLayerLift, MovingTheKnobIsAReasonToRebake )
+{
+    const CloudTypeShape shape = LoadShipped( kCloudTypeLenticular ).Shape;
+
+    CloudTypeShape rest = shape;
+    Desert::Graphic::CloudLiftSpeciesSet( LayerWithLift( 0.0f ), &rest, 1u );
+
+    CloudTypeShape lifted = shape;
+    Desert::Graphic::CloudLiftSpeciesSet( LayerWithLift( 2.0f ), &lifted, 1u );
+
+    EXPECT_FALSE(
+         Desert::Assets::CloudProceduralParamsEqual( BakeParamsFor( &rest, 1u ), BakeParamsFor( &lifted, 1u ) ) );
 }
 
 int main( int argc, char** argv )

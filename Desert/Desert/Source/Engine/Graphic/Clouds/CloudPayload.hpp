@@ -708,6 +708,75 @@ namespace Desert::Graphic
                atmosphere.TransmittanceLut != nullptr && atmosphere.DistantSkyLight != nullptr;
     }
 
+    /**
+     * @brief HOW HIGH THIS SCENE HANGS ITS DECK — applied to the TYPES, before anything derives anything.
+     *
+     * A cloud type states the altitudes of its own band, and it states them for every scene that loads
+     * the file. A scene that wants its deck higher therefore cannot say so by editing the type, and until
+     * this function existed it could not say so at all: the shell was the union of the types' bands and
+     * nothing else could reach it.
+     *
+     * WHY THE SHAPES AND NOT THE SHELL, which is the whole of the decision. Lifting only
+     * `CloudProceduralFieldParams::LayerBottomKm` would move the shell and leave the bodies behind: the
+     * generator places each lump at `shape.BaseAltitudeKm + ...` in absolute kilometres and DISCARDS any
+     * whose extent falls outside `[LayerBottomKm, LayerBottomKm + LayerThicknessKm]`
+     * (Engine/Assets/CloudProceduralVolume.cpp, the per-blob rejection). The shell would rise and the sky
+     * would empty. Lifting the SHAPE instead moves the band, the envelope computed from it, the packed
+     * `CloudGpuPayload::Layer`, the baked bodies and the rebake key together — because every one of them
+     * is downstream of this array. There is no second number to keep in agreement, which is the only kind
+     * of agreement this subsystem has managed to keep.
+     *
+     * ONE-DIRECTIONAL, and clamped rather than refused. A `.desce` is a text file: an out-of-range number
+     * in one must produce a sky rather than a refusal, exactly as the four placement numbers in
+     * ApplyCloudMaterialToBakeParams argue. The clamp is the component's own Range and not a second
+     * opinion about it.
+     *
+     * @param shapes  lifted in place; @p count of them, clamped to kCloudSpeciesSlots
+     * @return the lift actually applied, in kilometres — what the caller may log and a test may assert
+     */
+
+    /// WHAT THE FILE ASKED FOR, MADE LEGAL, IN ONE PLACE. Two readers need this number and only one of
+    /// them lifts anything: the renderer also prints it beside the baked envelope, because an envelope
+    /// that moved says nothing about WHICH of its two causes moved it. Two copies of the clamp would be
+    /// the §2.3.1 pair — individually correct, and silently disagreeing the day the Range changes.
+    inline float CloudLayerLiftKm( const ECS::VolumetricCloudData& data )
+    {
+        // A CLAMP IS NOT ENOUGH, AND THE TEST FOUND IT. `std::clamp(NaN, lo, hi)` returns the NaN — it is
+        // `v < lo ? lo : hi < v ? hi : v` and every comparison against a NaN is false — so a `.desce`
+        // carrying `nan` would have moved every band to NaN, and a NaN band is a shell the validator
+        // refuses: the whole layer would stop baking, with the error naming LayerBottomKm rather than the
+        // knob that produced it. An unreadable offset means NO offset, which is the same answer a missing
+        // key gives and the only one that still draws the sky the scene was authored with.
+        if ( !std::isfinite( data.LayerAltitudeOffset ) )
+            return 0.0f;
+
+        return std::clamp( data.LayerAltitudeOffset, 0.0f, ECS::kCloudLayerAltitudeOffsetMaxKm );
+    }
+
+    inline float CloudLiftSpeciesSet( const ECS::VolumetricCloudData& data, CloudTypeShape* shapes,
+                                      uint32_t count )
+    {
+        const float liftKm = CloudLayerLiftKm( data );
+        if ( liftKm == 0.0f )
+            return 0.0f;
+
+        const uint32_t used = std::min( count, kCloudSpeciesSlots );
+        for ( uint32_t i = 0; i < used; ++i )
+        {
+            // EVERY ALTITUDE IN THE SHAPE MOVES, the anvil's included. Moving the tower without the
+            // canopy would make the lift a shape edit rather than a translation, and CloudTypeTopKm reads
+            // the canopy's ceiling — the shell would then grow by the lift instead of rising by it. The
+            // anvil of a type that has none is inert either way: Graphic::CloudTypeHasAnvil is the single
+            // predicate that decides whether it is drawn or measured at all, and it reads the strength
+            // and the thickness, neither of which is touched here.
+            shapes[i].BaseAltitudeKm += liftKm;
+            shapes[i].TopAltitudeKm += liftKm;
+            shapes[i].AnvilAltitudeKm += liftKm;
+        }
+
+        return liftKm;
+    }
+
     inline CloudGpuPayload PackCloudParams( const ECS::VolumetricCloudData& data,
                                             const CloudMaterialValues& material, const CloudTypeShape* shapes,
                                             uint32_t speciesCount, const AtmosphereEnv& atmosphere,

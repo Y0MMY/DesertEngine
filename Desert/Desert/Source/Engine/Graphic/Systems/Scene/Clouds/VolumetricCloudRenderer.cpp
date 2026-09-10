@@ -198,23 +198,37 @@ namespace Desert::Graphic::System
 
         const ECS::CloudSpeciesResolution resolved = ECS::ResolveCloudSpecies( authored );
 
+        uint32_t speciesCount = resolved.Count;
+
         if ( resolved.BuiltInDefault )
         {
             // ALL FOUR EMPTY IS A DOCUMENTED ANSWER, and it is the SAME answer an empty single slot gave
             // before there were four: one built-in cumulus congestus. A scene nobody has authored a type
             // for still has to have a sky.
-            handles[0] = Assets::AssetHandle::Null();
-            shapes[0]  = Assets::CloudTypeDefaultShape();
-            return 1;
+            handles[0]   = Assets::AssetHandle::Null();
+            shapes[0]    = Assets::CloudTypeDefaultShape();
+            speciesCount = 1;
         }
-
-        for ( uint32_t species = 0; species < resolved.Count; ++species )
+        else
         {
-            handles[species] = authored[resolved.AuthoredSlot[species]];
-            shapes[species]  = types->GetShape( handles[species] );
+            for ( uint32_t species = 0; species < speciesCount; ++species )
+            {
+                handles[species] = authored[resolved.AuthoredSlot[species]];
+                shapes[species]  = types->GetShape( handles[species] );
+            }
         }
 
-        return resolved.Count;
+        // THE SCENE'S OWN LIFT, APPLIED HERE AND NOWHERE ELSE — which is the only reason it needs no
+        // second number kept in agreement with anything. Both readers of this array reach it through this
+        // one function: BuildProceduralParams builds the bake's shell and its bodies from it, and
+        // BuildPayload packs the march's shell from it. Lifting the SHAPES rather than either shell is
+        // what makes the two move together by construction; see Graphic::CloudLiftSpeciesSet for what
+        // lifting only the shell would empty. The built-in default is lifted too: a scene with no type in
+        // its slots is still a scene, and a knob that worked only once a type had been dropped in would
+        // be the worst kind of dead — dead in exactly the state a new user is in.
+        CloudLiftSpeciesSet( m_Data, shapes, speciesCount );
+
+        return speciesCount;
     }
 
     Assets::CloudProceduralFieldParams
@@ -545,13 +559,17 @@ namespace Desert::Graphic::System
                                                                              m_ModellingBakeStarted )
                                        .count();
 
+            // THE LIFT IS NAMED BESIDE THE ENVELOPE rather than left to be inferred from it. The envelope
+            // moves for two unrelated reasons — a different set of types, or this scene's own offset —
+            // and a reader who cannot tell them apart is one edit away from blaming the wrong one.
             LOG_INFO( "[Clouds] Modelling volume baked for {} cloud type(s) in {:.0f} ms — region {:.0f} km "
-                      "at ({:.1f}, {:.1f}), envelope {:.2f} to {:.2f} km, {}x{}x{} RGBA8 ({:.2f} MiB), "
+                      "at ({:.1f}, {:.1f}), envelope {:.2f} to {:.2f} km (scene lift {:.2f} km), "
+                      "{}x{}x{} RGBA8 ({:.2f} MiB), "
                       "{} lumps, {:.0f} m per voxel, {} stale bake(s) cancelled.",
                       m_ProfileSpeciesCount, bakeMs, m_ModellingParams.RegionSizeKm, m_ModellingOriginKm.x,
                       m_ModellingOriginKm.y, m_ModellingParams.LayerBottomKm,
-                      m_ModellingParams.LayerBottomKm + m_ModellingParams.LayerThicknessKm, bakedSide,
-                      Assets::kCloudProceduralVolumeHeight, bakedSide,
+                      m_ModellingParams.LayerBottomKm + m_ModellingParams.LayerThicknessKm,
+                      CloudLayerLiftKm( m_Data ), bakedSide, Assets::kCloudProceduralVolumeHeight, bakedSide,
                       BytesToMiB( static_cast<size_t>( Assets::CloudProceduralVoxelBytes( bakedSide ) ) ),
                       Assets::CountCloudProceduralBlobs( m_ModellingParams, m_ModellingOriginKm ),
                       m_ModellingParams.RegionSizeKm / static_cast<float>( bakedSide ) * 1000.0f,
