@@ -90,6 +90,13 @@ namespace
     constexpr const char* kO1D = "O1-D 2026-09-09, dev@2b504842, Clouds_Protocol 715x784, floor 0 bytes";
     constexpr const char* kP11 = "Р11 2026-08-31, dev@a2631ce0, Clouds_Protocol 1280x766, floor 0 bytes";
 
+    // О11 measured on SIL_Lenticular rather than Clouds_Protocol, and the departure is the point: the
+    // control is about ONE species' band against the cell it is placed on, and the protocol scene's
+    // congestus already stands at 2.20 km with a 3.0 km cell. The floor is three repeats of the same
+    // command in the same tree, and the first render of the worktree was discarded.
+    constexpr const char* kO11 =
+         "О11 2026-09-10, dev@7e46bda9, SIL_Lenticular 715x784, floor 0 bytes of 560 560 over 3 runs";
+
     // ── THE COMPONENT: what a cloud LAYER is in the world ────────────────────────────────────────────
     //
     // Tracing budgets, pass routing and world integration. Everything about how the clouds LOOK left for
@@ -103,6 +110,14 @@ namespace
          { "Material", "max 149/255 over 47.8% at AZ270 EL85 (authored <-> empty)", "", kO1D },
 
          { "PlanetRadius", "max 122/255 over 83.3% at AZ000 EL25", "", kP11 },
+
+         // О11's one addition, and it is the first control in this table whose subject is WHERE the deck
+         // is rather than how it is traced or how it looks. Measured on the scene it was asked for —
+         // SIL_Lenticular, a single-species sky whose 2.4 km cells sit at a 2.60 km base and therefore
+         // subtend 49.6 degrees inside a 45-degree frame, which is the owner's "I am inside a mountain"
+         // reported on 2026-09-10. At the far end of the range the same cells sit at 14.60 km and subtend
+         // 9.4 degrees.
+         { "LayerAltitudeOffset", "max 141/255 over 99.9% at AZ135 EL45 (0 -> 12 km)", "", kO11 },
          { "MaxViewDistance", "max 146/255 over 46.2% at AZ270 EL85", "", kP11 },
          { "TracingStartMaxDistance", "max 89/255 over 14.5% at AZ000 EL25",
            "grazing rays: flat from EL 0.5 to EL 25 and gone above it, which is what a guard on ray ENTRY "

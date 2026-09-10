@@ -253,6 +253,14 @@ namespace
          // that build the shell are MATERIAL parameters now (CloudType1..4 of the CloudRaymarch schema);
          // the component keeps the planet and the ray budgets, name for name UE's.
          { "PlanetRadius", kCloudPayload },
+
+         // The SCENE's own lift of the deck, and the one row here whose consumer is not a packer at all.
+         // Graphic::CloudLiftSpeciesSet reads it and moves the resolved CLOUD TYPE SHAPES by it, which is
+         // upstream of every shell in the subsystem — the packed CloudGpuPayload::Layer, the bake's
+         // LayerBottomKm and the bodies the bake places all follow from the lifted array. Wired to the
+         // packer's file because that is where the read is; the renderer's ResolveSpecies is the caller.
+         { "LayerAltitudeOffset", kCloudPayload },
+
          { "MaxViewDistance", kCloudPayload },
          { "TracingStartDistance", kCloudPayload },
          { "TracingStartMaxDistance", kCloudPayload },

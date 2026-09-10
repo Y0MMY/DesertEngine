@@ -16,6 +16,7 @@
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudQuality.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
+#include <Engine/Reflection/ReflectionSerializer.hpp>
 #include <Engine/Reflection/ReflectionTypes.hpp>
 
 #include <glm/glm.hpp>
@@ -424,7 +425,9 @@ TEST( HeightFogReflection, DistancesAreLengthsAndEveryFieldIsAnnotatedWellEnough
 }
 
 // ---------------------------------------------------------------------------------------------------
-// VolumetricCloudData — 22 fields: 21 since O1: the LOOK is a MATERIAL. What stays is exactly what
+// VolumetricCloudData — 23 fields: 22 since O1 (the LOOK is a MATERIAL) and 23 since О11, which gave the
+// SCENE a say in how high its deck hangs without giving it a second say in the shell. What stays is
+// exactly what
 // UVolumetricCloudComponent keeps, name for name — tracing budgets, pass routing, world integration —
 // plus the Material handle that is the seam itself, the region budget, and the wind pair (the one named
 // divergence from the UE split: the collector integrates the offset and may not touch the registry).
@@ -438,6 +441,7 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
          "Enabled",
          "Material",
          "PlanetRadius",
+         "LayerAltitudeOffset",
          "MaxViewDistance",
          "TracingStartMaxDistance",
          "TracingStartDistance",
@@ -460,10 +464,15 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     };
 
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
-    EXPECT_EQ( cloud.Fields.size(), 22u );
+    EXPECT_EQ( cloud.Fields.size(), 23u );
     EXPECT_EQ( FieldNames( cloud ), expected );
 
-    EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 5u );
+    // SIX Cloud Layer rows since О11: the sixth is the SCENE's own lift of the deck. It is not a sixth
+    // statement of the shell — the shell is still the union of the types' bands and still computed in one
+    // place — it is a displacement applied to those bands, which is a different quantity and therefore
+    // one that cannot disagree with them. See VolumetricCloudData::LayerAltitudeOffset for why an
+    // absolute Layer Bottom, which is what Unreal exposes, would have been the §4.2 double write.
+    EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 6u );
     EXPECT_EQ( CountInCategory( cloud, "Materials" ), 1u );
     // ONE Weather row: the region is a MEMORY budget (how much world the modelling volume covers), not a
     // look. The look's own weather — coverage, the tile, the seed — is material schema now.
@@ -1270,6 +1279,13 @@ TEST( VolumetricCloudReflection, DistancesAreLengthsExceptTheTwoThatCarryTheirOw
     EXPECT_FALSE( Find( cloud, "PlanetRadius" )->Meta.IsLength );
     EXPECT_EQ( Find( cloud, "PlanetRadius" )->Meta.Units, "km" );
 
+    // And the second one, which is what the test's name has always claimed. The deck's lift is in
+    // kilometres because everything it moves is: a cloud type's band, the envelope built from it and the
+    // packed shell are all km, and asking an artist to type 300000 for three kilometres would be the
+    // one conversion this subsystem does not already do exactly once.
+    EXPECT_FALSE( Find( cloud, "LayerAltitudeOffset" )->Meta.IsLength );
+    EXPECT_EQ( Find( cloud, "LayerAltitudeOffset" )->Meta.Units, "km" );
+
     // The dimensionless ones stay dimensionless.
     for ( const char* name : { "ShadowStrength", "StopTransmittance" } )
         EXPECT_FALSE( Find( cloud, name )->Meta.IsLength ) << name;
@@ -1589,6 +1605,72 @@ TEST( HeroCloudReflection, EveryRangedDefaultLiesInsideItsOwnRange )
         EXPECT_GE( value, f.Meta.RangeMin ) << f.Name << " defaults below its own slider";
         EXPECT_LE( value, f.Meta.RangeMax ) << f.Name << " defaults above its own slider";
     }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// A FIELD THAT IS EXPOSED AND NOT SAVED — the У13 defect, which this file's census could not see.
+//
+// Everything above asks what the reflection table CONTAINS. Nothing above asks whether a value put into
+// the component comes back out of a `.desce`, and that is the gap У13 fell into five times in one week:
+// five components authored in Details that silently lost the edit on reload. The serializer suite next
+// door builds its TypeInfo BY HAND, so it proves the mechanism and never the table, and the mechanism was
+// never what was broken.
+//
+// This is the same pair of calls Core::Serialize::ComponentRegistry makes — SerializeReflected on save,
+// DeserializeReflected on load — driven by the SAME registry entry the editor draws from. No resolver,
+// because a resolver only exists for AssetHandle fields and every field below is a number.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( VolumetricCloudReflection, AnAuthoredValueSurvivesTheSaveAndTheLoad )
+{
+    const TypeInfo& cloud = Type( "VolumetricCloudData" );
+
+    Desert::ECS::VolumetricCloudData authored;
+    authored.LayerAltitudeOffset = 3.4f; // the owner's own edit: a lenticular deck from 2.6 km to 6.0 km
+    authored.MaxViewDistance     = 7'000'000.0f;
+
+    const rfl::Generic::Object saved = Desert::Reflection::SerializeReflected( cloud, &authored );
+
+    ASSERT_TRUE( saved.get( "LayerAltitudeOffset" ).has_value() )
+         << "the layer's lift is not WRITTEN, so an artist's edit is lost the moment the scene is closed — "
+            "the У13 defect, in a sixth component";
+
+    Desert::ECS::VolumetricCloudData loaded;
+    Desert::Reflection::DeserializeReflected( cloud, &loaded, saved );
+
+    EXPECT_FLOAT_EQ( loaded.LayerAltitudeOffset, 3.4f );
+    EXPECT_FLOAT_EQ( loaded.MaxViewDistance, 7'000'000.0f );
+}
+
+// AND THE OTHER HALF, which is the one the eighty-four scenes on disk depend on: not one of them states
+// this key, and a missing key must leave the field at its default rather than at zero-by-accident or at
+// whatever the previous load left behind. Asserted from a NON-default starting value, because a reader
+// that ignores the key and a reader that writes 0.0 into it are indistinguishable when the default is 0.
+TEST( VolumetricCloudReflection, AKeyThatIsNotInTheSceneLeavesTheFieldAlone )
+{
+    const TypeInfo& cloud = Type( "VolumetricCloudData" );
+
+    Desert::ECS::VolumetricCloudData authored;
+    authored.LayerAltitudeOffset = 3.4f;
+
+    // Every key EXCEPT this one, which is exactly what every scene in this repository looks like. Built
+    // by copying rather than erasing because rfl::Object is an ordered vector of pairs with no erase.
+    rfl::Generic::Object olderScene;
+    for ( const auto& pair : Desert::Reflection::SerializeReflected( cloud, &authored ) )
+    {
+        if ( pair.first != "LayerAltitudeOffset" )
+            olderScene.insert( pair.first, pair.second );
+    }
+    ASSERT_FALSE( olderScene.get( "LayerAltitudeOffset" ).has_value() );
+
+    Desert::ECS::VolumetricCloudData loaded;
+    loaded.LayerAltitudeOffset = 9.0f; // deliberately neither the default nor the authored value
+
+    Desert::Reflection::DeserializeReflected( cloud, &loaded, olderScene );
+
+    EXPECT_FLOAT_EQ( loaded.LayerAltitudeOffset, 9.0f )
+         << "a missing key OVERWROTE the field, so loading an old scene would move every cloud layer in "
+            "the repository";
 }
 
 int main( int argc, char** argv )

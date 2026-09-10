@@ -23,6 +23,13 @@ project(test_name)
         -- The cloud packer takes a cloud TYPE's twelve numbers as an argument now, and the payload tests
         -- drive it with the built-in default: the shape an empty slot resolves to lives here.
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudTypeData.cpp",
+        -- THE WRITER AND THE READER OF A `.desce`'s COMPONENT BLOCK, because a census of what a component
+        -- EXPOSES is only half of §1.3 if nothing checks that the exposed value comes back. У13 shipped
+        -- five fields that were authored in Details and silently never saved, and no suite in this tree
+        -- round-trips a real component through this path — ReflectionSerializer next door builds its
+        -- TypeInfo by hand, so it proves the mechanism and never the table. It brings nothing with it: no
+        -- GPU, no asset layer, no filesystem.
+        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionSerializer.cpp",
     }
 
     includedirs {

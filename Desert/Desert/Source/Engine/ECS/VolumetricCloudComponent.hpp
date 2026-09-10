@@ -71,6 +71,18 @@ namespace Desert::ECS
     // -0.228 at three octaves to -0.290 at six. More terms of this particular series buy flatness.
     inline constexpr int32_t kCloudMultiScatterMaxOctaves = 3;
 
+    // How far a scene may lift its deck above the altitudes its cloud types were authored at, in ONE place
+    // for the reason the two constants above give: the slider's Range and the clamp in
+    // Graphic::CloudLiftSpeciesSet are two copies of one number, and while they were two literals an
+    // artist could type a value into the `.desce` that the packer silently threw away.
+    //
+    // TWELVE KILOMETRES IS THE SHIPPED LIBRARY'S OWN VERTICAL SPAN, rounded up, and not a taste. The nine
+    // `.decloudtype` files run from the stratus deck's base at 0.15 km to the cumulonimbus canopy's
+    // ceiling at 11.30 km (9.50 + 1.80) — 11.15 km end to end. A ceiling of twelve therefore lets a scene
+    // put ANY of them anywhere the library itself reaches, and buys nothing beyond that: a deck lifted
+    // further would sit above every altitude this project has a cloud for.
+    inline constexpr float kCloudLayerAltitudeOffsetMaxKm = 12.0f;
+
     struct VolumetricCloudData
     {
         REFLECT()
@@ -103,6 +115,35 @@ namespace Desert::ECS
                            "where it belongs: a flat layer has no horizon at all and either fills the "
                            "whole lower sky or ends at an invisible edge." ) )
         float PlanetRadius = 6360.0f;
+
+        PROPERTY( DisplayName( "Layer Altitude Offset" ), Category( "Cloud Layer" ), Units( "km" ),
+                  Range( 0.0f, ::Desert::ECS::kCloudLayerAltitudeOffsetMaxKm ),
+                  Tooltip( "Raises this SCENE's deck above the altitudes its cloud types were authored "
+                           "at. Zero is exactly where the types say. It is an offset and not an "
+                           "altitude, so swapping a type still gets that type's own band — lifted by "
+                           "this much. Raising the base makes every cloud SMALLER on screen, because "
+                           "the cloud itself does not grow: to keep the apparent size, multiply the "
+                           "material's Weather Tile Size by the same ratio the base grew by." ) )
+        // WHY AN OFFSET AND NOT A LAYER BOTTOM. Unreal authors the shell directly (Layer Bottom + Layer
+        // Height on the component) because its types do not carry altitudes; ours do, and the shell is
+        // DERIVED from them in one place — Graphic::CloudTypeSetEnvelopeKm, the union of the bands of the
+        // types the layer actually carries. An absolute Layer Bottom here would be a SECOND author for
+        // that same shell, and the symptom of the two disagreeing is not an error: it is a cumulonimbus
+        // with its anvil sliced off by a ceiling nobody remembers setting (the defect commit 54330ab9
+        // fixed, and §4.2's double write one component further out).
+        //
+        // A DISPLACEMENT IS A DIFFERENT QUANTITY FROM AN ALTITUDE, so it cannot disagree with one. The
+        // types keep saying how tall and how thick; the scene says how high the whole thing sits. Change
+        // the type set and the new bands are lifted by the same amount — the authored value stays
+        // meaningful instead of becoming a stale absolute, and nothing silently wins.
+        //
+        // ZERO TO TWELVE KILOMETRES, one-directional on purpose. Lowering would have to stop at sea
+        // level — the shell is floored at zero in both Graphic::PackCloudParams and
+        // Graphic::ApplyCloudMaterialToBakeParams while the bodies are not — so the usable travel of a
+        // negative side would depend on which types were in the slots, which is a slider that lies about
+        // its own range. A deck lower than its types is asking for a different kind of cloud, and the
+        // `.decloudtype` is where that is said.
+        float LayerAltitudeOffset = 0.0f;
 
         PROPERTY( DisplayName( "Max View Distance" ), Category( "Cloud Layer" ), Length,
                   Range( 100000.0f, 40000000.0f ),
