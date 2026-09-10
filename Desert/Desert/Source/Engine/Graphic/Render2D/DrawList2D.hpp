@@ -208,8 +208,7 @@ namespace Desert::Graphic::Render2D
         // Append one textured/tinted quad (the shared path behind AddRectFilled / AddImage / AddText /
         // AddMaterialRect).
         void AddQuad( const void* texture, const glm::vec2& min, const glm::vec2& max, const glm::vec2& uv0,
-                      const glm::vec2& uv1, const glm::vec4& color, bool text,
-                      const void* material = nullptr );
+                      const glm::vec2& uv1, const glm::vec4& color, bool text, const void* material = nullptr );
 
         // --- The three shapes every primitive here is made of, and the only places geometry is appended ---
         // Each has an EXACT unclipped path — the vertices are stored as given and indexed exactly as they

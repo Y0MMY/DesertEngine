@@ -47,7 +47,7 @@ namespace Desert::Graphic::Render2D
             // True for the shared error entry — the element draws the magenta hatch of `UIMatError`
             // because its slot named something the UI path cannot execute. Kept on the entry rather than
             // compared by pointer at the call site so the backend cannot forget to ask.
-            bool  Error         = false;
+            bool     Error         = false;
             uint64_t LastUsedFrame = 0;
         };
 
@@ -96,9 +96,9 @@ namespace Desert::Graphic::Render2D
         // The magenta hatch, built on first need and shared by every failing handle.
         const Entry* ErrorEntry();
 
-        std::shared_ptr<Framebuffer>                     m_Target;
-        std::unordered_map<Assets::AssetHandle, Entry>   m_Entries;
-        std::unique_ptr<Entry>                           m_Error;
+        std::shared_ptr<Framebuffer>                   m_Target;
+        std::unordered_map<Assets::AssetHandle, Entry> m_Entries;
+        std::unique_ptr<Entry>                         m_Error;
         // Handles already reported. A refusal at frame rate buries everything else in the log and gets
         // the whole message ignored; the picture is what says it is still wrong, every frame.
         std::unordered_map<Assets::AssetHandle, std::string> m_Reported;

@@ -77,7 +77,8 @@ namespace Desert::Graphic::Render2D
             // binds none of them. Naming both domains is what makes the message actionable — the author
             // has to know which one the slot wanted, not only that this one was wrong.
             refusal = std::string( "shader '" ) + shaderName + "' has Domain " +
-                      Core::Formats::ShaderDomainName( meta.Domain ) + ", and a UI element can only fill "
+                      Core::Formats::ShaderDomainName( meta.Domain ) +
+                      ", and a UI element can only fill "
                       "itself with a Domain " +
                       Core::Formats::ShaderDomainName( Core::Formats::kUIPathDomain ) + " material";
             return entry;

@@ -103,7 +103,7 @@ namespace Desert::UI
         // Distinct UI-domain materials filled with this frame. Each is a pipeline of its own, so this is
         // the number that says what materials cost the canvas — a texture change is a descriptor bind, a
         // material change is a pipeline bind AND a descriptor bind.
-        std::uint32_t UniqueMaterials = 0;
+        std::uint32_t UniqueMaterials  = 0;
         std::uint32_t LargestBatchTris = 0;
 
         std::array<std::uint32_t, kBatchBreakCount> BreakCounts{};
