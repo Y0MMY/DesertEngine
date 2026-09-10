@@ -376,6 +376,11 @@ namespace
          { "Visible", kCanvasRenderer },
          { "Sprite", kCanvasRenderer },
          { "SafeArea", kCanvasRenderer },
+         // Which canvas is on top when a view draws several — read by UI::CanvasesInDrawOrder, which is
+         // the ordering every drawing host now uses. It is in the LAYOUT file and not the renderer's
+         // because deciding which canvases to walk, and in which order, is a query about the scene rather
+         // than a step of a walk.
+         { "SortOrder", kCanvasLayout },
     };
 
     // ------------------------------------------------------------------------------------------------

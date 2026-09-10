@@ -123,7 +123,10 @@ namespace Desert::UI
         std::array<std::uint32_t, 6> SkipCounts{};
     };
 
-    // Everything one captured frame of one canvas knows about itself.
+    // Everything one captured frame of one VIEW knows about itself — every canvas the view drew, not one
+    // of them. A view draws N canvases (Ю4) into ONE draw list, so a probe that described a single canvas
+    // could only ever be right about the batches by accident: the list it read already held the geometry
+    // of every canvas before it.
     struct UIFrameProbe
     {
         bool          Valid = false; // false until a capture succeeded; Refusal then says why
@@ -135,8 +138,8 @@ namespace Desert::UI
         std::vector<UIBatchInfo>   Batches;
         std::vector<UIElementNode> Elements;
 
-        Rect         ViewportPx{};
-        entt::entity Canvas = entt::null;
+        Rect                      ViewportPx{};
+        std::vector<entt::entity> Canvases; // in draw order — the frame's canvases, all of them
 
         // Forget the frame while keeping the allocated capacity — the same no-reallocation-per-frame
         // discipline DrawList2D::Reset follows, because this runs every frame the panel is open.
@@ -147,13 +150,15 @@ namespace Desert::UI
     // CaptureFrame below.
     void CaptureDrawList( const Graphic::Render2D::DrawList2D& dl, UIFrameProbe& out );
 
-    // Capture one frame of @p canvas: the walk's elements (through EnumerateCanvas, honouring @p ctx's
-    // screen and bindings) and the batches @p dl ended up with. Refuses, into out.Refusal, when @p canvas
-    // is not a drawable canvas of @p reg — an empty successful probe would read as "this canvas costs
-    // nothing", which is the silent wrong answer this project forbids.
-    NO_DISCARD Common::BoolResultStr CaptureFrame( const UICanvasContext& ctx, entt::registry& reg,
-                                                   entt::entity canvas, const Graphic::Render2D::DrawList2D& dl,
-                                                   const Rect& viewportPx, UIFrameProbe& out );
+    // Capture one frame of @p view: the elements of every canvas in @p canvases (through EnumerateCanvas,
+    // honouring each canvas's OWN cell of @p view — its screen and its bindings) and the batches @p dl
+    // ended up with, read ONCE for the frame. Refuses, into out.Refusal, when a canvas is not drawable in
+    // @p reg — an empty successful probe would read as "this canvas costs nothing", which is the silent
+    // wrong answer this project forbids.
+    NO_DISCARD Common::BoolResultStr CaptureFrame( const UIViewContext& view, entt::registry& reg,
+                                                   const std::vector<entt::entity>&     canvases,
+                                                   const Graphic::Render2D::DrawList2D& dl, const Rect& viewportPx,
+                                                   UIFrameProbe& out );
 
     // --- What one element costs, measured rather than modelled ----------------------------------------
     //
@@ -190,7 +195,7 @@ namespace Desert::UI
     // Measure @p element inside @p canvas. Mutates nothing that outlives the call: the walk runs against a
     // COPY of @p ctx with a zero timestep and no input, so hover eases, tween clocks and the hot election
     // are not disturbed, and the element's Visibility is restored before returning.
-    [[nodiscard]] UIElementCost ProbeElementCost( const UICanvasContext& ctx, entt::registry& reg,
+    [[nodiscard]] UIElementCost ProbeElementCost( const UIViewContext& view, entt::registry& reg,
                                                   entt::entity canvas, entt::entity element,
                                                   const Rect& viewportPx );
     // A host's slot for the probe, and the ONE place "is anybody looking?" is asked.
@@ -214,11 +219,11 @@ namespace Desert::UI
         void SetArmed( bool armed );
 
         // Returns immediately, having touched nothing, while disarmed.
-        void Capture( const UICanvasContext& ctx, entt::registry& reg, entt::entity canvas,
+        void Capture( const UIViewContext& view, entt::registry& reg, const std::vector<entt::entity>& canvases,
                       const Graphic::Render2D::DrawList2D& dl, const Rect& viewportPx );
 
         // Ask for one element to be measured (see UIElementCost). THE MEASUREMENT IS NOT TAKEN HERE: it
-        // needs the view's UICanvasContext, which only the pass that draws the canvas holds, so the
+        // needs the view's UIViewContext, which only the pass that draws the canvas holds, so the
         // request is answered on that pass's next frame. One frame of latency, and the alternative —
         // copying the whole context out every frame so a panel could walk with it — would charge every
         // armed frame for something asked once.

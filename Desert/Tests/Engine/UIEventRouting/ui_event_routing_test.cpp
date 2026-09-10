@@ -103,8 +103,8 @@ namespace Desert::Runtime
 } // namespace Desert::Runtime
 
 using Desert::UI::Rect;
-using Desert::UI::UICanvasContext;
 using Desert::UI::UIInput;
+using Desert::UI::UIViewContext;
 namespace ECS = Desert::ECS;
 namespace R2D = Desert::Graphic::Render2D;
 
@@ -194,7 +194,7 @@ namespace
 
     // One walk with a synthesised pointer; hands back every message the canvas fired, IN ORDER. Order is
     // the point: a set would pass on a build that ran the chain backwards.
-    std::vector<std::string> Frame( Tree& t, UICanvasContext& ctx, glm::vec2 mouse, bool down = false,
+    std::vector<std::string> Frame( Tree& t, UIViewContext& ctx, glm::vec2 mouse, bool down = false,
                                     bool released = false )
     {
         UIInput input;
@@ -204,9 +204,12 @@ namespace
 
         R2D::DrawList2D          dl;
         std::vector<std::string> out;
-        const auto drawn = Desert::UI::RenderCanvas2D( ctx, t.Registry, t.Canvas, dl, kViewport, nullptr, &input,
-                                                       nullptr, nullptr, &out );
+        Desert::UI::BeginUIFrame( ctx, t.Registry );
+        const auto drawn = Desert::UI::RenderCanvas2D( ctx, t.Registry, t.Canvas, dl, kViewport, nullptr, &input );
         EXPECT_TRUE( drawn.IsSuccess() ) << drawn.GetError();
+        // The routing is the VIEW's, not the walk's: it runs once per frame over the election every canvas
+        // of that frame contributed to. This suite draws one canvas, so a frame is Begin / one walk / End.
+        Desert::UI::EndUIFrame( ctx, t.Registry, dl, &input, nullptr, nullptr, &out );
         return out;
     }
 
@@ -214,14 +217,14 @@ namespace
     // is walked to @p mouse and left there for a frame before the button goes down. Without the settling
     // frames the press frame ALSO carries the whole Enter chain, and a test that asserted the messages of
     // that frame would be asserting two different things at once.
-    std::vector<std::string> Press( Tree& t, UICanvasContext& ctx, glm::vec2 mouse )
+    std::vector<std::string> Press( Tree& t, UIViewContext& ctx, glm::vec2 mouse )
     {
         Frame( t, ctx, mouse );
         Frame( t, ctx, mouse );
         return Frame( t, ctx, mouse, /*down=*/true );
     }
 
-    std::vector<std::string> Release( Tree& t, UICanvasContext& ctx, glm::vec2 mouse )
+    std::vector<std::string> Release( Tree& t, UIViewContext& ctx, glm::vec2 mouse )
     {
         Frame( t, ctx, mouse );
         Frame( t, ctx, mouse );
@@ -248,7 +251,7 @@ TEST( UIEventRoute, APressOnALeafIsHeardByEveryAncestorInnermostFirst )
     t.Listen( t.Inner, "inner" );
     t.Listen( t.LeafA, "leafA" );
 
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     const auto      msgs = Press( t, ctx, kOnLeafA );
 
     const std::vector<std::string> expected = { "leafA:down", "inner:down", "outer:down", "canvas:down" };
@@ -265,7 +268,7 @@ TEST( UIEventRoute, TunnelListenersAllRunBeforeAnyBubbleListener )
     t.Listen( t.Inner, "inner" ); // Bubble, the default
     t.Listen( t.LeafA, "leafA" ).Phase = ECS::UIEventPhase::Tunnel;
 
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     const auto      msgs = Press( t, ctx, kOnLeafA );
 
     // Tunnel descends: outer before leafA. Then the bubble pass runs, and inner is all that is left.
@@ -284,7 +287,7 @@ TEST( UIEventRoute, StopPropagationOnTheTargetEndsTheRouteAndTheAncestorsHearNot
     t.Listen( t.Outer, "outer" );
     t.Listen( t.LeafA, "leafA" ).StopPropagation = true;
 
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     const auto      msgs = Press( t, ctx, kOnLeafA );
 
     ASSERT_EQ( msgs.size(), 1u ) << "propagation continued past a listener that stopped it";
@@ -304,7 +307,7 @@ TEST( UIEventRoute, ATunnellingAncestorThatStopsTakesThePressAndItsChildrenNever
     t.Listen( t.Inner, "inner" );
     t.Listen( t.LeafA, "leafA" );
 
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     const auto      msgs = Press( t, ctx, kOnLeafA );
 
     ASSERT_EQ( msgs.size(), 1u );
@@ -320,7 +323,7 @@ TEST( UIEventRoute, ReleaseTravelsTheSameChainAsPress )
     t.Listen( t.Outer, "outer" );
     t.Listen( t.LeafA, "leafA" );
 
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     const auto      msgs = Release( t, ctx, kOnLeafA );
 
     const std::vector<std::string> expected = { "leafA:up", "outer:up" };
@@ -342,7 +345,7 @@ TEST( UIEventRouteMeetsHitTest, AChildrenOnlyAncestorIsSkippedAndTheOneAboveItSt
     t.Listen( t.LeafA, "leafA" );
     t.SetHitTest( t.Inner, ECS::UIHitTest::ChildrenOnly );
 
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     const auto      msgs = Press( t, ctx, kOnLeafA );
 
     const std::vector<std::string> expected = { "leafA:down", "outer:down", "canvas:down" };
@@ -360,7 +363,7 @@ TEST( UIEventRouteMeetsHitTest, ABlockingTargetSwallowsThePressForItsAncestorsTo
     t.Listen( t.LeafA, "leafA" );
     t.SetHitTest( t.LeafA, ECS::UIHitTest::Blocking );
 
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     const auto      msgs = Press( t, ctx, kOnLeafA );
 
     EXPECT_TRUE( msgs.empty() ) << "a Blocking element let a press through to " << msgs.size() << " listener(s)";
@@ -377,7 +380,7 @@ TEST( UIEventRouteMeetsHitTest, NothingUnderANoneAncestorCanEvenStartARoute )
     t.Listen( t.LeafA, "leafA" );
     t.SetHitTest( t.Outer, ECS::UIHitTest::None );
 
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     const auto      msgs = Press( t, ctx, kOnLeafA );
 
     EXPECT_TRUE( msgs.empty() ) << "a press reached a sub-tree that is transparent to the pointer";
@@ -402,7 +405,7 @@ TEST( UIEventHover, MovingBetweenTwoChildrenOfOnePanelSaysNothingAboutThePanel )
     t.Listen( t.LeafA, "leafA" );
     t.Listen( t.LeafB, "leafB" );
 
-    UICanvasContext ctx;
+    UIViewContext ctx;
     Frame( t, ctx, kOnLeafA ); // settle the election: the first frame has nothing to compare against
     Frame( t, ctx, kOnLeafA );
     const auto msgs = Frame( t, ctx, kOnLeafB );
@@ -422,7 +425,7 @@ TEST( UIEventHover, ArrivingFromOutsideEntersEveryAncestorOutermostFirst )
     t.Listen( t.Inner, "inner" );
     t.Listen( t.LeafA, "leafA" );
 
-    UICanvasContext ctx;
+    UIViewContext ctx;
     Frame( t, ctx, kOffAll );
     Frame( t, ctx, kOffAll );
     const auto msgs = Frame( t, ctx, kOnLeafA );
@@ -440,7 +443,7 @@ TEST( UIEventHover, LeavingForAnAncestorExitsOnlyTheBranchThePointerLeft )
     t.Listen( t.Inner, "inner" );
     t.Listen( t.LeafA, "leafA" );
 
-    UICanvasContext ctx;
+    UIViewContext ctx;
     Frame( t, ctx, kOnLeafA );
     Frame( t, ctx, kOnLeafA );
     const auto toInner = Frame( t, ctx, kOnInner ); // still inside inner and outer
@@ -466,7 +469,7 @@ TEST( UIEventHover, AChildrenOnlyElementIsNotToldThePointerArrived )
     t.Listen( t.LeafA, "leafA" );
     t.SetHitTest( t.Inner, ECS::UIHitTest::ChildrenOnly );
 
-    UICanvasContext ctx;
+    UIViewContext ctx;
     Frame( t, ctx, kOffAll );
     Frame( t, ctx, kOffAll );
     const auto msgs = Frame( t, ctx, kOnLeafA );
@@ -492,7 +495,7 @@ TEST( UIEventRoute, TheDefaultsAreBubbleAndDoNotStop )
     Tree t;
     t.Listen( t.LeafA, "leafA" );
 
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     const auto      msgs = Press( t, ctx, kOnLeafA );
 
     const std::vector<std::string> expected = { "leafA:down" };

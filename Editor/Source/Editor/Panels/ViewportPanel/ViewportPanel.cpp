@@ -1701,12 +1701,19 @@ namespace Desert::Editor
                 auto&                    reg = m_Scene->GetRegistry();
                 const ::Desert::UI::Rect viewRect{ vp.ViewportPos.x, vp.ViewportPos.y, vp.Size.x, vp.Size.y };
 
-                // Ask EVERY canvas and keep the last hit. Canvases are drawn in registry order, so the last
-                // one to answer is the one on top — the same "last writer wins" rule the renderer's own hot
-                // election uses. Picking through only the first canvas is what made an overlay canvas
-                // unselectable in the viewport while it was plainly on screen.
+                // Ask EVERY canvas IN DRAW ORDER and keep the last hit, because the last canvas drawn is
+                // the one on top — the same "last writer wins" rule the renderer's own hot election uses.
+                // Picking through only the first canvas is what made an overlay canvas unselectable in the
+                // viewport while it was plainly on screen.
+                //
+                // THE ORDER HAS TO BE THE RENDERER'S, and `reg.view<>()` is not it: this loop used to walk
+                // the component pool, whose order is the REVERSE of creation and knows nothing of the
+                // canvas's authored Sort Order (Ю4). Two canvases overlapping at the cursor would then
+                // select the one the renderer had drawn UNDERNEATH — a click landing on the element that
+                // is not the one under the pointer. UI::CanvasesInDrawOrder is the single answer both
+                // halves ask, and Desert/Tests/Engine/UICanvasContext asserts they agree.
                 entt::entity uiHit = entt::null;
-                for ( const entt::entity canvas : reg.view<ECS::UICanvasComponent>() )
+                for ( const entt::entity canvas : ::Desert::UI::CanvasesInDrawOrder( reg ) )
                     if ( const entt::entity hit =
                               ::Desert::UI::PickElement( reg, canvas, glm::vec2( mp.x, mp.y ), viewRect );
                          hit != entt::null )

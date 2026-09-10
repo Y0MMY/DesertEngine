@@ -24,16 +24,15 @@ namespace Desert::Editor::Render
         std::weak_ptr<Core::Scene>  m_Scene;
         Graphic::Render2D::Render2D m_Render2D;
 
-        // The canvas runtime state of THIS viewport. One EditorUIPass exists per open scene document
-        // (Render::RenderRegistry builds one in its constructor), so this is what keeps two viewports from
-        // sharing a hover clock, an elected hot element or a screen stack. It also drives the scene's UIAnim
-        // playheads — the UI Editor panel's preview deliberately does not, or a clip would advance twice a
-        // frame.
-        ::Desert::UI::UICanvasContext m_UICanvas;
-
-        // The last reason this pass had no canvas to draw, so the reason is logged when it CHANGES rather
-        // than once per frame. A scene with no UI at all is the common case; a refusal at frame rate would
-        // bury everything else in the log and get the whole message ignored.
-        std::string m_CanvasRefusal;
+        // The UI runtime state of THIS viewport — one cell per (canvas x this view). One EditorUIPass
+        // exists per open scene document (Render::RenderRegistry builds one in its constructor), so this is
+        // what keeps two viewports from sharing a hover clock, an elected hot element or a screen stack,
+        // and the cells inside it are what keeps the level's own canvases from sharing them with each
+        // other. It also drives the scene's UIAnim playheads — the UI Editor panel's preview deliberately
+        // does not, or a clip would advance twice a frame.
+        //
+        // LIFETIME: by value in the pass, and the pass is owned by the document's RenderRegistry. Closing
+        // the document destroys the pass and with it every cell — there is nothing to release by hand.
+        ::Desert::UI::UIViewContext m_UIView;
     };
 } // namespace Desert::Editor::Render

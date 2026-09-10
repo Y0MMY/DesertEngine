@@ -134,6 +134,7 @@ namespace Desert::Runtime
 using Desert::UI::Rect;
 using Desert::UI::UICanvasContext;
 using Desert::UI::UIInput;
+using Desert::UI::UIViewContext;
 namespace ECS = Desert::ECS;
 namespace R2D = Desert::Graphic::Render2D;
 
@@ -197,19 +198,38 @@ namespace
     // Every walk in this file goes through here. RenderCanvas2D REFUSES rather than returning a bare false
     // (Ю1), and a test that swallowed the refusal would go on to assert about an empty draw list and pass
     // for entirely the wrong reason — so the refusal is surfaced at the one place that makes the call.
-    bool Draw( UICanvasContext& ctx, entt::registry& reg, entt::entity canvas, R2D::DrawList2D& dl,
+    // It is also a whole FRAME of the view — BeginUIFrame / EndUIFrame around the one canvas — because
+    // that is what a host does and because the walk refuses outside a frame (Ю4). Tests that need two
+    // canvases in one frame use DrawTwo below instead of calling this twice, which would be two frames.
+    bool Draw( UIViewContext& ctx, entt::registry& reg, entt::entity canvas, R2D::DrawList2D& dl,
                const UIInput* input = nullptr, std::string* outClicked = nullptr, entt::entity* focused = nullptr,
                std::vector<std::string>* outMessages = nullptr )
     {
-        const auto drawn =
-             Desert::UI::RenderCanvas2D( ctx, reg, canvas, dl, kViewport,
-                                         /*worldViewProj=*/nullptr, input, outClicked, focused, outMessages );
+        Desert::UI::BeginUIFrame( ctx, reg );
+        const auto drawn = Desert::UI::RenderCanvas2D( ctx, reg, canvas, dl, kViewport,
+                                                       /*worldViewProj=*/nullptr, input, outClicked, focused );
         EXPECT_TRUE( drawn.IsSuccess() ) << drawn.GetError();
+        Desert::UI::EndUIFrame( ctx, reg, dl, input, focused, outClicked, outMessages );
         return drawn.IsSuccess() && drawn.GetValue();
     }
 
+    // ONE frame of @p ctx over TWO canvases, in the order given — what a view of a scene with a HUD and an
+    // overlay actually does.
+    void DrawTwo( UIViewContext& ctx, entt::registry& reg, entt::entity first, entt::entity second,
+                  R2D::DrawList2D& dl, const UIInput* input = nullptr, std::string* outClicked = nullptr )
+    {
+        Desert::UI::BeginUIFrame( ctx, reg );
+        for ( const entt::entity c : { first, second } )
+        {
+            const auto drawn = Desert::UI::RenderCanvas2D( ctx, reg, c, dl, kViewport,
+                                                           /*worldViewProj=*/nullptr, input, outClicked );
+            EXPECT_TRUE( drawn.IsSuccess() ) << drawn.GetError();
+        }
+        Desert::UI::EndUIFrame( ctx, reg, dl, input, /*focused=*/nullptr, outClicked );
+    }
+
     // Draw one frame of @p f through @p ctx and hand back what the button was painted.
-    glm::vec4 Frame( UICanvasContext& ctx, Fixture& f, const UIInput* input )
+    glm::vec4 Frame( UIViewContext& ctx, Fixture& f, const UIInput* input )
     {
         R2D::DrawList2D dl;
         Draw( ctx, f.Registry, f.Canvas, dl, input );
@@ -218,7 +238,7 @@ namespace
 
     // Same, spelled so a call can build the pointer state inline (a temporary lives to the end of the full
     // expression, which is longer than the walk).
-    glm::vec4 Frame( UICanvasContext& ctx, Fixture& f, const UIInput& input )
+    glm::vec4 Frame( UIViewContext& ctx, Fixture& f, const UIInput& input )
     {
         return Frame( ctx, f, &input );
     }
@@ -226,7 +246,7 @@ namespace
     // Push this view's wall clock @p seconds into the past, so the NEXT frame it draws measures that delta.
     // The renderer reads a real clock (hover eases and tweens are wall-clock driven by design); this is how
     // a test asks it for a specific one without sleeping.
-    void RewindClock( UICanvasContext& ctx, float seconds )
+    void RewindClock( UIViewContext& ctx, float seconds )
     {
         ctx.LastFrameTime -= seconds;
     }
@@ -247,7 +267,7 @@ TEST( UICanvasContext, TheHotElectionOfOneViewDoesNotReachAnother )
     Fixture a, b;
     ASSERT_EQ( a.Button, b.Button ) << "the two registries must hand out the same id for this to test anything";
 
-    UICanvasContext ctxA, ctxB;
+    UIViewContext ctxA, ctxB;
 
     // Frame 1 elects: A's pointer is on its button, B's is far away. Controls react to the PREVIOUS frame's
     // winner, so nothing is pressed yet in either.
@@ -272,8 +292,8 @@ TEST( UICanvasContext, TheHotElectionOfOneViewDoesNotReachAnother )
 TEST( UICanvasContext, AnInertPreviewDoesNotClearTheInteractiveViewsElection )
 {
     Fixture         f;
-    UICanvasContext viewport;
-    UICanvasContext preview;
+    UIViewContext   viewport;
+    UIViewContext   preview;
     preview.DrivesSceneAnimation = false; // as UIEditorPanel configures it
 
     Frame( viewport, f, At( 10.0f, 10.0f ) );
@@ -291,21 +311,21 @@ TEST( UICanvasContext, AnInertPreviewDoesNotClearTheInteractiveViewsElection )
 TEST( UICanvasContext, APerEntityClockIsKeyedInsideItsOwnView )
 {
     Fixture         a, b;
-    UICanvasContext ctxA, ctxB;
+    UIViewContext   ctxA, ctxB;
 
     Frame( ctxA, a, At( 10.0f, 10.0f, /*down=*/false ) );
     Frame( ctxB, b, At( 900.0f, 900.0f, /*down=*/false ) );
 
     // A has been hovering long enough for its ease to saturate.
-    ctxA.HoverT[a.Button] = 1.0f;
-    ASSERT_EQ( ctxA.HoverT.count( a.Button ), 1u );
+    ctxA.CanvasState( a.Canvas ).HoverT[a.Button] = 1.0f;
+    ASSERT_EQ( ctxA.CanvasState( a.Canvas ).HoverT.count( a.Button ), 1u );
 
     RewindClock( ctxB, 0.5f ); // give B a real frame delta, so a leaked clock would have time to show
     const glm::vec4 drawnB = Frame( ctxB, b, At( 900.0f, 900.0f, /*down=*/false ) );
 
     EXPECT_TRUE( SameColor( drawnB, glm::vec3( 0.1f ) ) )
          << "B's button drew a hover blend from a clock that belongs to A's entity of the same id";
-    EXPECT_NEAR( ctxB.HoverT[b.Button], 0.0f, 1e-4f );
+    EXPECT_NEAR( ctxB.CanvasState( b.Canvas ).HoverT[b.Button], 0.0f, 1e-4f );
 }
 
 // --- (4) Each view keeps its own frame delta -------------------------------------------------------------
@@ -316,7 +336,7 @@ TEST( UICanvasContext, APerEntityClockIsKeyedInsideItsOwnView )
 TEST( UICanvasContext, EveryViewMeasuresItsOwnFrameDelta )
 {
     Fixture         a, b;
-    UICanvasContext ctxA, ctxB;
+    UIViewContext   ctxA, ctxB;
 
     Frame( ctxA, a, At( 10.0f, 10.0f, /*down=*/false ) ); // seed both clocks
     Frame( ctxB, b, At( 10.0f, 10.0f, /*down=*/false ) );
@@ -335,9 +355,12 @@ TEST( UICanvasContext, EveryViewMeasuresItsOwnFrameDelta )
     // catches is one view easing to 0.6 while the other sits at exactly 0 — not a difference in the fourth
     // decimal. A tighter bound made this test fail on the spread between two consecutive steady_clock
     // reads, which is a flake and worse than no test at all.
-    EXPECT_GT( ctxA.HoverT[a.Button], 0.5f ) << "50 ms of hover moved view A's ease by nothing";
-    EXPECT_GT( ctxB.HoverT[b.Button], 0.5f ) << "50 ms of hover moved view B's ease by nothing";
-    EXPECT_NEAR( ctxA.HoverT[a.Button], ctxB.HoverT[b.Button], 0.01f );
+    EXPECT_GT( ctxA.CanvasState( a.Canvas ).HoverT[a.Button], 0.5f )
+         << "50 ms of hover moved view A's ease by nothing";
+    EXPECT_GT( ctxB.CanvasState( b.Canvas ).HoverT[b.Button], 0.5f )
+         << "50 ms of hover moved view B's ease by nothing";
+    EXPECT_NEAR( ctxA.CanvasState( a.Canvas ).HoverT[a.Button], ctxB.CanvasState( b.Canvas ).HoverT[b.Button],
+                 0.01f );
 }
 
 // --- (5) Screen navigation is view state, the anim playhead is scene state -------------------------------
@@ -379,7 +402,7 @@ TEST( UICanvasContext, ScreenNavigationBelongsToTheViewThatDidIt )
     button.Action         = ECS::UIButtonAction::ShowScreen;
     button.OnClickMessage = "Settings";
 
-    UICanvasContext viewport, second;
+    UIViewContext viewport, second;
 
     // Seed both views, then release the pointer over the button in ONE of them.
     Frame( viewport, f, At( 10.0f, 10.0f ) );
@@ -396,8 +419,9 @@ TEST( UICanvasContext, ScreenNavigationBelongsToTheViewThatDidIt )
     }
     Frame( second, f, At( 900.0f, 900.0f ) );
 
-    EXPECT_EQ( viewport.Screen, "Settings" );
-    EXPECT_EQ( second.Screen, "Home" ) << "a second view of the same scene followed a navigation it never made";
+    EXPECT_EQ( viewport.CanvasState( f.Canvas ).Screen, "Settings" );
+    EXPECT_EQ( second.CanvasState( f.Canvas ).Screen, "Home" )
+         << "a second view of the same scene followed a navigation it never made";
 }
 
 // --- (6) The one clock that is NOT view state ------------------------------------------------------------
@@ -413,8 +437,8 @@ TEST( UICanvasContext, OnlyTheDrivingViewAdvancesTheScenesAnimationPlayhead )
     clip.Duration = 100.0f; // long enough that nothing wraps
     clip.Loop     = false;
 
-    UICanvasContext viewport;
-    UICanvasContext preview;
+    UIViewContext viewport;
+    UIViewContext preview;
     preview.DrivesSceneAnimation = false;
 
     Frame( viewport, f, At( 900.0f, 900.0f, /*down=*/false ) );
@@ -437,15 +461,16 @@ TEST( UICanvasContext, OnlyTheDrivingViewAdvancesTheScenesAnimationPlayhead )
 TEST( UICanvasContext, RebindingAViewToAnotherRegistryDropsItsPerEntityState )
 {
     Fixture         a, b;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
 
     Frame( ctx, a, At( 10.0f, 10.0f ) );
     Frame( ctx, a, At( 10.0f, 10.0f ) );
     ASSERT_EQ( ctx.Hot, a.Button ) << "the pointer was over A's button for two frames and it was not elected";
-    ASSERT_FALSE( ctx.HoverT.empty() );
+    ASSERT_FALSE( ctx.CanvasState( a.Canvas ).HoverT.empty() );
 
     const glm::vec4 drawnB = Frame( ctx, b, At( 900.0f, 900.0f ) );
     EXPECT_TRUE( ctx.Hot == entt::null ) << "the election survived a change of scene";
+    EXPECT_EQ( ctx.CanvasStateCount(), 1u ) << "a rebind kept the old scene's (canvas x view) cell as well";
     EXPECT_TRUE( SameColor( drawnB, glm::vec3( 0.1f ) ) )
          << "B's button reacted to an election made in A, because the id matched";
 }
@@ -462,7 +487,7 @@ TEST( UICanvasContext, AnUnresolvableCanvasBackgroundDrawsNothingRatherThanAWhit
     withSprite.Registry.get<ECS::UICanvasComponent>( withSprite.Canvas ).Data.Sprite =
          Desert::Assets::AssetHandle( 0x1234u );
 
-    UICanvasContext c1, c2;
+    UIViewContext   c1, c2;
     R2D::DrawList2D dlBare, dlSprite;
     Draw( c1, bare.Registry, bare.Canvas, dlBare );
     Draw( c2, withSprite.Registry, withSprite.Canvas, dlSprite );
@@ -500,7 +525,7 @@ TEST( UICanvasContext, AResolvableCanvasBackgroundCoversTheCanvasAndIsDrawnFirst
          Desert::Assets::AssetHandle( kBackgroundHandle );
 
     g_BackgroundServiceArmed = true;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     R2D::DrawList2D dl;
     Draw( ctx, f.Registry, f.Canvas, dl );
     g_BackgroundServiceArmed = false;
@@ -637,7 +662,7 @@ namespace
     // Draw @p s once and hand back where each of its three items landed (nullopt = not drawn at all).
     std::array<std::optional<Rect>, 3> Layout( Stack& s )
     {
-        UICanvasContext ctx;
+        UIViewContext   ctx;
         R2D::DrawList2D dl;
         Draw( ctx, s.Registry, s.Canvas, dl );
         return { RectOfColor( dl, Stack::ColorOf( 0 ) ), RectOfColor( dl, Stack::ColorOf( 1 ) ),
@@ -777,7 +802,7 @@ namespace
 
     Probe Press( Nested& n, float x, float y )
     {
-        UICanvasContext ctx;
+        UIViewContext   ctx;
         R2D::DrawList2D first;
         const UIInput   in = At( x, y );
         Draw( ctx, n.Registry, n.Canvas, first, &in );
@@ -924,7 +949,7 @@ namespace
         n.SetHitTest( n.Panel, hit );
         ArmButton( n );
 
-        UICanvasContext ctx;
+        UIViewContext   ctx;
         R2D::DrawList2D a, b;
         const UIInput   hold = At( 10.0f, 10.0f );
         Draw( ctx, n.Registry, n.Canvas, a, &hold );
@@ -945,7 +970,7 @@ namespace
         n.SetHitTest( n.Panel, hit );
         ArmButton( n );
 
-        UICanvasContext ctx;
+        UIViewContext   ctx;
         R2D::DrawList2D a, b;
         entt::entity    focused = entt::null;
 
@@ -968,7 +993,7 @@ namespace
     {
         n.SetHitTest( n.Panel, hit );
 
-        UICanvasContext ctx;
+        UIViewContext   ctx;
         R2D::DrawList2D dl;
         entt::entity    focused = entt::null;
         UIInput         tab     = At( 900.0f, 900.0f, /*down=*/false );
@@ -1033,7 +1058,7 @@ TEST( UICanvasHitTest, EnterOnAFocusHeldFromBeforeDoesNotFireAnUnreachableButton
         ArmButton( n );
 
         entt::entity    focused = n.Button; // handed, not tabbed: the panel changed under a live focus
-        UICanvasContext ctx;
+        UIViewContext   ctx;
         R2D::DrawList2D dl;
         std::string     clicked;
         UIInput         enter = At( 900.0f, 900.0f, /*down=*/false );
@@ -1075,7 +1100,7 @@ TEST( UICanvasHitTest, AFieldOutOfTheHitTestsReachStopsAcceptingTypedText )
         // Focus is HANDED to the field rather than tabbed to, which is the stale-focus case: it is what a
         // host holds after the field was legitimately focused and the panel changed afterwards.
         entt::entity    focused = field;
-        UICanvasContext ctx;
+        UIViewContext   ctx;
         R2D::DrawList2D dl;
         UIInput         keys = At( 900.0f, 900.0f, /*down=*/false );
         keys.TypedText       = "x";
@@ -1154,7 +1179,7 @@ TEST( UICanvasSelection, TheCanvasThatWasAskedForIsTheOneDrawn )
 {
     TwoCanvases t;
 
-    UICanvasContext ctxA, ctxB;
+    UIViewContext   ctxA, ctxB;
     R2D::DrawList2D a, b;
     EXPECT_TRUE( Draw( ctxA, t.Registry, t.CanvasA, a ) );
     EXPECT_TRUE( Draw( ctxB, t.Registry, t.CanvasB, b ) );
@@ -1200,7 +1225,7 @@ TEST( UICanvasSelection, NotNamingACanvasIsARefusalAndNotTheFirstOne )
 {
     TwoCanvases t;
 
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     R2D::DrawList2D dl;
     const auto      unnamed = Desert::UI::RenderCanvas2D( ctx, t.Registry, entt::null, dl, kViewport );
     EXPECT_FALSE( unnamed.IsSuccess() ) << "RenderCanvas2D accepted no canvas and drew something anyway";
@@ -1353,7 +1378,7 @@ namespace
     // the election is finished by the time RenderCanvas2D returns (ctx.Hot = ctx.HotNext).
     bool ElectsAt( XformFixture& f, entt::entity e, const glm::vec2& p )
     {
-        UICanvasContext ctx;
+        UIViewContext   ctx;
         R2D::DrawList2D dl;
         const UIInput   in = At( p.x, p.y, /*down=*/false );
         Draw( ctx, f.Registry, f.Canvas, dl, &in );
@@ -1369,7 +1394,7 @@ TEST( UICanvasContext, WhereARotatedElementIsDrawnIsWhereItTakesThePointer )
     f.Layout( f.Panel ).Pivot    = { 0.0f, 0.0f }; // a CORNER: an inverse/forward slip is not symmetric here
 
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     Draw( ctx, f.Registry, f.Canvas, dl, nullptr );
     const std::array<glm::vec2, 4> quad = DrawnQuad( dl );
 
@@ -1428,7 +1453,7 @@ TEST( UICanvasContext, AChildOfARotatedParentIsDrawnAndPickedWhereTheParentCarri
     glm::vec2 straightCentre;
     {
         R2D::DrawList2D dl;
-        UICanvasContext ctx;
+        UIViewContext   ctx;
         Draw( ctx, f.Registry, f.Canvas, dl, nullptr );
         ASSERT_GE( dl.GetVertices().size(), 8u ); // parent quad, then the child's
         straightCentre = ( dl.GetVertices()[4].Position + dl.GetVertices()[6].Position ) * 0.5f;
@@ -1439,7 +1464,7 @@ TEST( UICanvasContext, AChildOfARotatedParentIsDrawnAndPickedWhereTheParentCarri
     std::array<glm::vec2, 4> childQuad{};
     {
         R2D::DrawList2D dl;
-        UICanvasContext ctx;
+        UIViewContext   ctx;
         Draw( ctx, f.Registry, f.Canvas, dl, nullptr );
         ASSERT_GE( dl.GetVertices().size(), 8u );
         for ( int i = 0; i < 4; ++i )
@@ -1506,7 +1531,7 @@ TEST( UICanvasContext, TheSameRotationAboutTwoPivotsLandsInTwoPlaces )
         f.Layout( f.Panel ).Rotation = 45.0f;
         f.Layout( f.Panel ).Pivot    = pivot;
         R2D::DrawList2D dl;
-        UICanvasContext ctx;
+        UIViewContext   ctx;
         Draw( ctx, f.Registry, f.Canvas, dl, nullptr );
         EXPECT_GE( dl.GetVertices().size(), 4u );
         return ( dl.GetVertices()[0].Position + dl.GetVertices()[2].Position ) * 0.5f;
@@ -1595,7 +1620,7 @@ namespace
     int SweepAgreement( XformFixture& f, entt::entity target, const glm::vec3& color, float step )
     {
         R2D::DrawList2D dl;
-        UICanvasContext ctx;
+        UIViewContext   ctx;
         Draw( ctx, f.Registry, f.Canvas, dl, nullptr );
 
         int covered = 0, disagreements = 0;
@@ -1631,7 +1656,7 @@ TEST( UICanvasContext, ARotatedClipperRefusesThePointerExactlyWhereItCutThePixel
     // Not vacuous in the OTHER direction either: there is a point inside the clipper's box and outside the
     // clipper itself, and it must now be refused by both halves. Under Ю8 both accepted it.
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     Draw( ctx, f.Registry, f.Canvas, dl, nullptr );
     glm::vec4 box{ 0.0f };
     for ( const auto& cmd : dl.GetCommands() )
@@ -1679,7 +1704,7 @@ TEST( UICanvasContext, TwoRotatedClippersNestAsAnIntersectionOfBothQuadrilateral
     const auto coveredCount = [&]( XformFixture& fx )
     {
         R2D::DrawList2D dl;
-        UICanvasContext ctx;
+        UIViewContext   ctx;
         Draw( ctx, fx.Registry, fx.Canvas, dl, nullptr );
         int n = 0;
         for ( float y = 5.0f; y < kSide; y += 5.0f )
@@ -1795,7 +1820,7 @@ TEST( UICanvasContext, TwoTurnedLevelsComposeRatherThanReplace )
     f.Registry.get<ECS::RelationshipComponent>( f.Panel ).Children.push_back( child );
 
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     Draw( ctx, f.Registry, f.Canvas, dl, nullptr );
     ASSERT_GE( dl.GetVertices().size(), 8u );
 
@@ -1825,6 +1850,337 @@ TEST( UICanvasContext, TwoTurnedLevelsComposeRatherThanReplace )
     EXPECT_TRUE( ElectsAt( f, child, centre ) );
     EXPECT_EQ( Desert::UI::PickElement( f.Registry, f.Canvas, centre, kViewport ), child )
          << "the editor's pick disagrees with the walk about a doubly-rotated child";
+}
+
+// =========================================================================================================
+// Ю4 — THE KEY IS THE PAIR (canvas x view), NOT EITHER HALF
+//
+// U3 gave the state a VIEW. It was half the key, and the missing half was not the smaller one: a view draws
+// EVERY canvas of its scene, so a HUD canvas and a menu canvas shared one screen machine, one hover-clock
+// table and one hot election. The tests below vary ONE coordinate at a time and require the other to hold
+// still, which is the only shape that can tell a two-dimensional key from either of its projections — a
+// suite that only ever varied the view passes with the canvas half deleted, and one that only varied the
+// canvas passes with the view half deleted.
+// =========================================================================================================
+
+namespace
+{
+    // ONE registry, TWO canvases, one button each. Both canvases are Stretch at 1000x1000 so design px are
+    // screen px; `Upper` has the higher Sort Order, so it is drawn second and is therefore on top — of the
+    // pixels and of the pointer.
+    struct TwoCanvasFixture
+    {
+        entt::registry Registry;
+        entt::entity   Lower = entt::null, LowerButton = entt::null;
+        entt::entity   Upper = entt::null, UpperButton = entt::null;
+
+        TwoCanvasFixture()
+        {
+            Lower       = MakeCanvas( 0 );
+            LowerButton = MakeButton( Lower, 0.0f );
+            Upper       = MakeCanvas( 10 );
+            UpperButton = MakeButton( Upper, 200.0f ); // disjoint from the lower one by default
+        }
+
+        entt::entity MakeCanvas( int sortOrder )
+        {
+            const entt::entity e = Registry.create();
+            auto&              c = Registry.emplace<ECS::UICanvasComponent>( e ).Data;
+            c.ScaleMode          = ECS::UICanvasScaleMode::Stretch;
+            c.ReferenceWidth     = kSide;
+            c.ReferenceHeight    = kSide;
+            c.SortOrder          = sortOrder;
+            Registry.emplace<ECS::RelationshipComponent>( e );
+            return e;
+        }
+
+        entt::entity MakeButton( entt::entity canvas, float x )
+        {
+            const entt::entity e = Registry.create();
+            auto&              l = Registry.emplace<ECS::UILayoutComponent>( e ).Data;
+            l.AnchorMin          = { 0.0f, 0.0f };
+            l.AnchorMax          = { 0.0f, 0.0f };
+            l.OffsetMin          = { x, 0.0f };
+            l.OffsetMax          = { x + 100.0f, 50.0f };
+
+            auto& b        = Registry.emplace<ECS::UIButtonComponent>( e ).Data;
+            b.NormalColor  = { 0.1f, 0.1f, 0.1f };
+            b.HoverColor   = { 0.5f, 0.5f, 0.5f };
+            b.PressedColor = { 0.9f, 0.9f, 0.9f };
+
+            Registry.get<ECS::RelationshipComponent>( canvas ).Children.push_back( e );
+            Registry.emplace<ECS::RelationshipComponent>( e ).Parent = canvas;
+            return e;
+        }
+
+        // One frame of @p view over both canvases, in draw order, with the pointer at @p input. Returns
+        // the button action the frame fired, if any — a button only acts when the host offers somewhere to
+        // put the answer, so a frame with no outClicked cannot navigate.
+        std::string Frame( UIViewContext& view, const UIInput& input )
+        {
+            R2D::DrawList2D dl;
+            std::string     clicked;
+            const auto      canvases = Desert::UI::CanvasesInDrawOrder( Registry );
+            Desert::UI::BeginUIFrame( view, Registry );
+            for ( const entt::entity c : canvases )
+            {
+                const auto drawn = Desert::UI::RenderCanvas2D( view, Registry, c, dl, kViewport,
+                                                               /*worldViewProj=*/nullptr, &input, &clicked );
+                EXPECT_TRUE( drawn.IsSuccess() ) << drawn.GetError();
+            }
+            Desert::UI::EndUIFrame( view, Registry, dl, &input, /*focused=*/nullptr, &clicked );
+            return clicked;
+        }
+    };
+
+    // A canvas with two screens under it, "<name>A" (initial) and "<name>B", each spread over the canvas.
+    // Returns the entity of the second screen so a test can hang a navigating button on the first.
+    void AddTwoScreens( entt::registry& reg, entt::entity canvas, const std::string& a, const std::string& b,
+                        entt::entity moveUnderFirst = entt::null )
+    {
+        reg.emplace<ECS::UIScreenStackComponent>( canvas ).Data.InitialScreen = a;
+        for ( const std::string& name : { a, b } )
+        {
+            const entt::entity s                               = reg.create();
+            reg.emplace<ECS::UIScreenComponent>( s ).Data.Name = name;
+            auto& l                                            = reg.emplace<ECS::UILayoutComponent>( s ).Data;
+            l.AnchorMax                                        = { 1.0f, 1.0f };
+            l.OffsetMax                                        = { 0.0f, 0.0f };
+            // A screen is a container, not a target: it spreads over the whole canvas, so with the default
+            // HitTest it would be elected by any pointer inside the canvas and the topmost canvas's screen
+            // would swallow every click in the frame. ChildrenOnly is what a real screen carries, and it is
+            // the engine behaving correctly rather than a workaround — measured here first.
+            l.HitTest                                           = ECS::UIHitTest::ChildrenOnly;
+            reg.emplace<ECS::RelationshipComponent>( s ).Parent = canvas;
+            auto& kids = reg.get<ECS::RelationshipComponent>( canvas ).Children;
+            if ( name == a && moveUnderFirst != entt::null )
+            {
+                kids.erase( std::remove( kids.begin(), kids.end(), moveUnderFirst ), kids.end() );
+                reg.get<ECS::RelationshipComponent>( s ).Children.push_back( moveUnderFirst );
+                reg.get<ECS::RelationshipComponent>( moveUnderFirst ).Parent = s;
+            }
+            kids.push_back( s );
+        }
+    }
+} // namespace
+
+// --- THE DECISIVE ONE: four cells, and each moves only when its own pair is addressed --------------------
+//
+// Two views draw the SAME two canvases in the same frames. Each view points at a different canvas's button.
+// Four (canvas x view) cells exist and exactly two of them may warm up. Collapse the key to the view alone
+// and the two cells of a view merge, so the canvas the view is NOT pointing at warms up too; collapse it to
+// the canvas alone and the two views merge, so the other view's button warms up.
+TEST( UICanvasContextPair, HoverInOneCellMovesNoOtherCellOfTheTable )
+{
+    TwoCanvasFixture f;
+    UIViewContext    viewA, viewB;
+
+    const UIInput onLower = At( 10.0f, 10.0f, /*down=*/false );  // inside LowerButton only
+    const UIInput onUpper = At( 210.0f, 10.0f, /*down=*/false ); // inside UpperButton only
+
+    // Frame 1 elects; the ease only starts once the election is in (the walk reacts to LAST frame's hot).
+    f.Frame( viewA, onLower );
+    f.Frame( viewB, onUpper );
+    RewindClock( viewA, 0.5f );
+    RewindClock( viewB, 0.5f );
+    f.Frame( viewA, onLower );
+    f.Frame( viewB, onUpper );
+
+    const float aOnLower = viewA.CanvasState( f.Lower ).HoverT[f.LowerButton];
+    const float aOnUpper = viewA.CanvasState( f.Upper ).HoverT[f.UpperButton];
+    const float bOnLower = viewB.CanvasState( f.Lower ).HoverT[f.LowerButton];
+    const float bOnUpper = viewB.CanvasState( f.Upper ).HoverT[f.UpperButton];
+
+    EXPECT_GT( aOnLower, 0.5f ) << "view A pointed at the lower canvas's button and its clock never moved";
+    EXPECT_GT( bOnUpper, 0.5f ) << "view B pointed at the upper canvas's button and its clock never moved";
+
+    // The two negative controls, one per axis. Without them the assertions above pass on a shared table.
+    EXPECT_NEAR( aOnUpper, 0.0f, 1e-4f )
+         << "the OTHER CANVAS of the same view warmed up: the cell is keyed by the view alone";
+    EXPECT_NEAR( bOnLower, 0.0f, 1e-4f )
+         << "the OTHER CANVAS of the same view warmed up: the cell is keyed by the view alone";
+
+    // And the view axis, on ONE canvas — the brief's own case, with one registry rather than two.
+    EXPECT_NEAR( viewB.CanvasState( f.Lower ).HoverT[f.LowerButton], 0.0f, 1e-4f )
+         << "view B's cell for the lower canvas warmed from view A's pointer: the cell is keyed by the "
+            "canvas alone";
+    EXPECT_NEAR( viewA.CanvasState( f.Upper ).HoverT[f.UpperButton], 0.0f, 1e-4f )
+         << "view A's cell for the upper canvas warmed from view B's pointer: the cell is keyed by the "
+            "canvas alone";
+
+    EXPECT_EQ( viewA.CanvasStateCount(), 2u );
+    EXPECT_EQ( viewB.CanvasStateCount(), 2u );
+}
+
+// --- The screen machine is a property of the pair, and this is what a shared one DOES --------------------
+//
+// Two canvases in one view, each with its own two screens. The names are disjoint, because screens are
+// sub-trees of ONE canvas — which is exactly why a single machine per view cannot work: the second walk of
+// every frame finds the current name foreign to its own tree and RE-SEEDS, so the two canvases would fight
+// over one string forever and both end up on their first screen.
+TEST( UICanvasContextPair, EachCanvasNavigatesItsOwnScreensInsideOneView )
+{
+    TwoCanvasFixture f;
+    AddTwoScreens( f.Registry, f.Lower, "Home", "Settings", f.LowerButton );
+    AddTwoScreens( f.Registry, f.Upper, "Idle", "Alert" );
+
+    auto& button          = f.Registry.get<ECS::UIButtonComponent>( f.LowerButton ).Data;
+    button.Action         = ECS::UIButtonAction::ShowScreen;
+    button.OnClickMessage = "Settings";
+
+    UIViewContext view, untouched;
+
+    f.Frame( view, At( 10.0f, 10.0f ) );        // elect the lower canvas's button
+    f.Frame( untouched, At( 900.0f, 900.0f ) ); // a second view of the same scene, pointing at nothing
+    ASSERT_EQ( view.Hot, f.LowerButton );
+
+    UIInput click       = At( 10.0f, 10.0f, /*down=*/false );
+    click.MouseReleased = true;
+    EXPECT_EQ( f.Frame( view, click ), "screen:Settings" );
+
+    // Three more frames: a shared machine does not merely start wrong, it oscillates, so one frame after
+    // the click could pass by accident.
+    for ( int i = 0; i < 3; ++i )
+    {
+        f.Frame( view, At( 900.0f, 900.0f, /*down=*/false ) );
+        f.Frame( untouched, At( 900.0f, 900.0f, /*down=*/false ) );
+    }
+
+    EXPECT_EQ( view.CanvasState( f.Lower ).Screen, "Settings" ) << "the navigation did not stick";
+    EXPECT_EQ( view.CanvasState( f.Upper ).Screen, "Idle" )
+         << "the OTHER canvas of the same view moved, or was re-seeded by the navigating one";
+    EXPECT_EQ( untouched.CanvasState( f.Lower ).Screen, "Home" )
+         << "a second view of the same scene followed a navigation it never made";
+    EXPECT_EQ( untouched.CanvasState( f.Upper ).Screen, "Idle" );
+}
+
+// --- The pointer is the VIEW's: one election over every canvas of the frame ------------------------------
+//
+// This is the seam the four overlay features sit on. A canvas drawn later is on top, and being on top has
+// to mean the pointer stops there — otherwise a modal scrim is a picture of a modal and not a modal.
+TEST( UICanvasContextPair, TheCanvasDrawnLastTakesThePointerFromTheOneBelowIt )
+{
+    TwoCanvasFixture f;
+    // Move the upper canvas's button onto the lower one's, so one point is inside both.
+    auto& l     = f.Registry.get<ECS::UILayoutComponent>( f.UpperButton ).Data;
+    l.OffsetMin = { 0.0f, 0.0f };
+    l.OffsetMax = { 100.0f, 50.0f };
+
+    UIViewContext view;
+    f.Frame( view, At( 10.0f, 10.0f ) );
+    EXPECT_EQ( view.Hot, f.UpperButton ) << "the pointer was over both canvases and the one drawn FIRST kept it";
+
+    // The negative control, and it is the one that matters: with the overlay's button moved away the same
+    // point must reach the canvas underneath. Without it, "the last canvas always wins" would also pass —
+    // including the way it wins by erasing the election of everything drawn before it, which is what the
+    // per-walk hand-over did.
+    l.OffsetMin = { 200.0f, 0.0f };
+    l.OffsetMax = { 300.0f, 50.0f };
+    UIViewContext second;
+    second.Reset();
+    f.Frame( second, At( 10.0f, 10.0f ) );
+    EXPECT_EQ( second.Hot, f.LowerButton )
+         << "an overlay canvas that does not cover the pointer still swallowed the election";
+}
+
+// --- Lifetime: a cell dies with its canvas, inside a living view -----------------------------------------
+//
+// The twin of "a hidden preview still owns its renderer slot" (Docs/RENDERER_FRAME_STATE.md). entt recycles
+// ids, so a cell outliving its canvas is not dead weight — the next canvas can be handed that id.
+TEST( UICanvasContextPair, ACanvasThatStopsExistingTakesItsCellWithIt )
+{
+    TwoCanvasFixture f;
+    UIViewContext    view;
+
+    f.Frame( view, At( 10.0f, 10.0f ) );
+    ASSERT_EQ( view.CanvasStateCount(), 2u );
+    view.CanvasState( f.Upper ).Screen = "Alert"; // something recognisable to inherit
+
+    const entt::entity destroyed = f.Upper;
+    f.Registry.destroy( f.Upper );
+    f.Upper = entt::null;
+
+    f.Frame( view, At( 10.0f, 10.0f ) );
+    EXPECT_EQ( view.CanvasStateCount(), 1u ) << "the destroyed canvas's cell outlived it";
+
+    // The recycled id, and the correction it forced. entt reuses the INDEX but bumps the version, so the
+    // reborn canvas is a different key and could not have inherited the cell even if the cell had stayed.
+    // What the retirement is really for is therefore the LEAK — one cell per canvas the level ever
+    // destroyed, in a view that lives as long as the document — and, at the far end, the 12 version bits
+    // wrapping after 4096 reuses of one index. Both are reasons; "the next canvas inherits it" is not, and
+    // it was the reason this test was written to prove until it measured otherwise.
+    const entt::entity reborn = f.MakeCanvas( 10 );
+    EXPECT_NE( reborn, destroyed ) << "entt handed back an identical id, version bits and all";
+    EXPECT_EQ( entt::to_integral( reborn ) & 0xFFFFFu, entt::to_integral( destroyed ) & 0xFFFFFu )
+         << "the index was not recycled, so nothing here is about recycling";
+    f.MakeButton( reborn, 200.0f );
+    f.Frame( view, At( 10.0f, 10.0f ) );
+    EXPECT_TRUE( view.CanvasState( reborn ).Screen.empty() );
+    EXPECT_EQ( view.CanvasStateCount(), 2u ) << "the retired cell came back";
+}
+
+// --- Draw order is authored, not the component pool's ----------------------------------------------------
+TEST( UICanvasContextPair, CanvasesAreOrderedByTheirAuthoredSortOrder )
+{
+    TwoCanvasFixture f;
+    ASSERT_EQ( Desert::UI::CanvasesInDrawOrder( f.Registry ), ( std::vector<entt::entity>{ f.Lower, f.Upper } ) );
+
+    // Reverse the authored order and the draw order follows it, not the creation order.
+    f.Registry.get<ECS::UICanvasComponent>( f.Lower ).Data.SortOrder = 20;
+    EXPECT_EQ( Desert::UI::CanvasesInDrawOrder( f.Registry ), ( std::vector<entt::entity>{ f.Upper, f.Lower } ) );
+
+    // Equal orders keep the order the scene created them in — a STABLE sort, so the tie is decided by the
+    // file rather than by the sort's internal pivoting.
+    f.Registry.get<ECS::UICanvasComponent>( f.Lower ).Data.SortOrder = 10;
+    EXPECT_EQ( Desert::UI::CanvasesInDrawOrder( f.Registry ), ( std::vector<entt::entity>{ f.Lower, f.Upper } ) );
+}
+
+// --- A walk outside a frame of its view is refused, not silently frozen ----------------------------------
+TEST( UICanvasContextPair, AWalkWithNoOpenFrameIsRefusedByName )
+{
+    TwoCanvasFixture f;
+    UIViewContext    view;
+    R2D::DrawList2D  dl;
+
+    const auto refused = Desert::UI::RenderCanvas2D( view, f.Registry, f.Lower, dl, kViewport );
+    EXPECT_FALSE( refused.IsSuccess() )
+         << "a walk with no BeginUIFrame drew a frame whose clock can never advance";
+    EXPECT_NE( refused.GetError().find( "BeginUIFrame" ), std::string::npos ) << refused.GetError();
+}
+
+// --- The editor's pick and the renderer's election must agree ABOUT WHICH CANVAS -------------------------
+//
+// The viewport picks by asking every canvas and keeping the last hit; the walk elects by drawing every
+// canvas and keeping the last writer. Two loops, one answer required — and they can only give it if both
+// iterate the SAME order. The pick's loop used to walk `reg.view<UICanvasComponent>()`, which is the pool's
+// order (measured: the REVERSE of creation) and knows nothing of Sort Order, so with two canvases
+// overlapping at the cursor it selected the one drawn underneath.
+TEST( UICanvasContextPair, TheEditorsPickAndTheWalkAgreeOnWhichCanvasIsOnTop )
+{
+    TwoCanvasFixture f;
+    auto&            l = f.Registry.get<ECS::UILayoutComponent>( f.UpperButton ).Data;
+    l.OffsetMin        = { 0.0f, 0.0f }; // both buttons under one point
+    l.OffsetMax        = { 100.0f, 50.0f };
+
+    const glm::vec2 point{ 10.0f, 10.0f };
+    for ( const int upperOrder : { 10, -10 } ) // on top, then underneath
+    {
+        f.Registry.get<ECS::UICanvasComponent>( f.Upper ).Data.SortOrder = upperOrder;
+
+        UIViewContext view;
+        f.Frame( view, At( point.x, point.y ) );
+
+        // The editor's loop, spelled exactly as ViewportPanel spells it.
+        entt::entity picked = entt::null;
+        for ( const entt::entity canvas : Desert::UI::CanvasesInDrawOrder( f.Registry ) )
+            if ( const entt::entity hit = Desert::UI::PickElement( f.Registry, canvas, point, kViewport );
+                 hit != entt::null )
+                picked = hit;
+
+        EXPECT_EQ( picked, view.Hot ) << "the pick and the election disagree with Upper's Sort Order at "
+                                      << upperOrder;
+        EXPECT_EQ( picked, upperOrder > 0 ? f.UpperButton : f.LowerButton );
+    }
 }
 
 int main( int argc, char** argv )

@@ -130,11 +130,11 @@ namespace Desert::Runtime
 
 using Desert::UI::BatchBreak;
 using Desert::UI::Rect;
-using Desert::UI::UICanvasContext;
 using Desert::UI::UIElementNode;
 using Desert::UI::UIFrameProbe;
 using Desert::UI::UIFrameProbeSink;
 using Desert::UI::UISkipCause;
+using Desert::UI::UIViewContext;
 namespace ECS = Desert::ECS;
 namespace R2D = Desert::Graphic::Render2D;
 namespace UI  = Desert::UI;
@@ -199,10 +199,13 @@ namespace
 
     // One walk of the canvas into a fresh draw list, with a fresh context — the headless equivalent of a
     // frame. Returns whether the canvas drew.
-    bool Walk( Scene& scene, R2D::DrawList2D& dl, UICanvasContext& ctx )
+    bool Walk( Scene& scene, R2D::DrawList2D& dl, UIViewContext& ctx )
     {
         dl.Reset();
-        return UI::RenderCanvas2D( ctx, scene.Registry, scene.Canvas, dl, kViewport ).IsSuccess();
+        UI::BeginUIFrame( ctx, scene.Registry );
+        const bool drawn = UI::RenderCanvas2D( ctx, scene.Registry, scene.Canvas, dl, kViewport ).IsSuccess();
+        UI::EndUIFrame( ctx, scene.Registry, dl, /*input=*/nullptr );
+        return drawn;
     }
 
     // The bytes a draw list holds, as one comparable value: geometry AND batch structure. Two walks that
@@ -276,7 +279,7 @@ TEST( UIIntrospectionBatches, GeometryCountsAreTheDrawListsOwn )
 {
     Scene           scene;
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     ASSERT_TRUE( Walk( scene, dl, ctx ) );
 
     UIFrameProbe probe;
@@ -304,7 +307,7 @@ TEST( UIIntrospectionBatches, EveryRecordedBatchIsSubmitted )
     scene.Layout( scene.Panels[2] ).ClipContents = true;
 
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     ASSERT_TRUE( Walk( scene, dl, ctx ) );
 
     UIFrameProbe probe;
@@ -326,7 +329,7 @@ TEST( UIIntrospectionBatches, NoTwoAdjacentBatchesCouldHaveMerged )
     scene.Registry.get<ECS::UIPanelComponent>( scene.Panels[4] ).Data.BackdropBlur = 1.0f;
 
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     ASSERT_TRUE( Walk( scene, dl, ctx ) );
 
     const auto& cmds = dl.GetCommands();
@@ -348,11 +351,11 @@ TEST( UIIntrospectionWalk, CountsAddUp )
     scene.Layout( scene.Panels[1] ).Visibility = ECS::UIVisibility::Hidden;
 
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     ASSERT_TRUE( Walk( scene, dl, ctx ) );
 
     UIFrameProbe probe;
-    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, scene.Canvas, dl, kViewport, probe ).IsSuccess() );
+    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, { scene.Canvas }, dl, kViewport, probe ).IsSuccess() );
 
     EXPECT_EQ( probe.Walk.Visited, 3u );
     EXPECT_EQ( probe.Walk.Drawn, 2u );
@@ -371,10 +374,10 @@ TEST( UIIntrospectionWalk, OwnAndInheritedAreDifferentAnswers )
     scene.Layout( scene.Panels[0] ).Visibility = ECS::UIVisibility::Hidden;
 
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     ASSERT_TRUE( Walk( scene, dl, ctx ) );
     UIFrameProbe probe;
-    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, scene.Canvas, dl, kViewport, probe ).IsSuccess() );
+    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, { scene.Canvas }, dl, kViewport, probe ).IsSuccess() );
 
     const UIElementNode* root = NodeFor( probe, scene.Panels[0] );
     const UIElementNode* mid  = NodeFor( probe, child );
@@ -400,10 +403,10 @@ TEST( UIIntrospectionWalk, ABindingThatSaysHiddenIsItsOwnReason )
     UI::UIDataStore::Get().Set( "hud.visible", false );
 
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     ASSERT_TRUE( Walk( scene, dl, ctx ) );
     UIFrameProbe probe;
-    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, scene.Canvas, dl, kViewport, probe ).IsSuccess() );
+    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, { scene.Canvas }, dl, kViewport, probe ).IsSuccess() );
 
     const UIElementNode* bound = NodeFor( probe, scene.Panels[1] );
     ASSERT_NE( bound, nullptr );
@@ -420,10 +423,10 @@ TEST( UIIntrospectionWalk, AScreenThatIsNotCurrentIsItsOwnReason )
     scene.Registry.emplace<ECS::UIScreenComponent>( scene.Panels[1] ).Data.Name = "Settings";
 
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     ASSERT_TRUE( Walk( scene, dl, ctx ) );
     UIFrameProbe probe;
-    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, scene.Canvas, dl, kViewport, probe ).IsSuccess() );
+    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, { scene.Canvas }, dl, kViewport, probe ).IsSuccess() );
 
     // Exactly one screen is current, so exactly one of the two is on screen.
     EXPECT_EQ( probe.Walk.SkipCounts[static_cast<std::size_t>( UISkipCause::ScreenNotCurrent )], 1u );
@@ -448,10 +451,10 @@ TEST( UIIntrospectionWalk, HidingASkippedElementChangesNothing )
     (void)underHidden;
 
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     ASSERT_TRUE( Walk( scene, dl, ctx ) );
     UIFrameProbe probe;
-    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, scene.Canvas, dl, kViewport, probe ).IsSuccess() );
+    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, { scene.Canvas }, dl, kViewport, probe ).IsSuccess() );
 
     const std::string baseline = Fingerprint( dl );
     ASSERT_GT( probe.Walk.Skipped, 0u );
@@ -466,7 +469,7 @@ TEST( UIIntrospectionWalk, HidingASkippedElementChangesNothing )
         field                         = ECS::UIVisibility::Hidden;
 
         R2D::DrawList2D again;
-        UICanvasContext ctx2;
+        UIViewContext   ctx2;
         ASSERT_TRUE( Walk( scene, again, ctx2 ) );
         EXPECT_EQ( Fingerprint( again ), baseline )
              << "entity " << static_cast<std::uint32_t>( n.Entity )
@@ -494,10 +497,10 @@ TEST( UIIntrospectionWalk, AnElementScrolledOutOfItsListIsCountedAsClipped )
     const entt::entity belowTheFold = scene.AddPanel( scene.Panels[0], 0.0f, 200.0f, 40.0f, 20.0f );
 
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     ASSERT_TRUE( Walk( scene, dl, ctx ) );
     UIFrameProbe probe;
-    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, scene.Canvas, dl, kViewport, probe ).IsSuccess() );
+    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, { scene.Canvas }, dl, kViewport, probe ).IsSuccess() );
 
     const UIElementNode* visible = NodeFor( probe, onScreenRow );
     const UIElementNode* hidden  = NodeFor( probe, belowTheFold );
@@ -537,10 +540,10 @@ TEST( UIIntrospectionWalk, ARotatedClipperCountsWhatItCutEvenThoughTheBoxesOverl
     const entt::entity inTheCorner = scene.AddPanel( clipper, -90.0f, 80.0f, 40.0f, 40.0f );
 
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     ASSERT_TRUE( Walk( scene, dl, ctx ) );
     UIFrameProbe probe;
-    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, scene.Canvas, dl, kViewport, probe ).IsSuccess() );
+    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, { scene.Canvas }, dl, kViewport, probe ).IsSuccess() );
 
     const UIElementNode* node = NodeFor( probe, inTheCorner );
     ASSERT_NE( node, nullptr );
@@ -561,10 +564,10 @@ TEST( UIIntrospectionWalk, DrawOrderIsTheOrderTheWalkEmitsIn )
     const entt::entity child = scene.AddPanel( scene.Panels[0], 0.0f, 0.0f, 20.0f, 20.0f );
 
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     ASSERT_TRUE( Walk( scene, dl, ctx ) );
     UIFrameProbe probe;
-    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, scene.Canvas, dl, kViewport, probe ).IsSuccess() );
+    ASSERT_TRUE( UI::CaptureFrame( ctx, scene.Registry, { scene.Canvas }, dl, kViewport, probe ).IsSuccess() );
 
     // Parent before child, siblings in order — which is what makes "the last writer is topmost" readable.
     EXPECT_EQ( NodeFor( probe, scene.Panels[0] )->Order, 0 );
@@ -579,9 +582,9 @@ TEST( UIIntrospectionWalk, ARefusalIsNotAnEmptyFrame )
     const entt::entity notACanvas = scene.Panels[0];
 
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     UIFrameProbe    probe;
-    const auto      result = UI::CaptureFrame( ctx, scene.Registry, notACanvas, dl, kViewport, probe );
+    const auto      result = UI::CaptureFrame( ctx, scene.Registry, { notACanvas }, dl, kViewport, probe );
     EXPECT_FALSE( result.IsSuccess() );
     EXPECT_FALSE( probe.Valid );
     EXPECT_FALSE( probe.Refusal.empty() );
@@ -596,13 +599,13 @@ TEST( UIIntrospectionSink, DisarmedItTouchesNothing )
 {
     Scene           scene( 4 );
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     ASSERT_TRUE( Walk( scene, dl, ctx ) );
 
     UIFrameProbeSink sink;
     ASSERT_FALSE( sink.IsArmed() );
     for ( int i = 0; i < 32; ++i )
-        sink.Capture( ctx, scene.Registry, scene.Canvas, dl, kViewport );
+        sink.Capture( ctx, scene.Registry, { scene.Canvas }, dl, kViewport );
 
     EXPECT_EQ( sink.Captures(), 0u );
     EXPECT_TRUE( sink.Frame().Elements.empty() );
@@ -616,12 +619,12 @@ TEST( UIIntrospectionSink, ArmedItCapturesAndDisarmingDropsTheFrame )
 {
     Scene           scene( 4 );
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     ASSERT_TRUE( Walk( scene, dl, ctx ) );
 
     UIFrameProbeSink sink;
     sink.SetArmed( true );
-    sink.Capture( ctx, scene.Registry, scene.Canvas, dl, kViewport );
+    sink.Capture( ctx, scene.Registry, { scene.Canvas }, dl, kViewport );
     EXPECT_EQ( sink.Captures(), 1u );
     EXPECT_TRUE( sink.Frame().Valid );
     EXPECT_EQ( sink.Frame().Walk.Drawn, 4u );
@@ -646,7 +649,7 @@ TEST( UIIntrospectionCost, AnElementBetweenTwoTexturesIsTheOneThatOpensABatch )
     g_BackgroundServiceArmed = true;
 
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     ASSERT_TRUE( Walk( scene, dl, ctx ) );
     ASSERT_EQ( dl.GetCommands().size(), 3u ) << "the sprite panel should split the flat run in two";
 
@@ -671,7 +674,7 @@ TEST( UIIntrospectionCost, AFlatPanelBetweenFlatPanelsOpensNothing )
     // The negative control. Without it "OpensBatch" could be true for everything and still pass above.
     Scene           scene( 3 );
     R2D::DrawList2D dl;
-    UICanvasContext ctx;
+    UIViewContext   ctx;
     ASSERT_TRUE( Walk( scene, dl, ctx ) );
 
     const UI::UIElementCost cost =
@@ -687,12 +690,12 @@ TEST( UIIntrospectionCost, RefusesByNameWhenItCannotMeasure )
     Scene scene( 1 );
 
     const UI::UIElementCost noLayout =
-         UI::ProbeElementCost( UICanvasContext{}, scene.Registry, scene.Canvas, scene.Canvas, kViewport );
+         UI::ProbeElementCost( UIViewContext{}, scene.Registry, scene.Canvas, scene.Canvas, kViewport );
     EXPECT_FALSE( noLayout.Valid );
     EXPECT_FALSE( noLayout.Refusal.empty() );
 
     const UI::UIElementCost nothing =
-         UI::ProbeElementCost( UICanvasContext{}, scene.Registry, scene.Canvas, entt::null, kViewport );
+         UI::ProbeElementCost( UIViewContext{}, scene.Registry, scene.Canvas, entt::null, kViewport );
     EXPECT_FALSE( nothing.Valid );
     EXPECT_FALSE( nothing.Refusal.empty() );
 }

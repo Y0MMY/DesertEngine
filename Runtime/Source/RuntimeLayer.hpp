@@ -74,14 +74,11 @@ namespace Desert::Player
         bool                                         m_SubmitPressed = false; // Enter pressed since present
         entt::entity                                 m_FocusedUI     = entt::null; // the focused control (or null)
 
-        // The player's one canvas view: hover and tween clocks, the elected hot element, the drag and the
-        // screen stack. It rebinds itself when a "scene:" button loads another scene, so entity ids from the
-        // old registry never answer for the new one.
-        UI::UICanvasContext m_UICanvas;
-
-        // The last reason the frame had no canvas to draw, so it is logged when it CHANGES rather than every
-        // frame. A game with no UI at all is legitimate and must not be told about it sixty times a second.
-        std::string m_CanvasRefusal;
+        // The player's one view: hover and tween clocks, the elected hot element, the drag, and one screen
+        // stack per canvas the level holds. It rebinds itself when a "scene:" button loads another scene, so
+        // entity ids from the old registry never answer for the new one, and a canvas destroyed mid-level
+        // takes its cell with it.
+        UI::UIViewContext m_UIView;
 
         Common::BoolResultStr InitPresent( const std::shared_ptr<Graphic::Framebuffer>& swapFb );
 

@@ -39,17 +39,24 @@ namespace Desert::UI
     // carry its own canvas. The UI Editor could not preview the second canvas either and had to refuse by
     // name (U7-2 left that refusal in place, pointing here).
     //
-    // So the canvas is now an ARGUMENT everywhere below and in RenderCanvas2D, and these three functions are
+    // So the canvas is now an ARGUMENT everywhere below and in RenderCanvas2D, and these four functions are
     // the only ways to obtain one. None of them can silently pick a winner:
     //
     //   CanvasOf     derives the answer from an element that already names it — its own canvas ancestor.
     //                This is what the editor uses, and it is exact rather than lucky.
     //   CanvasCount  counts. Counting is not electing, and it is what lets a host say "no canvas yet, offer
     //                to create one" and "more than one, ask which" as two different sentences.
-    //   SoleCanvas   the answer for a host that has no other way to name one (the game, the viewport pass).
-    //                It REFUSES when there is none and when there is more than one, with the count in the
-    //                message — because "there are two and I drew one of them" is exactly the silent wrong
-    //                answer the contract forbids, and it is what this code did for its whole life.
+    //   SoleCanvas   the answer for a host that must name exactly ONE — the UI Editor's element factory,
+    //                which has to put a new element somewhere. It REFUSES when there is none and when
+    //                there is more than one, with the count in the message — because "there are two and I
+    //                chose one of them" is exactly the silent wrong answer the contract forbids.
+    //   CanvasesInDrawOrder
+    //                ALL of them, ordered. This is what a view that DRAWS uses, and it is why the two
+    //                drawing hosts (the viewport's EditorUIPass and the runtime) no longer refuse a scene
+    //                with two canvases: refusing was the honest answer while a view could hold the state
+    //                of only one canvas, and Ю4 removed that limit. A HUD and a pause menu are two
+    //                canvases of one level, and the four overlay features (tooltip, context menu, modal,
+    //                toast) are each an extra canvas drawn over the rest.
 
     // The canvas @p e belongs to: @p e itself when it carries a UICanvasComponent, otherwise the nearest
     // ancestor that does. entt::null when @p e is not under a canvas at all (a plain 3D entity, or a UI
@@ -61,6 +68,12 @@ namespace Desert::UI
 
     // The scene's ONE canvas. Refuses, by name and with the count, when there is not exactly one.
     [[nodiscard]] Common::ResultStr<entt::entity> SoleCanvas( entt::registry& reg );
+
+    // Every canvas of the scene, in the order a view must draw them: ascending UICanvasData::SortOrder,
+    // and within one SortOrder the order the scene created them (which is the order the file lists them).
+    // Later in the list = drawn later = on top, both for pixels and for the pointer, since the hot election
+    // keeps the last writer.
+    [[nodiscard]] std::vector<entt::entity> CanvasesInDrawOrder( entt::registry& reg );
 
     // --- The visibility axis, asked once ------------------------------------------------------------
     // Three places resolve an element's rect — the renderer's walk, the editor's pick, the editor's
