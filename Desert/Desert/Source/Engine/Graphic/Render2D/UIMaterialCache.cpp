@@ -220,10 +220,24 @@ namespace Desert::Graphic::Render2D
                               "ignored",
                               shaderName, name );
             for ( const auto& [name, texture] : overrides.Textures )
-                if ( !built.Material->SetTexture( name, ResolveTextureImage( texture ) ) )
+            {
+                // A HANDLE THAT NAMES A TEXTURE AND A HANDLE THAT NAMES NOTHING ARE NOT THE SAME SLOT,
+                // and DataDrivenMaterial::SetTexture cannot tell them apart: it takes null to mean "the
+                // shader's own default", which is exactly right for a slot the author cleared and
+                // exactly wrong for one whose texture failed to resolve. Both then draw the schema's
+                // white, and only one of them is what the file says. Asked HERE, where the handle is
+                // still in hand, because this is the last place that knows the difference.
+                Image2D* image = ResolveTextureImage( texture );
+                if ( texture != 0 && !image )
+                    LOG_ERROR( "[UIMaterial] '{}' binds texture {} to '{}' and it did not resolve; the "
+                               "slot falls back to the shader's own default and the surface will not "
+                               "look like the file says",
+                               shaderName, texture, name );
+                if ( !built.Material->SetTexture( name, image ) )
                     LOG_WARN( "[UIMaterial] '{}' has no Texture2D '{}' — the binding in the .demat is "
                               "ignored",
                               shaderName, name );
+            }
         }
 
         built.LastUsedFrame = frame;
