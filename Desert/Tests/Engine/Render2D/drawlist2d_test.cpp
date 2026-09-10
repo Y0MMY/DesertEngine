@@ -808,3 +808,105 @@ int main( int argc, char** argv )
     testing::InitGoogleTest( &argc, argv );
     return RUN_ALL_TESTS();
 }
+
+// --- Ю11: a UI-domain material is a FILL, and what it costs the batcher ------------------------------
+//
+// The whole design rests on one claim — a material adds nothing to the batch key that a texture does not
+// already add, and adds NOTHING AT ALL to an element that has none. These assert both halves of that,
+// plus the refusal that keeps a null from becoming an ordinary white rect.
+
+namespace
+{
+    // Two distinct addresses standing in for two resolved UIMaterialCache::Entry values. The list treats
+    // them as opaque ids and never dereferences them, which is exactly why a test needs no GPU.
+    const char kMaterialA = 0;
+    const char kMaterialB = 0;
+} // namespace
+
+TEST( DrawList2DMaterial, AMaterialRectEmitsOneQuadCarryingItsMaterial )
+{
+    DrawList2D dl;
+    dl.AddMaterialRect( &kMaterialA, { 0.0f, 0.0f }, { 10.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+
+    ASSERT_EQ( dl.GetCommands().size(), 1u );
+    EXPECT_EQ( dl.GetCommands()[0].Material, &kMaterialA );
+    EXPECT_EQ( dl.GetCommands()[0].Texture, nullptr );
+    EXPECT_FALSE( dl.GetCommands()[0].Text );
+    EXPECT_EQ( dl.GetIndices().size(), 6u );
+    ASSERT_EQ( dl.GetVertices().size(), 4u );
+    // UVs span the element's own rect, which is the whole contract a material fragment is written
+    // against (Common/UIVertex.glslh). A material owns its shape through that UV, so there is no
+    // rounding argument to check.
+    EXPECT_NEAR( dl.GetVertices()[0].UV.x, 0.0f, kEps );
+    EXPECT_NEAR( dl.GetVertices()[2].UV.x, 1.0f, kEps );
+    EXPECT_NEAR( dl.GetVertices()[2].UV.y, 1.0f, kEps );
+}
+
+TEST( DrawList2DMaterial, TwoElementsOnOneMaterialAreONEBatch )
+{
+    // The measured claim from UI_MaterialProbe, as an assertion: one runtime material per ASSET, not per
+    // element, so two panels pointing at the same `.demat` cost one draw call between them. UE's
+    // GetDynamicMaterial() is the counter-example — it silently gives each widget its own instance, and
+    // their own documentation names that as the dominant real-world batching cost of UI materials.
+    DrawList2D dl;
+    dl.AddMaterialRect( &kMaterialA, { 0.0f, 0.0f }, { 10.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+    dl.AddMaterialRect( &kMaterialA, { 20.0f, 0.0f }, { 30.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+
+    ASSERT_EQ( dl.GetCommands().size(), 1u );
+    EXPECT_EQ( dl.GetCommands()[0].IndexCount, 12u );
+}
+
+TEST( DrawList2DMaterial, ADifferentMaterialOpensItsOwnBatch )
+{
+    DrawList2D dl;
+    dl.AddMaterialRect( &kMaterialA, { 0.0f, 0.0f }, { 10.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+    dl.AddMaterialRect( &kMaterialB, { 20.0f, 0.0f }, { 30.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+
+    ASSERT_EQ( dl.GetCommands().size(), 2u );
+    EXPECT_EQ( dl.GetCommands()[0].Material, &kMaterialA );
+    EXPECT_EQ( dl.GetCommands()[1].Material, &kMaterialB );
+}
+
+TEST( DrawList2DMaterial, AMaterialQuadNeverMergesWithAPlainOne )
+{
+    // Both are "solid" by every other test in the key — null texture, not text, same clip — so without
+    // the material in the merge test the second quad would be drawn by the FIRST one's pipeline. That is
+    // the failure this asserts against, in both directions.
+    DrawList2D dl;
+    dl.AddRectFilled( { 0.0f, 0.0f }, { 10.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+    dl.AddMaterialRect( &kMaterialA, { 20.0f, 0.0f }, { 30.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+    dl.AddRectFilled( { 40.0f, 0.0f }, { 50.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+
+    ASSERT_EQ( dl.GetCommands().size(), 3u );
+    EXPECT_EQ( dl.GetCommands()[0].Material, nullptr );
+    EXPECT_EQ( dl.GetCommands()[1].Material, &kMaterialA );
+    EXPECT_EQ( dl.GetCommands()[2].Material, nullptr );
+}
+
+TEST( DrawList2DMaterial, ACanvasWithNoMaterialRecordsExACTLYWhatItAlwaysDid )
+{
+    // THE INVARIANT OF THIS WHOLE LINE, at the level a test can hold it: nothing that does not ask for a
+    // material may differ by one byte because materials exist. The frame half of the same claim is
+    // measured on UI_ElementProbe — 0 differing pixels of 560 560, floor 0 over three repeats.
+    DrawList2D dl;
+    dl.AddRectFilled( { 0.0f, 0.0f }, { 10.0f, 10.0f }, { 1.0f, 0.5f, 0.25f, 1.0f }, 4.0f );
+    dl.AddRect( { 0.0f, 0.0f }, { 10.0f, 10.0f }, { 0.0f, 0.0f, 0.0f, 1.0f }, 2.0f );
+    dl.AddText( &kMaterialA, { 1.0f, 1.0f }, { 5.0f, 5.0f }, { 0.0f, 0.0f }, { 1.0f, 1.0f },
+                { 1.0f, 1.0f, 1.0f, 1.0f } );
+
+    for ( const auto& cmd : dl.GetCommands() )
+        EXPECT_EQ( cmd.Material, nullptr ) << "a primitive that names no material must not carry one";
+}
+
+TEST( DrawList2DMaterial, ANullMaterialRecordsNOTHINGRatherThanAWhiteRect )
+{
+    // AddQuad's null texture means "the backend's 1x1 white", so a null material falling through to it
+    // would draw the element's authored colour and look ALMOST right — the silent wrong answer §1.4
+    // forbids. Resolving a handle is the caller's job precisely because only the caller knows which
+    // handle failed, and UIMaterialCache::Resolve never answers null for a set one.
+    DrawList2D dl;
+    dl.AddMaterialRect( nullptr, { 0.0f, 0.0f }, { 10.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+
+    EXPECT_TRUE( dl.Empty() );
+    EXPECT_TRUE( dl.GetCommands().empty() );
+}

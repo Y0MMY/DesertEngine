@@ -4,7 +4,6 @@
 #include <Engine/Assets/Common.hpp>
 #include <Engine/Graphic/Texture.hpp>
 #include <Engine/Graphic/Image.hpp>
-#include <Engine/Graphic/Render2D/UIMaterialCache.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Text/FontBaker.hpp>
 #include <Engine/Text/Utf8.hpp>
@@ -474,7 +473,7 @@ namespace Desert::UI
                 return nullptr;
             }
 
-            return ctx.Materials->Resolve( handle );
+            return ctx.Materials->ResolveMaterial( handle );
         }
 
         // An animated (GIF) sprite's current frame — a pure function of wall-clock time. Non-GIF handles

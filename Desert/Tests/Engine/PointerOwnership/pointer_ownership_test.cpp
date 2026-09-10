@@ -237,11 +237,15 @@ TEST( PointerOwnership, TheScanFindsTheCensusedPopulation )
     //   accesses: two copies of DrawCommand::Texture carried into the probe so the panel can print WHICH
     //   texture broke a batch, and the editor's probe registry keyed on a Scene's address. The fourth is
     //   the shared Scene the UI Debugger panel holds like every other scene-bound panel.
-    EXPECT_EQ( CountOf( Form::Raw ), 351 );
-    EXPECT_EQ( CountOf( Form::Shared ), 324 );
-    EXPECT_EQ( CountOf( Form::Unique ), 110 );
+    //   823 -> 830 with Ю11 (materials on a UI element). Three raw: the material's identity in the batch
+    //   command, the copy of it the probe prints, and the view's pointer to the cache that owns them.
+    //   Two shared (the cache's target framebuffer and each entry's pipeline) and two unique (each
+    //   entry's runtime material, and the shared error entry) are ownership and answer for themselves.
+    EXPECT_EQ( CountOf( Form::Raw ), 354 );
+    EXPECT_EQ( CountOf( Form::Shared ), 326 );
+    EXPECT_EQ( CountOf( Form::Unique ), 112 );
     EXPECT_EQ( CountOf( Form::Weak ), 38 );
-    EXPECT_EQ( (int)Members().size(), 823 )
+    EXPECT_EQ( (int)Members().size(), 830 )
          << "the population moved. That is not a number to adjust -- it means a pointer member was added "
             "or removed, and the two questions at the top of this file are owed an answer for it.";
 }
@@ -452,7 +456,11 @@ TEST( PointerOwnership, SharedOwnershipIsTheMajorityAndThatIsTheMeasuredAnswer )
     // `shared_ptr` here is a false impression of shared ownership, and the register's job is to make
     // the true owner findable instead of mass-replacing them for uniformity -- churn that would hide
     // the seven real findings in a diff of two hundred files.
-    EXPECT_EQ( CountOf( Form::Shared ), 324 );
+    // 324 -> 326 with Ю11's UIMaterialCache: its target framebuffer and each entry's pipeline. Both are
+    // genuinely shared -- a Framebuffer is held by the scene that made it and by every pipeline compiled
+    // against its render pass, and a GraphicsPipeline by the cache entry and by the specification it was
+    // created from -- so they belong on this side of the census rather than being narrowed for tidiness.
+    EXPECT_EQ( CountOf( Form::Shared ), 326 );
     EXPECT_GT( CountOf( Form::Shared ), CountOf( Form::Unique ) + CountOf( Form::Weak ) );
 }
 

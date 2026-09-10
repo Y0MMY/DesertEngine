@@ -656,6 +656,9 @@ namespace
          { "Shadow", kCanvasRenderer },       { "ShadowColor", kCanvasRenderer },
          { "ShadowOffset", kCanvasRenderer }, { "Glow", kCanvasRenderer },
          { "GlowColor", kCanvasRenderer },    { "GlowSize", kCanvasRenderer },
+         // The UI-material slot is read by the canvas walk like every other fill field; what it
+         // resolves to is Render2D's business (Graphic/Render2D/UIMaterialCache.cpp).
+         { "Material", kCanvasRenderer },
     };
 
     constexpr Row kButtonRows[] = {
