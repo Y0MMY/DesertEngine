@@ -38,6 +38,43 @@ namespace Desert::UI
         return n;
     }
 
+    std::vector<entt::entity> CanvasesInDrawOrder( entt::registry& reg )
+    {
+        // The entity's INDEX, with entt's version bits stripped off. Two canvases with the same authored
+        // Sort Order are decided by it, and it is the order the registry handed the ids out — which, for a
+        // level being loaded, is the order the file lists the canvases in.
+        //
+        // WHY NOT SIMPLY THE ORDER `reg.view<>()` HANDS THEM OUT, which is what a stable sort over the view
+        // would have kept: MEASURED, it is the REVERSE of creation order, because the pool is walked
+        // backwards. A comment claiming the view iterates in creation order would have been wrong in the
+        // one direction that matters, and the test that caught it is
+        // UICanvasContextPair.CanvasesAreOrderedByTheirAuthoredSortOrder.
+        //
+        // And the version bits have to come off, or the tie-break is not creation order at all: a recycled
+        // id carries a bumped version in the high bits, so a raw comparison would sort every canvas that
+        // ever reused an id after every canvas that did not, whenever they were made.
+        const auto creationIndex = []( entt::entity e )
+        {
+            using Traits = entt::entt_traits<std::underlying_type_t<entt::entity>>;
+            return static_cast<std::uint32_t>( entt::to_integral( e ) & Traits::entity_mask );
+        };
+
+        std::vector<entt::entity> out;
+        for ( const auto e : reg.view<ECS::UICanvasComponent>() )
+            out.push_back( e );
+
+        std::sort( out.begin(), out.end(),
+                   [&reg, &creationIndex]( entt::entity a, entt::entity b )
+                   {
+                       const auto& ca = reg.get<ECS::UICanvasComponent>( a ).Data;
+                       const auto& cb = reg.get<ECS::UICanvasComponent>( b ).Data;
+                       if ( ca.SortOrder != cb.SortOrder )
+                           return ca.SortOrder < cb.SortOrder;
+                       return creationIndex( a ) < creationIndex( b );
+                   } );
+        return out;
+    }
+
     Common::ResultStr<entt::entity> SoleCanvas( entt::registry& reg )
     {
         entt::entity first = entt::null;

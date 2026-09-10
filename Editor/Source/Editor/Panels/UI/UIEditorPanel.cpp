@@ -53,7 +53,7 @@ namespace Desert::Editor
         // this walk does not own is the UIAnim playhead, which lives in the component; the viewport's pass
         // advances it, and this view must not, or every clip runs at twice its authored speed whenever the
         // window is open.
-        m_UICanvas.DrivesSceneAnimation = false;
+        m_UIView.DrivesSceneAnimation = false;
     }
 
     UIEditorPanel::~UIEditorPanel()
@@ -241,16 +241,23 @@ namespace Desert::Editor
         // worldViewProj = nullptr on purpose too: a WorldSpace canvas is billboarded by the camera in the
         // viewport, but there is no camera here — the authoring view shows it flat, at its design size.
         //
-        // m_UICanvas is THIS window's own canvas state, and inertness is not enough without it: the walk
-        // hands its hot election over at the end whether or not it had input, so this preview used to clear
-        // the viewport's elected element every single frame it was open — one scene, no second document
-        // needed. See UICanvasContext.hpp.
+        // m_UIView is THIS window's own view state, and inertness is not enough without it: the frame hands
+        // its hot election over at the end whether or not it had input, so this preview used to clear the
+        // viewport's elected element every single frame it was open — one scene, no second document needed.
+        // See UICanvasContext.hpp.
+        //
+        // ONE canvas, and the frame around it is still a frame: this window is a document over a single
+        // UICanvasComponent, so unlike the viewport it names its canvas instead of drawing them all. The
+        // cell it uses is this window's own (canvas x view) cell, so previewing the canvas here and playing
+        // it in the viewport are two independent screen stacks — which is the point of the pair, and what
+        // lets an author look at the Settings screen while the game sits on the main menu.
         //
         // THIS DOCUMENT'S OWN CANVAS, named. The window is a document over one UICanvasComponent, so the
         // entity it was opened on IS the answer — no election, no guard, and no second implementation of the
         // canvas pass (which is what this window's previous ImGui-based preview was, and why it was deleted).
-        m_UICanvas.Materials = &m_Render2D.Materials();
-        if ( const auto drawn = ::Desert::UI::RenderCanvas2D( m_UICanvas, scene->GetRegistry(), canvasEntity,
+        m_UIView.Materials = &m_Render2D.Materials();
+        ::Desert::UI::BeginUIFrame( m_UIView, scene->GetRegistry() );
+        if ( const auto drawn = ::Desert::UI::RenderCanvas2D( m_UIView, scene->GetRegistry(), canvasEntity,
                                                               m_Render2D.GetDrawList(), viewport,
                                                               /*worldViewProj=*/nullptr,
                                                               /*input=*/nullptr );
@@ -260,6 +267,7 @@ namespace Desert::Editor
             m_PreviewError = drawn.GetError();
             LOG_ERROR( "[UI Editor] {}", m_PreviewError );
         }
+        ::Desert::UI::EndUIFrame( m_UIView, scene->GetRegistry(), m_Render2D.GetDrawList(), /*input=*/nullptr );
         m_Render2D.Flush();
         renderer.EndRenderPass();
 

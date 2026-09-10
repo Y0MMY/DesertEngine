@@ -62,7 +62,7 @@ namespace Desert::UI
         Batches.clear();
         Elements.clear();
         ViewportPx = Rect{};
-        Canvas     = entt::null;
+        Canvases.clear();
     }
 
     namespace
@@ -143,39 +143,59 @@ namespace Desert::UI
         out.Stats.UniqueMaterials = static_cast<std::uint32_t>( materials.size() );
     }
 
-    Common::BoolResultStr CaptureFrame( const UICanvasContext& ctx, entt::registry& reg, entt::entity canvas,
+    Common::BoolResultStr CaptureFrame( const UIViewContext& view, entt::registry& reg,
+                                        const std::vector<entt::entity>&     canvases,
                                         const Graphic::Render2D::DrawList2D& dl, const Rect& viewportPx,
                                         UIFrameProbe& out )
     {
         out.Reset();
         out.ViewportPx = viewportPx;
-        out.Canvas     = canvas;
+        out.Canvases   = canvases;
 
-        if ( const auto walked = EnumerateCanvas( reg, canvas, viewportPx, out.Elements, &ctx ); !walked )
+        for ( const entt::entity canvas : canvases )
         {
-            // A probe that reported zero elements and success would read as "this canvas is free", which
-            // is exactly the empty-successful-answer the contract forbids. It refuses by name instead.
-            out.Refusal = walked.GetError();
-            return Common::MakeError( out.Refusal );
+            // EACH CANVAS IS ENUMERATED WITH ITS OWN CELL of this view, never with a neighbour's: the two
+            // skip causes EnumerateCanvas needs from a context — which screen is current, what a binding
+            // says — are per (canvas x view), so handing it the wrong cell would mark this canvas's screens
+            // "not current" because a DIFFERENT canvas is on a different screen.
+            //
+            // A canvas this view has not drawn has no cell, and that is not the same as a canvas sitting on
+            // its first screen: nullptr is EnumerateCanvas's own authoring mode, which honours neither
+            // reason, and it is the correct answer for a probe of a canvas the view never walked.
+            const UICanvasContext* cell = view.FindCanvasState( canvas );
+
+            const std::size_t before = out.Elements.size();
+            if ( const auto walked = EnumerateCanvas( reg, canvas, viewportPx, out.Elements, cell ); !walked )
+            {
+                // A probe that reported zero elements and success would read as "this canvas is free", which
+                // is exactly the empty-successful-answer the contract forbids. It refuses by name instead.
+                out.Refusal = walked.GetError();
+                return Common::MakeError( out.Refusal );
+            }
+
+            // EnumerateCanvas fills `out` from empty, so the accumulation is ours to do: a probe of a frame
+            // with two canvases must describe both, not the last one.
+            for ( std::size_t i = before; i < out.Elements.size(); ++i )
+            {
+                const UIElementNode& n = out.Elements[i];
+                out.Walk.Visited++;
+                out.Walk.MaxDepth = std::max( out.Walk.MaxDepth, static_cast<std::uint32_t>( n.Depth ) );
+                if ( n.Drawn )
+                {
+                    out.Walk.Drawn++;
+                    if ( n.Clipped )
+                        out.Walk.Clipped++;
+                }
+                else
+                {
+                    out.Walk.Skipped++;
+                    out.Walk.SkipCounts[static_cast<std::size_t>( n.Cause )]++;
+                }
+            }
         }
 
-        for ( const UIElementNode& n : out.Elements )
-        {
-            out.Walk.Visited++;
-            out.Walk.MaxDepth = std::max( out.Walk.MaxDepth, static_cast<std::uint32_t>( n.Depth ) );
-            if ( n.Drawn )
-            {
-                out.Walk.Drawn++;
-                if ( n.Clipped )
-                    out.Walk.Clipped++;
-            }
-            else
-            {
-                out.Walk.Skipped++;
-                out.Walk.SkipCounts[static_cast<std::size_t>( n.Cause )]++;
-            }
-        }
-
+        // ONCE for the frame. The draw list holds every canvas's geometry, so reading it per canvas counted
+        // the first canvas's batches again for each canvas after it.
         CaptureDrawList( dl, out );
         out.Valid = true;
         out.Captures++;
@@ -196,7 +216,8 @@ namespace Desert::UI
         }
     }
 
-    void UIFrameProbeSink::Capture( const UICanvasContext& ctx, entt::registry& reg, entt::entity canvas,
+    void UIFrameProbeSink::Capture( const UIViewContext& view, entt::registry& reg,
+                                    const std::vector<entt::entity>&     canvases,
                                     const Graphic::Render2D::DrawList2D& dl, const Rect& viewportPx )
     {
         if ( !m_Armed )
@@ -204,7 +225,7 @@ namespace Desert::UI
         // The refusal is kept in the frame (Valid stays false, Refusal names the canvas problem) rather
         // than logged from here: this runs once per frame, and a refusal at frame rate buries the log —
         // the same reason EditorUIPass reports its own canvas refusal only when it changes.
-        (void)CaptureFrame( ctx, reg, canvas, dl, viewportPx, m_Frame );
+        (void)CaptureFrame( view, reg, canvases, dl, viewportPx, m_Frame );
 
         // The element measurement is answered HERE and only when it was asked for: it costs two extra
         // walks of the canvas, which is why it is a request rather than a column of the table.
@@ -212,11 +233,13 @@ namespace Desert::UI
         {
             m_CostSubject = m_CostRequest;
             m_CostRequest = entt::null;
-            m_Cost        = ProbeElementCost( ctx, reg, canvas, m_CostSubject, viewportPx );
+            // WHICH CANVAS the element belongs to is DERIVED from the element, not from the frame's list:
+            // CanvasOf walks its ancestors, so it is exact. Asking the frame would have to pick one of N.
+            m_Cost = ProbeElementCost( view, reg, CanvasOf( reg, m_CostSubject ), m_CostSubject, viewportPx );
         }
     }
 
-    UIElementCost ProbeElementCost( const UICanvasContext& ctx, entt::registry& reg, entt::entity canvas,
+    UIElementCost ProbeElementCost( const UIViewContext& view, entt::registry& reg, entt::entity canvas,
                                     entt::entity element, const Rect& viewportPx )
     {
         UIElementCost cost;
@@ -242,10 +265,13 @@ namespace Desert::UI
         // a second walk advancing the shared UIAnim playheads runs every clip at double speed.
         const auto RunWalk = [&]( Graphic::Render2D::DrawList2D& dl ) -> bool
         {
-            UICanvasContext probe      = ctx;
+            UIViewContext probe        = view;
             probe.DrivesSceneAnimation = false;
             dl.Reset();
-            return RenderCanvas2D( probe, reg, canvas, dl, viewportPx ).IsSuccess();
+            BeginUIFrame( probe, reg );
+            const bool drawn = RenderCanvas2D( probe, reg, canvas, dl, viewportPx ).IsSuccess();
+            EndUIFrame( probe, reg, dl, /*input=*/nullptr );
+            return drawn;
         };
 
         Graphic::Render2D::DrawList2D authored;

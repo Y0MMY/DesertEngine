@@ -995,6 +995,17 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Visible" ), Category( "UI Canvas" ) )
         bool Visible = true;
 
+        // WHICH CANVAS IS ON TOP, authored. A view draws EVERY canvas of its scene (Ю4), so with two of
+        // them something has to decide the order — and "whichever entt hands out first" is a property of
+        // the component pool, not a decision. Ascending: a higher Sort Order draws later, so it covers the
+        // lower ones and takes the pointer from them. Equal values keep the scene file's own order.
+        //
+        // This is the knob the four overlay features are built on: a tooltip, a context menu, a modal and a
+        // toast are each a canvas that must be above the HUD whatever order the level happened to create
+        // them in. Read by UI::CanvasesInDrawOrder (UICanvasLayout.cpp).
+        PROPERTY( DisplayName( "Sort Order" ), Category( "UI Canvas" ) )
+        int SortOrder = 0;
+
         // Safe area (Phase B): per-edge insets (L/T/R/B, design px) the top-level content stays inside — for
         // mobile notches / rounded corners. On desktop set manually to preview a device; 0 = full canvas.
         PROPERTY( DisplayName( "Safe Area L/T/R/B" ), Category( "UI Canvas" ) )

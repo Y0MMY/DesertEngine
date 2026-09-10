@@ -550,7 +550,7 @@ namespace Desert::Tests::PointerCensus
           "nothing dereferences it, and UIFrameProbe::Reset drops the whole list at the start of every "
           "capture so the value never outlives the frame it came from" },
         { "Desert/Desert/Source/Engine/UI/UICanvasContext.hpp",
-          "UICanvasContext", "Materials", Guard::ObservedContainsUs,
+          "UIViewContext", "Materials", Guard::ObservedContainsUs,
           "where this view's UI materials come from, as an IUIMaterialSource. The one implementation is "
           "the UIMaterialCache that is a MEMBER of the Render2D backend the view's host owns alongside "
           "the context and hands to every RenderCanvas2D call it makes; the backend cannot be destroyed "
@@ -1295,7 +1295,7 @@ namespace Desert::Tests::PointerCensus
           "Reader", "p", Guard::CallScoped,
           "a cursor over the caller's font byte buffer, alive for one parse" },
         { "Desert/Desert/Source/Engine/UI/UICanvasContext.hpp",
-          "UICanvasContext", "Registry", Guard::FrameScoped,
+          "UIViewContext", "Registry", Guard::FrameScoped,
           "the scene registry, handed to the UI pass for one frame and never stored past it" },
         { "Desert/Desert/Source/Platform/MacOS/MacOSWindow.hpp",
           "MacOSWindow", "m_GLFWWindow", Guard::OwningRaw,

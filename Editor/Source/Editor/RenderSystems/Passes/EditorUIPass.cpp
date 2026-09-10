@@ -83,46 +83,42 @@ namespace Desert::Editor::Render
             }
 
             std::vector<std::string> uiMessages;
-            // WHICH CANVAS: the viewport shows the level, and a level with one canvas has one answer. With
-            // several it has none — this pass has no selection and no document to derive one from — so it
-            // says so once instead of drawing whichever entt hands out first, which is what it did before.
-            // m_UICanvas is this VIEW's canvas state — one per EditorUIPass, and the editor builds one pass
-            // per open scene document, so two viewports no longer walk into each other's hover clocks, hot
-            // element or screen stack.
-            const auto canvas = UI::SoleCanvas( scene->GetRegistry() );
-            if ( !canvas )
-            {
-                // Once per distinct reason, not once per frame: a scene with no canvas at all is the common
-                // case, and a refusal written at frame rate buries the log and gets the message ignored.
-                if ( m_CanvasRefusal != canvas.GetError() )
-                {
-                    m_CanvasRefusal = canvas.GetError();
-                    LOG_WARN( "[UI Preview] {}", m_CanvasRefusal );
-                }
-            }
-            else
-            {
-                m_CanvasRefusal.clear();
-                // This view's UI materials. Set here, beside the walk, because the cache belongs to the
-                // backend that will draw the list and a view must never be handed another view's
-                // pipelines — see UICanvasContext::Materials.
-                m_UICanvas.Materials = &m_Render2D.Materials();
-                if ( const auto drawn = UI::RenderCanvas2D(
-                          m_UICanvas, scene->GetRegistry(), canvas.GetValue(), m_Render2D.GetDrawList(),
-                          UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, feed ? &input : nullptr, feed ? &clicked : nullptr,
-                          feed ? &pv.Focused : nullptr, feed ? &uiMessages : nullptr );
+            // EVERY CANVAS OF THE LEVEL, in authored order. This pass used to ask UI::SoleCanvas and REFUSE
+            // a level with two canvases: an honest refusal while a view could hold the runtime state of one
+            // canvas only, and it is gone with that limit (Ю4) — m_UIView now holds one cell per (canvas x
+            // this view), so a HUD and a pause menu are simply two canvases, drawn in Sort Order.
+            //
+            // m_UIView is this VIEW's state — one per EditorUIPass, and the editor builds one pass per open
+            // scene document, so two viewports still do not walk into each other's hover clocks, hot element
+            // or screen stacks.
+            //
+            // This view's UI materials. Set here, beside the walk, because the cache belongs to the backend
+            // that will draw the list and a view must never be handed another view's pipelines — see
+            // UIViewContext::Materials.
+            m_UIView.Materials = &m_Render2D.Materials();
+
+            const std::vector<entt::entity> canvases = UI::CanvasesInDrawOrder( scene->GetRegistry() );
+            UI::BeginUIFrame( m_UIView, scene->GetRegistry() );
+            for ( const entt::entity canvas : canvases )
+                if ( const auto drawn =
+                          UI::RenderCanvas2D( m_UIView, scene->GetRegistry(), canvas, m_Render2D.GetDrawList(),
+                                              UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, feed ? &input : nullptr,
+                                              feed ? &clicked : nullptr, feed ? &pv.Focused : nullptr );
                      !drawn )
                     LOG_ERROR( "[UI Preview] {}", drawn.GetError() );
+            UI::EndUIFrame( m_UIView, scene->GetRegistry(), m_Render2D.GetDrawList(), feed ? &input : nullptr,
+                            feed ? &pv.Focused : nullptr, feed ? &clicked : nullptr,
+                            feed ? &uiMessages : nullptr );
 
-                // BEFORE Flush and AFTER the walk: this is the one moment the frame's draw list is
-                // complete and still readable, and it is the same object Flush is about to turn into
-                // draw calls — so the panel's numbers cannot be a second tally that drifts from it.
-                // The sink does nothing at all unless the UI Debugger panel armed it.
-                Core::UIProbeRegistry::Get()
-                     .Slot( scene.get() )
-                     .Capture( m_UICanvas, scene->GetRegistry(), canvas.GetValue(), m_Render2D.GetDrawList(),
-                               UI::Rect{ 0.0f, 0.0f, w, h } );
-            }
+            // BEFORE Flush and AFTER the frame: this is the one moment the frame's draw list is complete
+            // and still readable, and it is the same object Flush is about to turn into draw calls — so the
+            // panel's numbers cannot be a second tally that drifts from it. Once per FRAME, not per canvas:
+            // the list holds every canvas's geometry, so a per-canvas capture counted the earlier canvases'
+            // batches again for each canvas after them. The sink does nothing unless the panel armed it.
+            Core::UIProbeRegistry::Get()
+                 .Slot( scene.get() )
+                 .Capture( m_UIView, scene->GetRegistry(), canvases, m_Render2D.GetDrawList(),
+                           UI::Rect{ 0.0f, 0.0f, w, h } );
             m_Render2D.Flush();
 
             if ( auto* renderer = scene->GetSceneRenderer() )

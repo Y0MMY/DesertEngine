@@ -385,32 +385,25 @@ namespace Desert::Player
                 // Pointer events / drops can fire several times in one frame, so they come back in their
                 // own list; a button action still arrives through `clicked`.
                 std::vector<std::string> uiMessages;
-                // The player has exactly one view, but its canvas state still belongs to that view rather
+                // The player has exactly one view, but its UI state still belongs to that view rather
                 // than to the process — a scene change rebinds it, and nothing else can reach it.
                 //
-                // WHICH CANVAS: the game has no selection and no document, so a level with one canvas has the
-                // only answer available and a level with two has none. Drawing "the first" was what shipped a
-                // level whose second canvas — its pause menu, its HUD, whichever entt ordered later — was
-                // never drawn and never mentioned. The refusal is logged when it CHANGES, not per frame.
-                const auto canvas = UI::SoleCanvas( m_Scene->GetRegistry() );
-                if ( !canvas )
-                {
-                    if ( m_CanvasRefusal != canvas.GetError() )
-                    {
-                        m_CanvasRefusal = canvas.GetError();
-                        LOG_WARN( "[Runtime] {}", m_CanvasRefusal );
-                    }
-                }
-                else
-                {
-                    m_CanvasRefusal.clear();
-                    m_UICanvas.Materials = &m_Render2D->Materials();
-                    if ( const auto drawn = UI::RenderCanvas2D(
-                              m_UICanvas, m_Scene->GetRegistry(), canvas.GetValue(), dl,
-                              UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, &input, &clicked, &m_FocusedUI, &uiMessages );
+                // EVERY CANVAS OF THE LEVEL, in authored Sort Order. This used to ask UI::SoleCanvas and
+                // refuse a level with two canvases, because a view could hold the runtime state of one
+                // canvas only; Ю4 keys that state by (canvas x view), so a HUD and a pause menu are simply
+                // two canvases and both are drawn. A level with none draws nothing and says nothing — a
+                // game without UI is legitimate, and it was only ever a refusal because of the limit.
+                m_UIView.Materials = &m_Render2D->Materials();
+                UI::BeginUIFrame( m_UIView, m_Scene->GetRegistry() );
+                for ( const entt::entity canvas : UI::CanvasesInDrawOrder( m_Scene->GetRegistry() ) )
+                    if ( const auto drawn = UI::RenderCanvas2D( m_UIView, m_Scene->GetRegistry(), canvas, dl,
+                                                                UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, &input,
+                                                                &clicked, &m_FocusedUI );
                          !drawn )
                         LOG_ERROR( "[Runtime] {}", drawn.GetError() );
-                }
+                UI::EndUIFrame( m_UIView, m_Scene->GetRegistry(), dl, &input, &m_FocusedUI, &clicked,
+                                &uiMessages );
+
                 // Queue them for gameplay: ScriptSystem drains this and calls OnUIMessage on every script.
                 for ( const std::string& msg : uiMessages )
                     UI::UIMessageQueue::Get().Push( msg );
