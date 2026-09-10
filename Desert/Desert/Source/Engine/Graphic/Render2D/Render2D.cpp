@@ -10,7 +10,9 @@
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 #include <Engine/Graphic/Materials/Properties/PropertyDirty.hpp>
+#include <Engine/Graphic/Materials/Properties/StorageBufferProperty.hpp>
 #include <Engine/Graphic/Materials/Properties/Texture2DProperty.hpp>
+#include <Engine/Core/Formats/MaterialParamRow.hpp>
 #include <Engine/Graphic/Render2D/Render2DExecutorRetire.hpp>
 #include <Engine/Core/FrameManager.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -114,6 +116,10 @@ namespace Desert::Graphic::Render2D
             if ( auto* imgService = Runtime::ResourceRegistry::GetImageService() )
                 m_WhiteImage = static_cast<Image2D*>( imgService->Resolve( m_WhiteTexture->GetImageHandle() ) );
         }
+
+        // The UI materials' pipelines are compiled against the same target and must be rebuilt with the
+        // three above — a pipeline outliving its render pass is a device-lost, not a wrong picture.
+        m_MaterialCache.Rebuild( target );
 
         return Common::MakeSuccess( true );
     }
@@ -272,6 +278,39 @@ namespace Desert::Graphic::Render2D
                 continue;
             }
 
+            if ( cmd.Material )
+            {
+                // A UI-DOMAIN MATERIAL FILL. The batch carries the resolved entry the canvas walk got
+                // from UIMaterialCache::Resolve — never null, and never null-and-meaning-fine: a handle
+                // the UI path cannot execute resolved to the magenta error entry back there, with the
+                // reason logged, so there is nothing left here to fall back from.
+                const auto* entry = static_cast<const UIMaterialCache::Entry*>( cmd.Material );
+                if ( !entry->Pipeline || !entry->Material )
+                    continue;
+
+                auto* material = entry->Material.get();
+
+                // THE PARAMETERS ARE A ROW, NOT PUSH BYTES. One row per material and therefore index 0 —
+                // a UI material is shared by every element pointing at the same asset, which is exactly
+                // what keeps two such elements in one batch. `SetMaterialIndex` writes that index into
+                // the push block at Core::Formats::kMaterialIndexPushOffset (64), the same offset the
+                // mesh path writes it at, so the two transports cannot drift.
+                const auto& row = material->GetParamRow();
+                if ( !row.empty() )
+                    if ( auto* sb = material->Get<StorageBufferProperty>( Core::Formats::kMaterialRowBlockName ) )
+                        sb->SetRawData( row.data(), static_cast<uint32_t>( row.size() * sizeof( glm::vec4 ) ) );
+
+                ApplyScissor( cmd );
+                // 64 bytes of projection at offset 0 + 4 of row index at 64 = 68 of the 128 available.
+                // Common/UIVertex.glslh is the other half of this: the mat4 slot the mesh path calls
+                // Transform carries the batcher's pixel -> clip projection in the UI domain.
+                material->SetPushMatrix( m_Projection );
+                material->SetMaterialIndex( 0 );
+                renderer.SubmitIndexed( entry->Pipeline.get(), m_VertexBuffer.get(), m_IndexBuffer.get(),
+                                        cmd.IndexCount, cmd.IndexOffset, material->GetMaterialExecutor() );
+                continue;
+            }
+
             if ( cmd.Text )
             {
                 // Text always carries a valid font-atlas texture; route it to the SDF pipeline.
@@ -303,6 +342,7 @@ namespace Desert::Graphic::Render2D
         m_UsedBackdrop = usedBackdrop;
 
         RetireUnusedExecutors();
+        m_MaterialCache.RetireUnused();
     }
 
     void Render2D::RetireUnusedExecutors()

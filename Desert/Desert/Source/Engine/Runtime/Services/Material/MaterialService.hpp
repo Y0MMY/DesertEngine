@@ -125,6 +125,18 @@ namespace Desert::Runtime
         // schema defaults in place.
         bool ResolveOverrides( const Assets::AssetHandle& handle, Graphic::MaterialOverrides& out ) const;
 
+        // WHICH SHADER this handle's material is drawn by — the base of the instance chain's, since an
+        // instance overrides values and never the program. Empty when the handle resolves to no `.demat`
+        // at all, which is a DIFFERENT answer from "StaticMeshPBR": MaterialData::EffectiveShaderName()
+        // substitutes that default for an absent field, and a caller that cannot tell the two apart reads
+        // a dangling handle as a request for the standard mesh surface.
+        //
+        // It exists for the same caller ResolveOverrides exists for — one that owns its own runtime
+        // material and needs the asset's values by name — except that such a caller must first know WHICH
+        // program to build. The UI path is the one that does: Render2D::UIMaterialCache pairs this with
+        // ResolveOverrides, and refuses by name when the program's domain is not UI.
+        [[nodiscard]] std::string ShaderNameOf( const Assets::AssetHandle& handle ) const;
+
         // For editor live-edit of a material-instance asset: entities rebuild their cached
         // runtime instances on the next tick (same mechanism as Invalidate, no graveyard needed —
         // no runtime Material dies here).

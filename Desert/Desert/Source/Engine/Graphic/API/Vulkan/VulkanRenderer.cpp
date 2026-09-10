@@ -446,15 +446,25 @@ namespace Desert::Graphic::API::Vulkan
             materialExecutor->Apply();
             auto vkBackend = static_cast<VulkanMaterialBackend*>( materialExecutor->GetMaterialBackend().get() );
 
-            if ( !vkBackend->HasDescriptorSets() )
+            // "NO SETS" HAS TWO CAUSES AND ONLY ONE OF THEM IS A DEFECT, and until Ю11 the second one
+            // could not happen so both were refused together. A shader that publishes NO LAYOUTS
+            // declares no descriptor resources at all — legal Vulkan, and what a purely procedural fill
+            // driven by push constants looks like (`UIMatError`); there is simply nothing to bind, and
+            // dropping the draw made such a program invisible. A shader that publishes layouts and has
+            // no SETS is the real failure — allocation did not happen — and drawing it would sample
+            // whatever the last material left bound, so that one is still refused by name.
+            if ( !vkBackend->HasDescriptorSets() && !vkBackend->GetLayouts().empty() )
             {
                 LOG_WARN( "VulkanRendererAPI::SubmitIndexed: MaterialExecutor has no valid descriptor sets!" );
                 return;
             }
 
-            uint32_t frameIndex = Engine::FrameManager::GetInstance().GetCurrentFrameIndex();
-            vkBackend->BindDescriptorSets( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(),
-                                           VK_PIPELINE_BIND_POINT_GRAPHICS, frameIndex );
+            if ( vkBackend->HasDescriptorSets() )
+            {
+                uint32_t frameIndex = Engine::FrameManager::GetInstance().GetCurrentFrameIndex();
+                vkBackend->BindDescriptorSets( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(),
+                                               VK_PIPELINE_BIND_POINT_GRAPHICS, frameIndex );
+            }
 
             const auto&   pcBuffer     = materialExecutor->GetPushConstantBuffer();
             VulkanShader* vulkanShader = (VulkanShader*)pipeline->GetSpecification().Shader.get();

@@ -404,6 +404,7 @@ namespace Desert::Player
                 else
                 {
                     m_CanvasRefusal.clear();
+                    m_UICanvas.Materials = &m_Render2D->Materials();
                     if ( const auto drawn = UI::RenderCanvas2D(
                               m_UICanvas, m_Scene->GetRegistry(), canvas.GetValue(), dl,
                               UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, &input, &clicked, &m_FocusedUI, &uiMessages );

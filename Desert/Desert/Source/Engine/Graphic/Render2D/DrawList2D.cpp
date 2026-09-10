@@ -102,7 +102,7 @@ namespace Desert::Graphic::Render2D
         return m_Clip.Bounded ? m_Clip.Box : glm::vec4( 0.0f, 0.0f, 0.0f, 0.0f );
     }
 
-    DrawCommand& DrawList2D::CurrentCommand( const void* texture, bool text )
+    DrawCommand& DrawList2D::CurrentCommand( const void* texture, bool text, const void* material )
     {
         const glm::vec4 scissor = ScissorBox();
 
@@ -115,12 +115,14 @@ namespace Desert::Graphic::Render2D
         // two batches cut by two different rotated clippers that happen to share a scissor box may still be
         // one draw call. That is the whole reason exact clipping costs no draw call at all.
         if ( !m_Commands.empty() && !m_Commands.back().Glass && m_Commands.back().Texture == texture &&
-             m_Commands.back().Text == text && m_Commands.back().ClipRect == scissor )
+             m_Commands.back().Text == text && m_Commands.back().Material == material &&
+             m_Commands.back().ClipRect == scissor )
             return m_Commands.back();
 
         DrawCommand cmd;
         cmd.Texture     = texture;
         cmd.Text        = text;
+        cmd.Material    = material;
         cmd.ClipRect    = scissor;
         cmd.IndexOffset = static_cast<uint32_t>( m_Indices.size() );
         cmd.IndexCount  = 0;
@@ -304,14 +306,15 @@ namespace Desert::Graphic::Render2D
     }
 
     void DrawList2D::AddQuad( const void* texture, const glm::vec2& min, const glm::vec2& max,
-                              const glm::vec2& uv0, const glm::vec2& uv1, const glm::vec4& color, bool text )
+                              const glm::vec2& uv0, const glm::vec2& uv1, const glm::vec4& color, bool text,
+                              const void* material )
     {
         if ( ClipRegionEmpty( m_Clip ) )
             return;
 
         // Open/extend the batch BEFORE appending indices so a freshly opened command anchors its
         // IndexOffset at this quad's first index (not past it).
-        DrawCommand& cmd = CurrentCommand( texture, text );
+        DrawCommand& cmd = CurrentCommand( texture, text, material );
 
         // Corners: top-left, top-right, bottom-right, bottom-left (CW in a top-left-origin, y-down space).
         const Vertex2D corners[4] = { { Xf( { min.x, min.y } ), { uv0.x, uv0.y }, color },
@@ -368,6 +371,19 @@ namespace Desert::Graphic::Render2D
                                const glm::vec2& uv0, const glm::vec2& uv1, const glm::vec4& tint )
     {
         AddQuad( texture, min, max, uv0, uv1, tint, false );
+    }
+
+    void DrawList2D::AddMaterialRect( const void* material, const glm::vec2& min, const glm::vec2& max,
+                                      const glm::vec4& tint )
+    {
+        // A null material would silently become an ordinary white-textured rect — the element would look
+        // ALMOST right (its authored colour, no material) and nothing would say the fill never ran. The
+        // resolve-or-error decision belongs to the caller, which is the only place that knows which handle
+        // failed; Graphic::UIMaterialCache::Resolve never returns null for that reason.
+        if ( !material || max.x <= min.x || max.y <= min.y )
+            return;
+
+        AddQuad( nullptr, min, max, { 0.0f, 0.0f }, { 1.0f, 1.0f }, tint, false, material );
     }
 
     void DrawList2D::AddRectFilledMultiColor( const glm::vec2& min, const glm::vec2& max,

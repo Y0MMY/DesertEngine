@@ -51,6 +51,18 @@ namespace Desert::Graphic
         // call Bind at all — they submit an executor — so a stored value would never be pushed for them.
         void SetMaterialIndex( uint32_t index );
 
+        // The MATRIX half of that same push block — the slot Common/MaterialTransport.glslh declares as
+        // `mat4 Transform` at Core::Formats::kMaterialTransformPushOffset. What the matrix MEANS belongs
+        // to the drawing path, not to the material: a model matrix on the mesh path, the batcher's
+        // pixel -> clip projection on the UI path (Common/UIVertex.glslh).
+        //
+        // It sits beside SetMaterialIndex because the two write ONE 68-byte block between them, and a
+        // caller holding only the index setter has to write the other half by hand at a literal offset —
+        // which is the second copy of a layout this header exists to have only one of. Renderer::RenderMesh
+        // writes the same slot for the mesh path; Render2D, which submits an executor rather than a mesh,
+        // had nowhere else to write it from.
+        void SetPushMatrix( const glm::mat4& matrix );
+
         // Public for editor introspection (PropertyEditorBuilder reads reflected properties to build UI).
         const std::vector<IProperty*>& GetRegisteredProperties() const
         {

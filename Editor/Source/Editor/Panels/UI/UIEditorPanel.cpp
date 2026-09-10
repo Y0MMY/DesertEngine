@@ -249,6 +249,7 @@ namespace Desert::Editor
         // THIS DOCUMENT'S OWN CANVAS, named. The window is a document over one UICanvasComponent, so the
         // entity it was opened on IS the answer — no election, no guard, and no second implementation of the
         // canvas pass (which is what this window's previous ImGui-based preview was, and why it was deleted).
+        m_UICanvas.Materials = &m_Render2D.Materials();
         if ( const auto drawn = ::Desert::UI::RenderCanvas2D( m_UICanvas, scene->GetRegistry(), canvasEntity,
                                                               m_Render2D.GetDrawList(), viewport,
                                                               /*worldViewProj=*/nullptr,

@@ -1,0 +1,45 @@
+// THE UI-DOMAIN VERTEX CONTRACT — the whole vertex stage of every `Domain UI` material, so that no
+// material author ever writes one.
+//
+// WHY THE STAGE IS THE HEADER AND NOT A SNIPPET. A UI material's vertex stage has exactly one legal
+// body: the Render2D batcher has already resolved the element's rect, its render transform and its
+// oblique clip into pixel-space corners, so the only thing left to do is project them. A material that
+// could write its own vertex stage could move geometry the CPU-side clipper has already cut, and the
+// picture would then disagree with the pointer — the two are cut by one ClipRegion2D precisely so they
+// cannot (see DrawList2D::PushClipRect). GraphVertex.glslh draws the same line for the mesh path.
+//
+// THE MATRIX SLOT. This includes Common/MaterialTransport.glslh unchanged rather than declaring a push
+// block of its own, because Vulkan takes ONE push range per pipeline and a second spelling of the same
+// range is the drift this engine keeps paying for. In the UI domain the mat4 at offset 0 carries the
+// batcher's PIXEL -> CLIP projection instead of a model matrix — same slot, same size, same offset for
+// MaterialIndex at 64 — and it is named here so nobody has to read the mesh header to find out.
+// Total push size: 68 bytes of the 128 every Vulkan implementation must offer.
+//
+// WHAT A UI MATERIAL'S FRAGMENT STAGE MAY READ, and it is the complete list:
+//   In(0) vec2 v_TexCoord  — 0..1 across the element's own rect (0,0 = its top-left corner)
+//   In(1) vec4 v_Color     — the element's authored Color * Opacity, already tinted by the canvas
+//   u_Material.<Name>      — this material's own parameters, when it declares `Properties Binding(1)`
+//   its own samplers       — when it declares `TextureBinding(n)`
+// There is no camera, no world position, no normal and no scene colour: the UI path binds none of them,
+// which is exactly why Core::Formats::DrawnByUIPath exists and why a Surface material in a UI slot is
+// refused by name instead of drawing nothing.
+#ifndef DESERT_UI_VERTEX_GLSLH
+#define DESERT_UI_VERTEX_GLSLH
+
+#include <Common/MaterialTransport.glslh>
+
+In(0) vec2 a_Position; // pixel coordinates, top-left origin (Render2D::Vertex2D)
+In(1) vec2 a_TexCoord;
+In(2) vec4 a_Color;
+
+Out(0) vec2 v_TexCoord;
+Out(1) vec4 v_Color;
+
+void main()
+{
+    v_TexCoord  = a_TexCoord;
+    v_Color     = a_Color;
+    gl_Position = m_PushConstants.Transform * vec4( a_Position, 0.0, 1.0 );
+}
+
+#endif

@@ -35,11 +35,28 @@ namespace Desert::Graphic::API::Vulkan
         // EMPTY — HasDescriptorSets() already answers false for it, which is the state every consumer
         // reads as "nothing to bind". Same family as the crash Г21 is about: a container derived from a
         // shader that carries nothing, used as though it did.
+        //
+        // THE MESSAGE USED TO ASSERT A CAUSE IT HAD NOT CHECKED. It read "(it has no compiled stages)"
+        // off `m_Layouts.empty()` alone, and the two are not the same fact: a program that compiled
+        // perfectly well and simply declares no uniform, no storage block and no sampler publishes no
+        // layouts either, and is entirely legal Vulkan. Ю11's `UIMatError` is the first such program in
+        // the tree — a procedural fill with no parameters — and it was reported here as a broken shader.
+        // The stage list is what actually answers the question, so it is what is asked.
         if ( m_Layouts.empty() )
         {
-            LOG_ERROR( "[Material] shader '{}' publishes no descriptor set layouts (it has no compiled "
-                       "stages) — no descriptor pool is created and nothing binds through this material.",
-                       m_VulkanShader ? m_VulkanShader->GetName() : std::string( "<null>" ) );
+            if ( m_VulkanShader && m_VulkanShader->IsCompiled() )
+            {
+                LOG_INFO( "[Material] shader '{}' declares no descriptor resources; it draws from its "
+                          "push constants alone.",
+                          m_VulkanShader->GetName() );
+            }
+            else
+            {
+                LOG_ERROR( "[Material] shader '{}' publishes no descriptor set layouts because it has no "
+                           "compiled stages — no descriptor pool is created and nothing binds through "
+                           "this material.",
+                           m_VulkanShader ? m_VulkanShader->GetName() : std::string( "<null>" ) );
+            }
         }
         else
         {

@@ -36,6 +36,11 @@
 // WHAT DELIBERATELY DID NOT MOVE HERE. Runtime UI state stays OUT of the ECS components (UI_ROADMAP.md
 // section F): navigating screens or easing a hover in the editor must not rewrite the authored scene. This
 // type is that decision made explicit, not a reversal of it.
+namespace Desert::Graphic::Render2D
+{
+    class UIMaterialCache;
+}
+
 namespace Desert::UI
 {
     // An in-flight drag. Cross-frame: a drag survives from the press that starts it to the release that
@@ -115,6 +120,22 @@ namespace Desert::UI
         // instead of once per frame. Cleared when the handle changes or resolves.
         Assets::AssetHandle WarnedBackground;
 
+        // --- UI materials (Ю11) -------------------------------------------------------------------------
+        // This view's UI-material cache, owned by the Render2D backend that will draw the list. It is a
+        // VIEW's and not the process's for the same reason everything else here is: a UI material owns a
+        // pipeline, a pipeline is compiled against ONE framebuffer's render pass, and two viewports have
+        // two targets. A cache reached through a global would hand the second viewport pipelines built
+        // against the first one's pass.
+        //
+        // Null means this walk has no GPU backend behind it — a unit test, or a host that forgot to wire
+        // one. It is NOT a quiet "no materials today": an element whose slot is set draws its ordinary
+        // fill and the view says so ONCE, naming the element, because a panel that silently loses its
+        // material looks exactly like a panel nobody put a material on.
+        Graphic::Render2D::UIMaterialCache* Materials = nullptr;
+
+        // The material handle this view last drew without a backend, so that report happens once.
+        Assets::AssetHandle WarnedMaterial;
+
         // Forget everything about the scene drawn so far. Hosts call this when they point the view at a
         // different scene; RenderCanvas2D calls it itself when it notices the registry changed.
         void Reset()
@@ -137,6 +158,7 @@ namespace Desert::UI
             ScreenReqBack    = false;
             Tint             = glm::vec4( 1.0f );
             WarnedBackground = Assets::AssetHandle{};
+            WarnedMaterial   = Assets::AssetHandle{};
         }
     };
 } // namespace Desert::UI

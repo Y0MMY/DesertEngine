@@ -293,6 +293,30 @@ namespace Desert::Runtime
         return true;
     }
 
+    std::string MaterialService::ShaderNameOf( const Assets::AssetHandle& handle ) const
+    {
+        // Same chain walk as ResolveOverrides — an instance names no program of its own, so the answer is
+        // always the base's. Depth-capped for the same cycle reason.
+        Assets::AssetHandle current = handle;
+        for ( int depth = 0; depth < 8; ++depth )
+        {
+            auto it = m_MaterialAssets.find( current );
+            if ( it == m_MaterialAssets.end() )
+                return {};
+            (void)EnsureLoaded( it->second );
+            auto* surf = dynamic_cast<Assets::SurfaceMaterialAsset*>( it->second.get() );
+            if ( !surf )
+                return {};
+            if ( !surf->Data().IsInstance() )
+                return surf->Data().EffectiveShaderName();
+            const auto parent = GetAssetHandleByExternal( *surf->Data().ParentMaterialId );
+            if ( parent.IsNull() || parent == current )
+                return surf->Data().EffectiveShaderName();
+            current = parent;
+        }
+        return {};
+    }
+
     void MaterialService::Clear()
     {
         // Was an empty body. The graveyard goes with the rest: at shutdown there is no next frame to

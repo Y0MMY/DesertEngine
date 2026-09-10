@@ -24,6 +24,8 @@ namespace Desert::UI
                 return "text/solid";
             case BatchBreak::Texture:
                 return "texture";
+            case BatchBreak::Material:
+                return "material";
             case BatchBreak::ClipRect:
                 return "clip rect";
         }
@@ -44,6 +46,8 @@ namespace Desert::UI
             return BatchBreak::Text;
         if ( prev.Texture != cur.Texture )
             return BatchBreak::Texture;
+        if ( prev.Material != cur.Material )
+            return BatchBreak::Material;
         if ( prev.ClipRect != cur.ClipRect )
             return BatchBreak::ClipRect;
         return BatchBreak::None;
@@ -65,11 +69,19 @@ namespace Desert::UI
     {
         // Which of the three pipelines Render2D::Flush binds for a command. Glass wins over Text because
         // that is the order Flush tests them in.
-        int PipelineOf( const Graphic::Render2D::DrawCommand& cmd )
+        // WHICH PIPELINE a command binds, as an identity rather than as a small integer. It used to be
+        // 0/1/2 for UI2D/UIText/UIGlass, which was exact while those were the only three; a UI material
+        // brings a pipeline of ITS OWN, one per material, so two adjacent material batches are two
+        // pipeline binds and a fixed enumeration cannot say so. The three built-ins keep distinct
+        // addresses of their own so the comparison stays one comparison.
+        const void* PipelineOf( const Graphic::Render2D::DrawCommand& cmd )
         {
+            static const char kSolid = 0, kText = 0, kGlass = 0;
             if ( cmd.Glass )
-                return 2;
-            return cmd.Text ? 1 : 0;
+                return &kGlass;
+            if ( cmd.Material )
+                return cmd.Material;
+            return cmd.Text ? static_cast<const void*>( &kText ) : static_cast<const void*>( &kSolid );
         }
     } // namespace
 
@@ -83,7 +95,8 @@ namespace Desert::UI
         out.Stats.Batches   = static_cast<std::uint32_t>( commands.size() );
 
         std::unordered_set<const void*> textures;
-        int                             lastPipeline = -1;
+        std::unordered_set<const void*> materials;
+        const void*                     lastPipeline = nullptr;
 
         out.Batches.reserve( commands.size() );
         for ( std::size_t i = 0; i < commands.size(); ++i )
@@ -94,6 +107,7 @@ namespace Desert::UI
             info.Index       = static_cast<std::uint32_t>( i );
             info.Break       = i == 0 ? BatchBreak::First : ClassifyBatchBreak( commands[i - 1], cmd );
             info.Texture     = cmd.Texture;
+            info.Material    = cmd.Material;
             info.Text        = cmd.Text;
             info.Glass       = cmd.Glass;
             info.ClipRect    = cmd.ClipRect;
@@ -114,16 +128,19 @@ namespace Desert::UI
 
             if ( cmd.Texture != nullptr )
                 textures.insert( cmd.Texture );
+            if ( cmd.Material != nullptr )
+                materials.insert( cmd.Material );
 
-            const int pipeline = PipelineOf( cmd );
+            const void* pipeline = PipelineOf( cmd );
             if ( pipeline != lastPipeline )
             {
-                if ( lastPipeline != -1 )
+                if ( lastPipeline != nullptr )
                     out.Stats.PipelineSwitches++;
                 lastPipeline = pipeline;
             }
         }
-        out.Stats.UniqueTextures = static_cast<std::uint32_t>( textures.size() );
+        out.Stats.UniqueTextures  = static_cast<std::uint32_t>( textures.size() );
+        out.Stats.UniqueMaterials = static_cast<std::uint32_t>( materials.size() );
     }
 
     Common::BoolResultStr CaptureFrame( const UICanvasContext& ctx, entt::registry& reg, entt::entity canvas,

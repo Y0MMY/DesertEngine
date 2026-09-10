@@ -175,7 +175,8 @@ namespace Desert::Core::Formats
         Terrain,         // tessellated terrain materials
         Skybox,
         PostProcess,
-        Volume // participating media marched by a compute pass (the volumetric cloud layer)
+        Volume, // participating media marched by a compute pass (the volumetric cloud layer)
+        UI      // the fill of a 2D UI element, rasterized by the Render2D batcher
     };
 
     // The enum's own spelling, for diagnostics. It lives beside the enum so a domain added above cannot
@@ -202,6 +203,8 @@ namespace Desert::Core::Formats
                 return "PostProcess";
             case ShaderDomain::Volume:
                 return "Volume";
+            case ShaderDomain::UI:
+                return "UI";
         }
         return "Unspecified";
     }
@@ -227,6 +230,7 @@ namespace Desert::Core::Formats
     inline constexpr ShaderDomain kMeshPathDomain    = ShaderDomain::Surface;
     inline constexpr ShaderDomain kTerrainPathDomain = ShaderDomain::Terrain;
     inline constexpr ShaderDomain kVolumePathDomain  = ShaderDomain::Volume;
+    inline constexpr ShaderDomain kUIPathDomain      = ShaderDomain::UI;
 
     constexpr bool DrawnByMeshPath( ShaderDomain domain )
     {
@@ -244,6 +248,18 @@ namespace Desert::Core::Formats
     constexpr bool DrawnByVolumePath( ShaderDomain domain )
     {
         return domain == kVolumePathDomain;
+    }
+
+    // The UI path is Graphic::Render2D — a screen-space quad in the 2D batcher, fed the pixel->clip
+    // projection and this element's row of `Materials[]`, and nothing else. It receives no camera, no
+    // world position and no normal, so a Surface shader placed in a UI slot would read uniform blocks
+    // that path never binds: the UI slot asks THIS predicate and draws the error material by name when
+    // it is false, which is the refusal UE never wrote (its own source still carries
+    // `//TODO UMG Check if the material can be used with the UI`, and a wrong-domain UMG material
+    // renders silently nothing).
+    constexpr bool DrawnByUIPath( ShaderDomain domain )
+    {
+        return domain == kUIPathDomain;
     }
 
     struct ShaderProgramMeta
@@ -292,7 +308,8 @@ namespace Desert::Core::Formats
         // must still ask its OWN predicate, never this one (see the note above DrawnByMeshPath).
         bool IsUserAssignable() const
         {
-            return DrawnByMeshPath( Domain ) || DrawnByTerrainPath( Domain ) || DrawnByVolumePath( Domain );
+            return DrawnByMeshPath( Domain ) || DrawnByTerrainPath( Domain ) || DrawnByVolumePath( Domain ) ||
+                   DrawnByUIPath( Domain );
         }
     };
 

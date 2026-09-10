@@ -1201,6 +1201,26 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Sprite Border L/T/R/B" ), Category( "UI Panel" ) )
         glm::vec4 SpriteBorder = glm::vec4( 0.0f ); // 9-slice: source-px borders kept unstretched (0 = stretch)
 
+        // --- Material (Ю11) -------------------------------------------------------------------------------
+        // A `.demat` whose shader declares `Domain UI` becomes this panel's FILL, in place of the colour,
+        // the gradient, the sprite, the video and the glass. Its parameters are the shader's own, edited
+        // in the Material Editor like every other material's, and they reach the pixel through THE
+        // parameter transport (one row of `Materials[]`, named by a push constant) — so an author extends
+        // the look with an expression instead of waiting for one more boolean to be added below.
+        //
+        // WHY IT REPLACES THE FILL RATHER THAN COMPOSING WITH IT. The panel's Color * Opacity still
+        // travels, as the vertex colour the material may multiply by (the shipped UIMatRadialWipe does),
+        // so nothing is lost; but a fill that were BOTH a sprite and a material would need the batcher to
+        // key on two resources at once for one quad. Glow, Shadow and the Ring are separate quads and go
+        // on composing around it exactly as they do around a sprite.
+        //
+        // A handle the UI path cannot execute — deleted asset, unregistered shader, a Surface material
+        // dropped in here — draws the magenta hatch of `UIMatError` and is named in the log. It does NOT
+        // fall back to the flat colour: a panel that quietly looks unmaterialised is the one failure mode
+        // UE shipped and never fixed.
+        PROPERTY( DisplayName( "Material" ), Category( "UI Material" ), Asset<MaterialAsset> )
+        Assets::AssetHandle Material;
+
         PROPERTY( DisplayName( "Video" ), Category( "UI Panel" ), Asset<VideoAsset> )
         Assets::AssetHandle Video; // MPEG1 .mpg/.mpeg streamed into this panel (loops, tinted by Color*Opacity).
                                    // Drag a .mpg from the Content Browser. Overrides the sprite/gradient fill

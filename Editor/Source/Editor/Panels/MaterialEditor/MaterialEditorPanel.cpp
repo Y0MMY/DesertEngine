@@ -97,6 +97,8 @@ namespace Desert::Editor
                     return "Post Process";
                 case D::Volume:
                     return "Volume";
+                case D::UI:
+                    return "UI";
             }
             return "engine-internal";
         }
@@ -119,6 +121,10 @@ namespace Desert::Editor
                     return "is marched as the scene's volumetric cloud layer — a medium filling the sky, "
                            "not an object this pane could put on a sphere. Edit it here and look at the "
                            "clouds in the viewport; the layer picks it up the same frame.";
+                case D::UI:
+                    return "fills a 2D UI element — a screen-space quad the Render2D batcher rasterizes, "
+                           "not an object this pane could place. Drop it into a UI Panel's Material slot "
+                           "and look at the canvas; edit the parameters here and they land the same frame.";
                 case D::Unspecified:
                 case D::Surface:
                 case D::Skybox: // no longer a refusal: the pane wraps its cubemap onto a ball (see
