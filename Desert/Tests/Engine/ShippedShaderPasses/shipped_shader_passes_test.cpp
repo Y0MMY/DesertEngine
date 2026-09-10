@@ -279,11 +279,26 @@ TEST( ShippedShaderPasses, AGeneratedMaterialRowAlwaysArrivesWithThePushConstant
     // failure mode a census must not have. The sibling test (…ReadsThemFromTheSharedRowBuffer) does not
     // cover it: that one keys on "buffer Materials", a different string, so a #define respelling leaves it
     // green too.
-    EXPECT_EQ( withAGeneratedBlock.size(), 6u )
-         << "expected six shipped shaders to carry a generated material row; found " << withAGeneratedBlock.size()
-         << ". If a shader was legitimately added or removed, change this number. If it is zero or"
-            " unexpectedly small, the marker string above has stopped matching the emitter and this test"
-            " was passing without examining anything.";
+    // WHY A NAMED REGISTER AND NOT A COUNT. This assertion used to pin the NUMBER six, and a gate pinned
+    // by a number is satisfied by editing the number: Ю11 added a seventh shipped shader and the honest
+    // repair looked identical to the dishonest one. Naming each row makes an addition state WHICH shader
+    // was added, and the count is derived from the list rather than maintained beside it.
+    // Ю11 added the last of these. UIMatError.shader is deliberately ABSENT: it declares no resources at
+    // all, which is what makes it the tree's only test of a resource-free program, so it carries no row.
+    static constexpr std::string_view kCarriesAGeneratedRow[] = {
+         "MatProbe.shader", "MatProbeUnlit.shader",   "NewShaderGraph.shader", "Terrain.shader",
+         "TextSDF.shader",  "UIMatRadialWipe.shader", "Unlit.shader",
+    };
+
+    std::set<std::string> expected;
+    for ( const std::string_view name : kCarriesAGeneratedRow )
+        expected.emplace( name );
+
+    EXPECT_EQ( withAGeneratedBlock, expected )
+         << "the set of shipped shaders carrying a generated material row is not the registered one. Add or"
+            " remove the NAME above, never a count. If the set is empty or unexpectedly small, the marker"
+            " string above has stopped matching the emitter and this test was passing without examining"
+            " anything.";
 }
 
 // THE THIRD RELATION: what a shader SAYS and what a shader DECLARES are two different texts, and the
