@@ -485,6 +485,14 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanMaterialBackend::FlushUpdates()
     {
+        // NOTHING WAS ALLOCATED, SO THERE IS NOTHING TO MARK — and until Ю11 this line could not be
+        // reached, so it was not written. A shader that declares no descriptor resources allocates no
+        // sets, which leaves `m_DescriptorSetsUpdateFrame` EMPTY, and the index below then addressed
+        // element 0 of a null buffer: a hard crash, not a wrong picture. Such a shader is legal Vulkan
+        // (`UIMatError` draws from push constants alone), and it now flushes nothing instead of dying.
+        if ( m_DescriptorSetsUpdateFrame.empty() )
+            return;
+
         const uint32_t frameIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
         const uint64_t absoluteFrame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
 
