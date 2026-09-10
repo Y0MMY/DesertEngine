@@ -1347,6 +1347,8 @@ namespace Desert::Core::Preprocess
                     result.Meta.Domain = ShaderDomain::PostProcess;
                 else if ( v == "volume" )
                     result.Meta.Domain = ShaderDomain::Volume;
+                else if ( v == "ui" )
+                    result.Meta.Domain = ShaderDomain::UI;
                 else
                 {
                     err = { line, "unknown Domain '" + v + "'" };

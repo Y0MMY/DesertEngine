@@ -652,18 +652,33 @@ namespace
     };
 
     constexpr Row kPanelRows[] = {
-         { "Color", kCanvasRenderer },        { "Opacity", kCanvasRenderer },
-         { "CornerRadius", kCanvasRenderer }, { "BackdropBlur", kCanvasRenderer },
-         { "Sprite", kCanvasRenderer },       { "SpriteBorder", kCanvasRenderer },
-         { "Video", kCanvasRenderer },        { "Circle", kCanvasRenderer },
-         { "RingWidth", kCanvasRenderer },    { "RingColorA", kCanvasRenderer },
-         { "RingColorB", kCanvasRenderer },   { "Pulse", kCanvasRenderer },
-         { "PulseSpeed", kCanvasRenderer },   { "PulseMin", kCanvasRenderer },
-         { "UseGradient", kCanvasRenderer },  { "GradientColor", kCanvasRenderer },
-         { "BorderWidth", kCanvasRenderer },  { "BorderColor", kCanvasRenderer },
-         { "Shadow", kCanvasRenderer },       { "ShadowColor", kCanvasRenderer },
-         { "ShadowOffset", kCanvasRenderer }, { "Glow", kCanvasRenderer },
-         { "GlowColor", kCanvasRenderer },    { "GlowSize", kCanvasRenderer },
+         { "Color", kCanvasRenderer },
+         { "Opacity", kCanvasRenderer },
+         { "CornerRadius", kCanvasRenderer },
+         { "BackdropBlur", kCanvasRenderer },
+         { "Sprite", kCanvasRenderer },
+         { "SpriteBorder", kCanvasRenderer },
+         { "Video", kCanvasRenderer },
+         { "Circle", kCanvasRenderer },
+         { "RingWidth", kCanvasRenderer },
+         { "RingColorA", kCanvasRenderer },
+         { "RingColorB", kCanvasRenderer },
+         { "Pulse", kCanvasRenderer },
+         { "PulseSpeed", kCanvasRenderer },
+         { "PulseMin", kCanvasRenderer },
+         { "UseGradient", kCanvasRenderer },
+         { "GradientColor", kCanvasRenderer },
+         { "BorderWidth", kCanvasRenderer },
+         { "BorderColor", kCanvasRenderer },
+         { "Shadow", kCanvasRenderer },
+         { "ShadowColor", kCanvasRenderer },
+         { "ShadowOffset", kCanvasRenderer },
+         { "Glow", kCanvasRenderer },
+         { "GlowColor", kCanvasRenderer },
+         { "GlowSize", kCanvasRenderer },
+         // The UI-material slot is read by the canvas walk like every other fill field; what it
+         // resolves to is Render2D's business (Graphic/Render2D/UIMaterialCache.cpp).
+         { "Material", kCanvasRenderer },
     };
 
     constexpr Row kButtonRows[] = {

@@ -14,6 +14,14 @@ namespace Desert::Graphic
         m_MaterialExecutor->PushConstant( &index, sizeof( uint32_t ), Core::Formats::kMaterialIndexPushOffset );
     }
 
+    void Material::SetPushMatrix( const glm::mat4& matrix )
+    {
+        if ( !m_MaterialExecutor )
+            return;
+        m_MaterialExecutor->PushConstant( &matrix, sizeof( glm::mat4 ),
+                                          Core::Formats::kMaterialTransformPushOffset );
+    }
+
     Material::Material( std::string&& debugName, std::string&& shaderName )
          : m_MaterialExecutor(
                 Graphic::MaterialExecutor::Create( std::move( debugName ), std::move( shaderName ) ) ),

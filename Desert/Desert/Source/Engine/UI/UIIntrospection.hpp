@@ -52,10 +52,11 @@ namespace Desert::UI
         GlassSelf, // this batch is a glass rect; it carries its own rect/radius/blur in push constants
         Text,      // solid/image geometry met SDF glyphs, or the reverse: a different pipeline
         Texture,   // a different bound texture: a different descriptor set
+        Material,  // a different UI-domain material: its own pipeline and its own parameter row
         ClipRect   // a different scissor
     };
 
-    inline constexpr std::size_t kBatchBreakCount = 7;
+    inline constexpr std::size_t kBatchBreakCount = 8;
 
     [[nodiscard]] const char* BatchBreakName( BatchBreak reason );
 
@@ -72,6 +73,7 @@ namespace Desert::UI
         std::uint32_t Index       = 0;
         BatchBreak    Break       = BatchBreak::None;
         const void*   Texture     = nullptr; // opaque Image2D id; null = the backend's 1x1 white
+        const void*   Material    = nullptr; // opaque UIMaterialCache::Entry id; null = not a material fill
         bool          Text        = false;
         bool          Glass       = false;
         glm::vec4     ClipRect    = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -98,6 +100,10 @@ namespace Desert::UI
         // expensive state change; a texture change is a descriptor-set bind, which is cheaper.
         std::uint32_t PipelineSwitches = 0;
         std::uint32_t UniqueTextures   = 0; // distinct non-null texture ids = distinct descriptor sets
+        // Distinct UI-domain materials filled with this frame. Each is a pipeline of its own, so this is
+        // the number that says what materials cost the canvas — a texture change is a descriptor bind, a
+        // material change is a pipeline bind AND a descriptor bind.
+        std::uint32_t UniqueMaterials  = 0;
         std::uint32_t LargestBatchTris = 0;
 
         std::array<std::uint32_t, kBatchBreakCount> BreakCounts{};

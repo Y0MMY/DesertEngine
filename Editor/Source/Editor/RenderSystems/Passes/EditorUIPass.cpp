@@ -103,6 +103,10 @@ namespace Desert::Editor::Render
             else
             {
                 m_CanvasRefusal.clear();
+                // This view's UI materials. Set here, beside the walk, because the cache belongs to the
+                // backend that will draw the list and a view must never be handed another view's
+                // pipelines — see UICanvasContext::Materials.
+                m_UICanvas.Materials = &m_Render2D.Materials();
                 if ( const auto drawn = UI::RenderCanvas2D(
                           m_UICanvas, scene->GetRegistry(), canvas.GetValue(), m_Render2D.GetDrawList(),
                           UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, feed ? &input : nullptr, feed ? &clicked : nullptr,

@@ -182,6 +182,12 @@ namespace Desert::Editor
                         LabelledValue( "Batches with no geometry", U32( stats.EmptyBatches ) );
                     LabelledValue( "Pipeline switches", U32( stats.PipelineSwitches ) );
                     LabelledValue( "Distinct textures", U32( stats.UniqueTextures ) );
+                    // Shown only when the canvas uses one, on the same rule as the empty-batch row two
+                    // lines up: a permanent "0" beside every canvas that has no material is a column
+                    // answering nobody's question. When it is there it is the expensive one — a material
+                    // change is a PIPELINE bind, where a texture change is only a descriptor bind.
+                    if ( stats.UniqueMaterials > 0 )
+                        LabelledValue( "Distinct UI materials", U32( stats.UniqueMaterials ) );
                     LabelledValue( "Vertices", U32( stats.Vertices ) );
                     LabelledValue( "Triangles", U32( stats.Triangles ) );
                     LabelledValue( "Largest batch (triangles)", U32( stats.LargestBatchTris ) );

@@ -2,6 +2,7 @@
 
 #include <Engine/ECS/Components.hpp>
 #include <Engine/UI/UILayout.hpp>
+#include <Engine/UI/UIMaterialSource.hpp>
 
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
@@ -115,6 +116,22 @@ namespace Desert::UI
         // instead of once per frame. Cleared when the handle changes or resolves.
         Assets::AssetHandle WarnedBackground;
 
+        // --- UI materials (Ю11) -------------------------------------------------------------------------
+        // Where this view's UI materials come from — the Render2D backend that will draw the list. It is
+        // a VIEW's and not the process's for the same reason everything else here is: a UI material owns
+        // a pipeline, a pipeline is compiled against ONE framebuffer's render pass, and two viewports
+        // have two targets. A source reached through a global would hand the second viewport pipelines
+        // built against the first one's pass. See UIMaterialSource.hpp for why it is an interface.
+        //
+        // Null means this walk has no GPU backend behind it — a unit test, or a host that forgot to wire
+        // one. It is NOT a quiet "no materials today": an element whose slot is set draws its ordinary
+        // fill and the view says so ONCE, naming the element, because a panel that silently loses its
+        // material looks exactly like a panel nobody put a material on.
+        IUIMaterialSource* Materials = nullptr;
+
+        // The material handle this view last drew without a backend, so that report happens once.
+        Assets::AssetHandle WarnedMaterial;
+
         // Forget everything about the scene drawn so far. Hosts call this when they point the view at a
         // different scene; RenderCanvas2D calls it itself when it notices the registry changed.
         void Reset()
@@ -137,6 +154,7 @@ namespace Desert::UI
             ScreenReqBack    = false;
             Tint             = glm::vec4( 1.0f );
             WarnedBackground = Assets::AssetHandle{};
+            WarnedMaterial   = Assets::AssetHandle{};
         }
     };
 } // namespace Desert::UI

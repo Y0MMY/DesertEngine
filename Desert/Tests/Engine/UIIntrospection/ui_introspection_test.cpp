@@ -697,6 +697,54 @@ TEST( UIIntrospectionCost, RefusesByNameWhenItCannotMeasure )
     EXPECT_FALSE( nothing.Refusal.empty() );
 }
 
+// --- Ю11: the panel must be able to say "a MATERIAL broke this batch" -------------------------------
+
+TEST( UIIntrospectionBatches, AMaterialBreakIsNamedAsAMaterialAndCountedAsAPipelineBind )
+{
+    // Recorded directly rather than through a canvas walk: this is about the CLASSIFIER agreeing with
+    // the draw list, and a walk would only add a way for the test to be about something else.
+    static const char kMatA = 0, kMatB = 0;
+
+    Desert::Graphic::Render2D::DrawList2D dl;
+    dl.AddRectFilled( { 0.0f, 0.0f }, { 10.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+    dl.AddMaterialRect( &kMatA, { 20.0f, 0.0f }, { 30.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+    dl.AddMaterialRect( &kMatB, { 40.0f, 0.0f }, { 50.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+
+    UI::UIFrameProbe probe;
+    UI::CaptureDrawList( dl, probe );
+
+    ASSERT_EQ( probe.Batches.size(), 3u );
+    EXPECT_EQ( probe.Batches[0].Break, BatchBreak::First );
+    EXPECT_EQ( probe.Batches[1].Break, BatchBreak::Material );
+    EXPECT_EQ( probe.Batches[2].Break, BatchBreak::Material );
+    EXPECT_EQ( probe.Batches[1].Material, &kMatA );
+    EXPECT_EQ( probe.Batches[2].Material, &kMatB );
+
+    // Two distinct materials are two distinct PIPELINES, which is the cost that separates a material
+    // change from a texture change: a texture is a descriptor bind, a material is a pipeline bind too.
+    // The counter used to be 0/1/2 for the three built-in pipelines and could not have said this.
+    EXPECT_EQ( probe.Stats.UniqueMaterials, 2u );
+    EXPECT_EQ( probe.Stats.PipelineSwitches, 2u );
+    EXPECT_EQ( probe.Stats.UniqueTextures, 0u );
+}
+
+TEST( UIIntrospectionBatches, ACanvasWithNoMaterialReportsNoneOfIt )
+{
+    // The negative control of the test above: the two new numbers must stay at zero for every canvas
+    // that does not use a material, or the panel would start attributing ordinary batches to Ю11.
+    Desert::Graphic::Render2D::DrawList2D dl;
+    dl.AddRectFilled( { 0.0f, 0.0f }, { 10.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+    dl.AddRectFilled( { 20.0f, 0.0f }, { 30.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+
+    UI::UIFrameProbe probe;
+    UI::CaptureDrawList( dl, probe );
+
+    ASSERT_EQ( probe.Batches.size(), 1u );
+    EXPECT_EQ( probe.Batches[0].Material, nullptr );
+    EXPECT_EQ( probe.Stats.UniqueMaterials, 0u );
+    EXPECT_EQ( probe.Stats.PipelineSwitches, 0u );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

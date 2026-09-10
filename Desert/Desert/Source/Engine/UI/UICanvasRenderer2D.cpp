@@ -448,6 +448,34 @@ namespace Desert::UI
             return static_cast<Graphic::Image2D*>( imgService->Resolve( tex->GetImageHandle() ) );
         }
 
+        // Resolve an element's UI-material slot to the entry Render2D will draw it with, or nullptr when
+        // the slot is unset.
+        //
+        // THE ONE CASE THAT IS NOT AN ERROR AND IS STILL REPORTED: a walk with no GPU backend behind it
+        // (`ctx.Materials == nullptr`) — a unit test, or a host that never wired one. The element then
+        // draws its ordinary fill, which is a FALLBACK, so it is named. Reported once per view because a
+        // per-frame line buries the log and gets the whole message ignored; the picture is what keeps
+        // saying it, every frame.
+        const void* ResolveUIMaterial( UICanvasContext& ctx, entt::entity e, const Assets::AssetHandle& handle )
+        {
+            if ( !HandleSet( handle ) )
+                return nullptr;
+
+            if ( !ctx.Materials )
+            {
+                if ( ctx.WarnedMaterial != handle )
+                {
+                    ctx.WarnedMaterial = handle;
+                    LOG_WARN( "[UI] element {} has material {} but this view has no 2D backend, so it "
+                              "draws its plain fill instead",
+                              static_cast<uint32_t>( e ), static_cast<uint64_t>( handle ) );
+                }
+                return nullptr;
+            }
+
+            return ctx.Materials->ResolveMaterial( handle );
+        }
+
         // An animated (GIF) sprite's current frame — a pure function of wall-clock time. Non-GIF handles
         // resolve to nullptr here, so ordinary textures fall through to ResolveSpriteImage.
         Graphic::Image2D* ResolveAnimatedFrame( const Assets::AssetHandle& handle )
@@ -1395,7 +1423,15 @@ namespace Desert::UI
                     // Frosted glass: the fill IS the blurred scene behind the panel, tinted by Color/Opacity.
                     // Checked before the sprite/video fills — a glass panel is defined by what is behind it,
                     // so an image on top of it would be a different element (draw one as a child).
-                    if ( p.BackdropBlur > 0.0f && !video && !HandleSet( p.Sprite ) )
+                    // A UI-domain material IS the fill and is asked first, ahead of glass, video, the
+                    // gradient and the sprite: those are the fixed list this replaces, and letting one of
+                    // them win would make the material's presence depend on which other field happened to
+                    // be set. Resolve() never answers null for a set handle — a slot the UI path cannot
+                    // execute comes back as the magenta error entry, named once in the log.
+                    const auto* uiMaterial = ResolveUIMaterial( ctx, e, p.Material );
+                    if ( uiMaterial )
+                        dl.AddMaterialRect( uiMaterial, mn, mx, Tinted( ctx, glm::vec4( p.Color, op ) ) );
+                    else if ( p.BackdropBlur > 0.0f && !video && !HandleSet( p.Sprite ) )
                         dl.AddGlassRect( mn, mx, Tinted( ctx, glm::vec4( p.Color, op ) ), rounding,
                                          p.BackdropBlur );
                     else if ( video )

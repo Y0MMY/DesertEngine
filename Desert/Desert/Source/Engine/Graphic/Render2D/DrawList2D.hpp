@@ -32,6 +32,23 @@ namespace Desert::Graphic::Render2D
         uint32_t    IndexCount  = 0;                          // number of indices in this batch
         bool        Text        = false;                      // true => SDF glyph atlas (text pipeline), else UI2D
 
+        // MATERIAL (Ю11): an opaque id for the UI-domain material this batch's fill is drawn with
+        // (Graphic::UIMaterial*), null for every batch that is not one. The backend resolves it to a
+        // pipeline of that material's own shader plus the material's row of `Materials[]`.
+        //
+        // IT IS A SECOND RESOURCE AND NOT A WIDENING OF `Texture`, deliberately. Slate puts its material
+        // in the texture slot because an FSlateMaterialResource IS an FSlateShaderResource, and that is
+        // the right call for Slate — but here `Texture` is read by UIIntrospection as "distinct
+        // descriptor sets bound this frame" and by the UI Debugger as a texture column, and a material
+        // arriving under that name would make both of them quietly wrong. Two pointers cost one extra
+        // compare in the merge test below and keep every reader honest.
+        //
+        // The batch consequence is the same either way, and it is the good one: a material breaks a run
+        // exactly like a different texture does, and an element with NO material adds nothing to the key
+        // — measured on UI_ElementProbe, where 5 of 6 breaks are text/solid alternation and 0 are
+        // resources.
+        const void* Material = nullptr;
+
         // GLASS (backdrop blur): this batch samples the blurred scene snapshot instead of a texture, and
         // masks itself with a rounded rectangle. Every glass rect carries its own rect/radius/blur in push
         // constants, so glass commands are never merged with anything — one element, one draw.
@@ -140,6 +157,22 @@ namespace Desert::Graphic::Render2D
         void AddImage( const void* texture, const glm::vec2& min, const glm::vec2& max, const glm::vec2& uv0,
                        const glm::vec2& uv1, const glm::vec4& tint );
 
+        // Quad filled by a UI-DOMAIN MATERIAL (Ю11). `material` is an opaque id the backend resolves to
+        // that material's pipeline and parameter row; `tint` travels as the vertex colour, so a material
+        // that multiplies by `v_Color` honours the element's authored Color/Opacity for free and one that
+        // ignores it is free to.
+        //
+        // UVs are 0..1 across the rect and there is NO `rounding` argument, which is a decision and not an
+        // omission: a material owns its own shape. It receives that 0..1 UV, so a rounded corner is an SDF
+        // it can evaluate — antialiased, and correct under rotation and non-uniform scale — where a
+        // tessellated fan would hand it corner vertices whose UVs no longer describe the rect. UIGlass
+        // already draws its rounded corners this way for the same reason.
+        //
+        // Same-material quads batch together; a different material opens a new command, and a material
+        // quad never merges with a plain one.
+        void AddMaterialRect( const void* material, const glm::vec2& min, const glm::vec2& max,
+                              const glm::vec4& tint );
+
         // Textured quad sampled as an SDF glyph (the backend routes these to the text pipeline). Same args as
         // AddImage; `atlas` is the font's SDF atlas id, `uv0`/`uv1` the glyph's atlas sub-rect, `color` the
         // text colour. Text quads batch separately from image/solid quads even on the same texture.
@@ -168,13 +201,14 @@ namespace Desert::Graphic::Render2D
         // The half of the clip the hardware can cut: the region's box, or a zero rect meaning "no scissor".
         glm::vec4 ScissorBox() const;
 
-        // Returns a command matching the given state (texture + text mode), extending the last one when
-        // possible or opening a new one anchored at the current end of the index buffer.
-        DrawCommand& CurrentCommand( const void* texture, bool text );
+        // Returns a command matching the given state (texture + text mode + material), extending the last
+        // one when possible or opening a new one anchored at the current end of the index buffer.
+        DrawCommand& CurrentCommand( const void* texture, bool text, const void* material = nullptr );
 
-        // Append one textured/tinted quad (the shared path behind AddRectFilled / AddImage / AddText).
+        // Append one textured/tinted quad (the shared path behind AddRectFilled / AddImage / AddText /
+        // AddMaterialRect).
         void AddQuad( const void* texture, const glm::vec2& min, const glm::vec2& max, const glm::vec2& uv0,
-                      const glm::vec2& uv1, const glm::vec4& color, bool text );
+                      const glm::vec2& uv1, const glm::vec4& color, bool text, const void* material = nullptr );
 
         // --- The three shapes every primitive here is made of, and the only places geometry is appended ---
         // Each has an EXACT unclipped path — the vertices are stored as given and indexed exactly as they
